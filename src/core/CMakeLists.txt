@@ -10,6 +10,8 @@ add_library(dq8_core STATIC
     iso/iso9660.cpp
     elf/elf_headers.cpp
     profile/region_profile.cpp
+    intake/verify.cpp
+    intake/extract.cpp
 )
 add_library(dq8::core ALIAS dq8_core)
 target_include_directories(dq8_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
