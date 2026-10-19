@@ -1,0 +1,217 @@
+# Region profile: Dragon Quest VIII, NTSC-U (SLUS-21207). Schema: data/README.md.
+# Names, sizes, addresses and hashes only (architecture.md §14). Facts come from Docs/project-brief.md §6;
+# hashes for overlays and modules are filled in from `dq8ctl extract --emit-profile` on a verified disc.
+schema_version = 1
+
+[profile]
+id = "SLUS_21207"
+serial = "SLUS-21207"
+title = "Dragon Quest VIII: Journey of the Cursed King"
+region = "NTSC-U"
+video_mode = "NTSC"
+
+[image]
+size = 4180148224
+sector_size = 2048
+
+[boot]
+path = "SLUS_212.07"
+size = 2960032
+sha1 = "f24bfd21c21f6454c05934224ab52cde837bc90b"
+crc32 = "a66a08b0"
+entry = 0x00100008
+load_address = 0x00100000
+main_memsz = 0x361C80
+
+# The six zero-filesize PT_LOAD segments of the boot ELF, one per overlay, in segment order (== id order).
+[overlay_window]
+base = 0x00461C80
+end = 0x00489A80
+container = "MWo3"
+header_size = 64
+
+[[overlays]]
+name = "CASINO"
+id = 1
+path = "BIN/CASINO.BIN"
+segment_memsz = 0x20F00
+size = 129920
+sha1 = "257f13da3f92147237cc3526e1d1c890dbe018b6"
+crc32 = "b44104dd"
+
+[[overlays]]
+name = "VIEWER"
+id = 2
+path = "BIN/VIEWER.BIN"
+segment_memsz = 0x500
+size = 1152
+sha1 = "925da307a9f81589d7dde4eb0b7796689fd3ac58"
+crc32 = "440e90fc"
+
+[[overlays]]
+name = "SHOP"
+id = 3
+path = "BIN/SHOP.BIN"
+segment_memsz = 0x17B00
+size = 86016
+sha1 = "94fd3718c517716cede6586cb4193199ad330ff6"
+crc32 = "1af444ed"
+
+[[overlays]]
+name = "MENU"
+id = 4
+path = "BIN/MENU.BIN"
+segment_memsz = 0x1CD00
+size = 109312
+sha1 = "5bdab4c2fb325af0690840c600e01df39855de1a"
+crc32 = "3fec5c99"
+
+[[overlays]]
+name = "BATTLE"
+id = 5
+path = "BIN/BATTLE.BIN"
+segment_memsz = 0x27E00
+size = 156032
+sha1 = "913cb0e1bfa574598589932241c67680e8a5125c"
+crc32 = "8ab94616"
+
+[[overlays]]
+name = "TITLE"
+id = 6
+path = "BIN/TITLE.BIN"
+segment_memsz = 0x5780
+size = 20864
+sha1 = "86425d2f352fb23bac0b03c0894058f9059a907c"
+crc32 = "4ff87042"
+
+# Other files the intake extracts. size 0 and empty hashes mean "not recorded yet".
+[[files]]
+path = "SYSTEM.CNF"
+role = "system_cnf"
+size = 57
+sha1 = "898f74bb4fa4c763b9b11fb16fad27af755ac6d2"
+crc32 = "48622e29"
+
+[[files]]
+path = "MODULES/IOPRP300.IMG"
+role = "iop_image"
+size = 275345
+sha1 = "51fe51e904bb4ef87e996b8a5062aaeb46d53b31"
+crc32 = "944d87fe"
+
+[[files]]
+path = "MODULES/CDVDSTM.IRX"
+role = "iop_module"
+size = 33521
+sha1 = "c781a649c39bb77af76de67dc9e5af4cb7d0addb"
+crc32 = "54382cd7"
+
+[[files]]
+path = "MODULES/LIBSD.IRX"
+role = "iop_module"
+size = 28661
+sha1 = "595db0576397dc2e4ea41d3ac56b1684c76cbb28"
+crc32 = "b0a0f759"
+
+[[files]]
+path = "MODULES/MCMAN.IRX"
+role = "iop_module"
+size = 96181
+sha1 = "da2e9adc3102539e1c5cebf3e47535c438c2f477"
+crc32 = "cd43a5e0"
+
+[[files]]
+path = "MODULES/MCSERV.IRX"
+role = "iop_module"
+size = 7385
+sha1 = "d31e97e3c86bd812421a26703a174ba972b24b79"
+crc32 = "fa15980c"
+
+[[files]]
+path = "MODULES/MODHSYN.IRX"
+role = "iop_module"
+size = 63037
+sha1 = "5b1fc515bc0192b0da840d7579837e0aa8678727"
+crc32 = "81df4ed8"
+
+[[files]]
+path = "MODULES/MODMIDI.IRX"
+role = "iop_module"
+size = 21941
+sha1 = "64a9eb5c2885e9b41e9f06b27607784126d5fb4f"
+crc32 = "7da08a8c"
+
+[[files]]
+path = "MODULES/MODMSIN.IRX"
+role = "iop_module"
+size = 1929
+sha1 = "d3b42fab3b0f72e8e27bd0741561dc0230b544b2"
+crc32 = "d83d0360"
+
+[[files]]
+path = "MODULES/MSIFRPC.IRX"
+role = "iop_module"
+size = 8105
+sha1 = "8cc3ad6572c0db764625da512b83fb8cec9f80bb"
+crc32 = "2fda416d"
+
+[[files]]
+path = "MODULES/PADMAN.IRX"
+role = "iop_module"
+size = 45797
+sha1 = "853f73969d13b00216119b0d55a703e585e2109a"
+crc32 = "26fcc575"
+
+[[files]]
+path = "MODULES/PCMPLAY.IRX"
+role = "iop_module"
+size = 8592
+sha1 = "3a71eb67cc091728170162c36c9b5598e4009658"
+crc32 = "14685c00"
+
+[[files]]
+path = "MODULES/SDRDRV.IRX"
+role = "iop_module"
+size = 9161
+sha1 = "36b50dc82f36631d9cc06275f00df366c4ccaf93"
+crc32 = "44320470"
+
+[[files]]
+path = "MODULES/SIO2MAN.IRX"
+role = "iop_module"
+size = 6641
+sha1 = "2eeb68eaf5b73659be9d4986578b0caadaafe484"
+crc32 = "31b4d2ac"
+
+[[files]]
+path = "MODULES/SKHSYNTH.IRX"
+role = "iop_module"
+size = 9601
+sha1 = "10820c27963d697f1c2be4b4f8e15d8e565ef372"
+crc32 = "1a933d2f"
+
+[[files]]
+path = "MODULES/SKMIDI.IRX"
+role = "iop_module"
+size = 12973
+sha1 = "01a9c41bad53653ea00345a77617b9bccf7d4807"
+crc32 = "3d630701"
+
+[[files]]
+path = "MODULES/SKMSIN.IRX"
+role = "iop_module"
+size = 8317
+sha1 = "3db6e977e0fcbf3044f9b4aec4f6540c77645bdd"
+crc32 = "e5508467"
+
+[[files]]
+path = "MODULES/SKSOUND.IRX"
+role = "iop_module"
+size = 9717
+sha1 = "9618dff6ede3d91423eaffd28e07bb909e36cd7e"
+crc32 = "5386609b"
+
+# Never extracted: the runtime reads the archives from the image by sector (architecture.md §8.3), and the
+# movies are out of M1's scope. A trailing '/' marks a directory.
+[not_extracted]
+paths = ["DATA.DAT", "DATA2.DAT", "DATA.HD6", "DATA2.HD6", "DMYDATA", "MOVIE/"]

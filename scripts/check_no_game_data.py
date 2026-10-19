@@ -120,7 +120,9 @@ class Checker:
         name = rel.rsplit("/", 1)[-1]
         if FORBIDDEN_DIR.match(rel):
             self.refuse(rel, "forbidden-directory")
-        if FORBIDDEN_NAME.search(name):
+        # Region profiles are named by disc serial (architecture.md §13.4) and hold only names, sizes and hashes.
+        is_region_profile = rel.startswith("data/regions/") and rel.endswith(".toml")
+        if FORBIDDEN_NAME.search(name) and not is_region_profile:
             self.refuse(rel, "forbidden-name")
         if len(data) > MAX_SIZE:
             self.refuse(rel, "too-large", f"{len(data)} bytes > {MAX_SIZE}")
