@@ -15,6 +15,8 @@ is the three documents in `Docs/`; read them before proposing or changing design
 - `Docs/architecture.md`: setup pipeline, guest execution model, machine services, renderer, launcher, threading,
   layout rules (§13), legal safeguards (§14), extension points (§17), decision log (§18).
 - `Docs/tech-stack.md`: languages, build system, dependencies and their licenses, tooling, dev-environment snapshot (§12).
+- `Docs/spikes/`: one brief per M0 spike (S0–S7); a spike session executes its brief and appends `## Findings`.
+  `Docs/spikes/README.md` has the rules and the findings template.
 
 Only D1 (name) and D2 (license, ADR-0009) in brief §14 are decided. D3 to D8 and ADR-0001 to 0008 and 0010 are
 **proposals**; do not present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
@@ -30,7 +32,14 @@ Useful today:
 
 ```bash
 git check-ignore -v Game    # must print a .gitignore match; the disc image is never tracked
+cp tools/local.env.example tools/local.env    # then fill in your paths (git-ignored)
+set -a; . tools/local.env; set +a; 7z x -y -obaserom/raw "$DQ8_ISO" SLUS_212.07 SYSTEM.CNF DATA.HD6 DATA2.HD6 BIN MODULES
+GHIDRA_INSTALL_DIR="$DQ8_GHIDRA_INSTALL_DIR" rea doctor --provider ghidra --format json    # REA (Ghidra MCP/CLI) health
 ```
+
+Scratch locations, all git-ignored: `baserom/` (extracted disc files), `work/` (clones, Ghidra projects, dumps,
+REA snapshots), `generated/` (recompiler output). Ghidra and PCSX2 are not installed system-wide; `tools/local.env`
+points at the copies in the sibling `MGS2_Undub` project.
 
 `origin` is `git@github.com:Igrise12/DQVIIIPC.git` (SSH; there are no HTTPS credentials on this machine).
 

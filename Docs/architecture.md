@@ -168,7 +168,7 @@ recompilers assume, so it is designed in from the start.
 
 | Responsibility | Mechanism |
 |---|---|
-| Know when an overlay becomes resident | **Primary:** override the game's overlay-loader function (identified in spike S3) so the manager is told which file was loaded. **Fallback:** after each disc read that targets the window, hash the resident bytes and match them against the per-overlay fingerprints computed at setup. |
+| Know when an overlay becomes resident | **Primary:** override the game's overlay-loader function (identified in spike S3) so the manager is told which file was loaded. **Fallback:** the overlay header is resident at the window base, so read `overlay_id` at `window + 4` after each disc read that targets the window; hashing the resident bytes against per-overlay fingerprints is the last resort. |
 | Route dispatch | The dispatch table has one slot range for the window. The manager points that range at the resident overlay's table when it changes, and at an "empty" table (diagnostic stop) when none is resident. |
 | Keep guest memory honest | The loader still places the overlay bytes in guest RAM exactly as the game expects, because overlay files contain data as well as code. Only the *execution* is native. |
 | Detect desynchronization | Debug builds periodically verify the resident bytes against the expected fingerprint and report a mismatch. |

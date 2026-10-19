@@ -81,10 +81,10 @@ The "inferred" rows are working hypotheses that the first milestones must confir
 | Boot ELF SHA-1 | `f24bfd21c21f6454c05934224ab52cde837bc90b` |
 | Boot ELF CRC-32 | `a66a08b0` |
 | Code overlays | Six overlay files in `BIN/`: `BATTLE.BIN`, `CASINO.BIN`, `MENU.BIN`, `SHOP.BIN`, `TITLE.BIN`, `VIEWER.BIN` (1.1 KB to 156 KB each) |
-| Overlay container | Header magic `MWo3` with load address `0x00461C80` (confirmed for `TITLE.BIN` and `VIEWER.BIN`) |
-| Overlay window | The ELF declares six zero-file-size load segments at `0x00461C80`, the largest `0x27E00` bytes, so the window is `0x00461C80` to `0x00489A80`. Segment sizes line up one-to-one with the six `BIN` files. *Inferred; to be confirmed.* |
-| Game data | `DATA.DAT` (1,804,218,368 bytes) and `DATA2.DAT` (752,971,776 bytes). **Format unknown; no public tooling found.** |
-| Movies | `MOVIE/*.MVI`, about 3.5 to 4 MB each in `MOVIE/E904` (other folders not yet inspected). **Container format unknown.** |
+| Overlay container | `MWo3` header, 64 bytes, little-endian: magic, `overlay_id` (CASINO 1, VIEWER 2, SHOP 3, MENU 4, BATTLE 5, TITLE 6), `load_address` (`0x00461C80` for all six), `text_size`, `data_size`, `bss_size`, `table_start`/`table_end` (absolute addresses inside the overlay's data; 3 to 6 entries), 32-byte lowercase name; the payload (text, then data) follows at `+0x40`. `file_size == 64 + text + data` holds for all six. *Decoded from the headers; semantics to be confirmed by spike S3.* |
+| Overlay window | The ELF declares six zero-file-size load segments at `0x00461C80`, the largest `0x27E00` bytes, so the window is `0x00461C80` to `0x00489A80`. Each segment's `memsz` equals `64 + text + data + bss` of one overlay, in order CASINO, VIEWER, SHOP, MENU, BATTLE, TITLE (that is, by `overlay_id`), so the whole file including its header is resident and code starts at `0x00461CC0`. *Confirmed by size arithmetic; loader behaviour pending spike S3.* |
+| Game data | `DATA.DAT` (1,804,218,368 bytes) and `DATA2.DAT` (752,971,776 bytes), each with an index file beside it: `DATA.HD6` (188,732 bytes, magic `HD6\0`) and `DATA2.HD6` (87,092 bytes). The ELF references `.HD6` once and `DATA.DAT` never, so lookups go through the index. `DMYDATA` (51,166,209 bytes) is presumably padding. **Index layout not yet decoded (spike S4); no public tooling found.** |
+| Movies | 38 `MOVIE/**/*.MVI` files, mostly in pairs `X.MVI` / `X_W.MVI` (likely 16:9 variants); 3.5 to 4 MB each in `MOVIE/E904`, two of 248 MB under `MOVIE/EV/`. The ELF contains `sceMpeg` strings. **Container format unknown (spike S6).** |
 | IOP modules | 16 `.IRX` files plus `IOPRP300.IMG` under `MODULES/`. Standard Sony modules (`LIBSD`, `SDRDRV`, `MCMAN`, `MCSERV`, `PADMAN`, `SIO2MAN`, `CDVDSTM`, `MODHSYN`, `MODMIDI`, `MODMSIN`, `MSIFRPC`) plus game-specific ones (`SKSOUND`, `SKMIDI`, `SKHSYNTH`, `SKMSIN`, `PCMPLAY`). The `SK*` and `PCMPLAY` modules appear to form the game's own sound driver stack. *Inferred from names.* |
 
 **What this tells us:**
@@ -92,7 +92,7 @@ The "inferred" rows are working hypotheses that the first milestones must confir
 1. The **stripped ELF** means no function names or boundaries come for free. Function discovery needs a disassembler pass (Ghidra) before recompilation.
 2. The **six overlays sharing one address window** are the single most important design constraint. General-purpose recompilers assume one flat program. Our dispatch layer must know which overlay is currently resident (architecture.md §4.3).
 3. The **sound stack is custom IOP code**, so audio needs either execution of the original IOP modules or an HLE of their interfaces (architecture.md §7).
-4. **`DATA.DAT`, `DATA2.DAT` and `MVI`** formats must be reverse-engineered before we can stream game data natively or play movies.
+4. **The `HD6` archive index and the `MVI` container** must be reverse-engineered before we can stream game data natively or play movies (spikes S4 and S6).
 
 The hashes above come from a single dump. Before they are pinned as the canonical values, cross-check them against a
 Redump entry for SLUS-21207. Until then they are recorded, not trusted.
@@ -128,7 +128,7 @@ evaluate. Feasibility notes are honest: several items depend on research that ha
 | Final-image scaling and sharpening (for example FSR 1 with RCAS) | P1 | |
 | Anti-aliasing options, de-interlacing choice | P1 | |
 | CRT and scanline filters | P2 | |
-| True widescreen (16:9 and ultrawide) | P1 | **Research needed.** The game is 4:3; widening the view means patching projection and HUD placement |
+| True widescreen (16:9 and ultrawide) | P1 | **Research needed.** The disc ships `_W` variants of its movies, so the game may already have a native 16:9 mode: verify in spike S7 first. If not, widening the view means patching projection and HUD placement |
 | Frame interpolation beyond the game's native frame rate | P2 | **Research needed.** Needs scene state, not just GS packets; likely requires the native renderer path |
 | Texture dump and replacement, PCSX2-style pack compatibility | P1 | A community HD texture and UI pack for PCSX2 has been reported, so compatibility is attractive |
 
@@ -224,7 +224,7 @@ Each milestone ends with a demonstrable result. A milestone is done only when it
 | # | Milestone | Exit criteria |
 |---|---|---|
 | **M0** | **Foundations** | Workspace, docs, CI skeleton, toolchain spikes done (below). Decisions in §14 resolved. |
-| **M1** | **Disc and binary intake** | Tool reads the ISO, verifies hashes, extracts the ELF, overlays and IOP modules, and parses the `MWo3` overlay container. `DATA.DAT` index format documented. |
+| **M1** | **Disc and binary intake** | Tool reads the ISO, verifies hashes, extracts the ELF, overlays and IOP modules, and parses the `MWo3` overlay container. (The archive index layout is spike S4's deliverable, not an M1 gate: the game reads its archives itself through sector I/O.) |
 | **M2** | **Analysis and first recompile** | Ghidra function map for the main ELF and all six overlays. Recompiler generates C++ that compiles and links. Program starts and reaches the first unimplemented syscall. |
 | **M3** | **Boots** | Memory, kernel HLE, threads, CDVD and overlay switching work. Game reaches the title screen. First pixels through the GS backend. |
 | **M4** | **Playable core** | Pad, memory card, audio, VU1 and movies work. A new game can be started, a battle fought (battle overlay), the menu and shop used, and a save made and reloaded. |
@@ -233,14 +233,14 @@ Each milestone ends with a demonstrable result. A milestone is done only when it
 | **M7** | **1.0 release** | Packaging, documentation for players, CI-built releases, issue templates, security and legal review done. |
 | **Post-1.0** | Enhancements | Widescreen, texture replacement, interpolation research, PAL and NTSC-J, other platforms, mods. |
 
-**M0 spikes** (small, time-boxed experiments that de-risk the plan before real work starts):
+**M0 spikes** (small, time-boxed experiments that de-risk the plan before real work starts; briefs and findings live in `Docs/spikes/`, and S0 checks whether the REA tooling can open our ELF):
 
 | Spike | Question |
 |---|---|
 | S1 | Does PS2Recomp build with the Linux toolchain on the development machine (GCC and Clang), and how long does it take? |
 | S2 | Can Ghidra with an Emotion Engine plugin load `SLUS_212.07` and export a usable function list? Does the exporter handle a stripped ELF of this size? |
 | S3 | How does the overlay loader work? Find the function that reads `BIN/*.BIN` and the instruction sequence that makes new code live (cache flush). |
-| S4 | What is the `DATA.DAT` index layout? Find the reader in the ELF and decode the table. |
+| S4 | What is the `DATA.HD6` index layout, and how does the game read `DATA.DAT` through it? |
 | S5 | Can paraLLEl-GS be built standalone and fed a GS dump captured from PCSX2, with the output matching? |
 | S6 | What are the `MVI` movies (MPEG-2 through the IPU, or a custom codec)? |
 | S7 | What frame rate and resolution does the game run at in PCSX2, and which GS features does it use heavily? |
