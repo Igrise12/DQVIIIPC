@@ -17,7 +17,7 @@ jobs:
           - { name: "Linux Clang", os: ubuntu-24.04, preset: ci-clang, cc: clang-18, cxx: clang++-18 }
           - { name: "Windows MSVC", os: windows-2022, preset: ci-msvc }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: recursive }
       - name: Install Linux tools
         if: runner.os == 'Linux'
@@ -38,7 +38,7 @@ jobs:
     name: Linux Clang ASan+UBSan
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: recursive }
       - run: sudo apt-get update && sudo apt-get install -y ninja-build clang-18
       - run: cmake --preset asan -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
@@ -49,15 +49,14 @@ jobs:
     name: Lint and policy
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with: { submodules: recursive }
       - name: No game-derived content
         run: python3 -I scripts/check_no_game_data.py --tree
-      - name: clang-format
+      - name: pre-commit hooks (clang-format pinned by .pre-commit-config.yaml, whitespace, checker)
         run: |
-          sudo apt-get update && sudo apt-get install -y clang-format-18
-          git ls-files -z -- 'src/**/*.cpp' 'src/**/*.h' 'include/**/*.h' 'tests/**/*.cpp' 'tests/**/*.h' \
-            | xargs -0 -r clang-format-18 --dry-run -Werror
+          pipx install pre-commit
+          pre-commit run --all-files --show-diff-on-failure
       - name: REUSE compliance
         uses: fsfe/reuse-action@v5
       - name: Markdown links (local only)
