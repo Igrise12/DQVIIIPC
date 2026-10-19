@@ -5,6 +5,10 @@ if(DQ8_USE_SYSTEM_TOML11)
     find_package(toml11 CONFIG REQUIRED)
 else()
     add_subdirectory(toml11 EXCLUDE_FROM_ALL)
+    # Our warning set is stricter than toml11's; treat its headers as system headers so they never trip
+    # DQ8_WERROR (clang 20+ warns about its literal operators, for instance).
+    get_target_property(_dq8_toml11_includes toml11 INTERFACE_INCLUDE_DIRECTORIES)
+    set_target_properties(toml11 PROPERTIES INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_dq8_toml11_includes}")
 endif()
 
 if(DQ8_BUILD_TESTS)
