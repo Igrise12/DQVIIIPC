@@ -83,7 +83,7 @@ toolchain (Ubuntu 24.04's GCC and Clang) so the stated minimums stay honest.
 |---|---|
 | **CPU** | x86-64 with **SSE4.1** as a baseline. PS2Recomp notes SSE4 and AVX host support for some vector paths. Decide whether AVX is optional once helpers are written. |
 | **GPU API** | **Vulkan 1.3** capable device on Windows and Linux |
-| **Features needed by parallel-gs** | `descriptorIndexing`, `timelineSemaphore`, `storageBuffer8BitAccess`, `storageBuffer16BitAccess`, `shaderInt16`, `scalarBlockLayout`, full subgroup support, subgroup size control with full groups. Reported as fine on current desktop drivers; tested by its author on RADV, AMDVLK, amdgpu-pro, Steam Deck, NVIDIA RTX and Intel Arc. |
+| **Features needed by parallel-gs** | Documented: `descriptorIndexing`, `timelineSemaphore`, `storageBuffer8BitAccess`, `storageBuffer16BitAccess`, `shaderInt16`, `scalarBlockLayout`, subgroup operations (basic, vote, arithmetic, ballot, shuffle; clustered is not needed), subgroup size control with full subgroups for sizes 4–64 (16–64 only for 16x super-sampling). Checked by the code but undocumented: `bufferDeviceAddress` and at least 32 KiB of compute shared memory. All verified on the RTX 4060 on 2026-10-19 (spike S5a). Reported as fine on current desktop drivers; tested by its author on RADV, AMDVLK, amdgpu-pro, Steam Deck, NVIDIA RTX and Intel Arc. |
 | **Reference performance machine** | 6 cores, RTX 4060 class GPU, 16 GB RAM |
 
 The launcher's Diagnostics page reports whether the current device satisfies the active backend's requirements (architecture.md §11.2).
@@ -100,7 +100,7 @@ Versions: use the **latest stable release at the time each dependency is added**
 | **Vulkan loader** | **volk** | MIT | No link-time dependency on the Vulkan loader. |
 | **Vulkan headers** | Vulkan-Headers | Apache-2.0 or MIT | |
 | **GPU memory allocation** | Vulkan Memory Allocator | MIT | For the native renderer and presentation passes. |
-| **GS backend, first** | **paraLLEl-GS**, with its Granite dependency | LGPL-3.0-or-later (Granite: MIT) | **Shared library**, so the LGPL relinking terms hold. No documented embedding API: expect to write a wrapper (spike S5). The author currently does not accept outside contributions. |
+| **GS backend, first** | **paraLLEl-GS** `cc6184a` (2026-10-06) with Granite `16e7395` | LGPL-3.0-or-later (Granite: MIT) | **Shared library**, so the LGPL relinking terms hold: one `dq8-gs-parallel` library containing our wrapper, parallel-gs and the four Granite archives it needs (`granite-vulkan`, `-util`, `-math`, `-volk`) with hidden visibility, exporting only our C ABI. Embedding API is the `GSInterface` class (about 25 methods, all calls from one thread); wrapper estimated at 1,000–1,500 lines (spike S5a). C++14, precompiled SPIR-V header, so the library build needs three submodules and no shader toolchain; the contributor-only tools (replayer, stream, repro) need ten more plus SDL3 and build the SPIR-V toolchain. The author currently does not accept outside contributions. |
 | **ELF parsing** | ELFIO | MIT | Also used by PS2Recomp. |
 | **Configuration** | toml11 | BSL-1.0 | Also used by PS2Recomp, so no second TOML library. |
 | **JSON** | nlohmann/json | MIT | Process events and small data files. |
@@ -112,7 +112,7 @@ Versions: use the **latest stable release at the time each dependency is added**
 | **Digests** | A small vendored SHA-1 and CRC-32 implementation, or the platform crypto API | Public domain or system | Disc verification. |
 | **Compression** | zstd | BSD-3-Clause | Caches and dumps. |
 | **Image loading** | stb_image and stb_image_write | Public domain or MIT | Texture packs and screenshots. |
-| **Movie decoding** | **Decision pending spike S6.** Candidates: FFmpeg (libavcodec and libavformat, built **LGPL**, dynamically linked), libmpeg2 | LGPL-2.1+; GPL-2.0+ | Behind `IMovieDecoder`. `pl_mpeg` (MIT) is MPEG-1 only, so it is unlikely to be enough for PS2 video. |
+| **Movie decoding** | **FFmpeg libavcodec**, LGPL build, dynamically linked, `mpeg2video` decoder only (recommended by spike S6a; ADR after S6b). Fallback: libmpeg2 | LGPL-2.1+; GPL-2.0+ | Behind `IMovieDecoder`. The movies are MPEG-2 Main profile 512 × 448 at 30 fps with 16-bit PCM audio (`Docs/formats/mvi.md`), so no libavformat (our demux is small) and no audio codec are needed. `pl_mpeg` (MIT) is MPEG-1 only and unsuitable. |
 | **Recompiler** | **PS2Recomp** (`ps2xRecomp`, `ps2xAnalyzer`, and its IOP executor) | GPL-3.0 | Pinned commit (`eb8688b`, 2026-10-14) plus patch queue. It has no git submodules: `ps2xRecomp` fetches ELFIO `Release_3.12`, toml11 `v4.4.0`, fmt `12.1.0`, libdwarf `v2.2.0` and rabbitizer `1.14.3` with CMake FetchContent at configure time, so offline, reproducible builds need `FETCHCONTENT_SOURCE_DIR_<NAME>` overrides to our own pinned copies (spike S1). |
 | **Profiling** | Tracy (optional) | BSD-3-Clause | Development builds only. |
 | **HTTP for update checks** | Platform HTTP API or libcurl, in the launcher only, optional | OS or curl license | Not needed until the opt-in update check is built. |
@@ -165,7 +165,7 @@ These are for **contributors**. Players do not need any of them, because the fun
 
 | Tool | Use | License | Notes |
 |---|---|---|---|
-| **Ghidra** 12.1.4 | Disassembly, function discovery, the PS2Recomp export script (`ExportPS2Functions.java`) | Apache-2.0 | With the `ghidra-emotionengine-reloaded` extension (2.1.38, language `r5900:LE:32:default`). Needs JDK 21 or newer; JDK 27 is accepted. The export script is interactive (`askFile`), so headless runs need a `.properties` answer file (`tools/ghidra/`, spike S2). |
+| **Ghidra** 12.1.4 | Disassembly, function discovery, the PS2Recomp export script (`ExportPS2Functions.java`) | Apache-2.0 | With the `ghidra-emotionengine-reloaded` extension (2.1.38, language `r5900:LE:32:default`). Needs JDK 21 or newer; JDK 27 is accepted. The export script is interactive (`askFile`), so headless runs need a `.properties` answer file; spike S2 confirmed it runs unmodified that way. Headless import and analysis of the boot ELF take 2–3 minutes and 3.7 GB RSS (JDK 27). First-party scripts in `tools/ghidra/`: `headless.sh`, `Dq8AnalysisOptions.java`, `MapElfSegmentTails.java` (maps the bss and overlay window that the ELF loader skips), `InstructionCensus.java`, `ExportPS2Functions.properties`. The exporter's CSV lists labels as well as functions (68,791 records for 9,718 functions) and must be filtered before use. |
 | **REA** (`rea-agents` 6.7.0) | MCP server and CLI over the Ghidra install, for interactive queries from agent sessions (functions, xrefs, bytes, decompile) | MIT | Spike S0 (2026-10-19): it **refuses our R5900 ELF** at its own admission step (`architecture_unsupported`, MIPS32/32R2 only, no PS2 profile), with or without the language override, so all analysis of the game runs on headless Ghidra (`tools/ghidra/`). REA stays registered for host-side binaries and for a possible upstream PS2 profile (`Docs/spikes/S0-rea-capability.md`). Installed with `npm install --global rea-agents`, registered with `rea setup --client claude_code`. |
 | **PCSX2** | Ground truth for behavior, debugger, GS dump capture, texture dumping, ISO sanity checks | GPL-3.0 | The oracle of last resort (architecture.md §15). |
 | **ImHex** | Hex editor with a pattern language for documenting `DATA.DAT`, `MVI` and `MWo3` formats | GPL-2.0 | Format patterns we write are committed as documentation. |
@@ -287,7 +287,7 @@ The primary development machine, as found by inspection. Treat it as the referen
 | Graphics and platform | SDL3 3.4.16 and SDL2 2.32.72 development packages, Vulkan 1.4.357 (headers and loader), `glslc` 2026.3 |
 | GPU | NVIDIA GeForce RTX 4060 |
 | **Found in the sibling `MGS2_Undub` project** | Ghidra 12.1.4 with the Emotion Engine extension (`tools/ghidra_12.1.4_PUBLIC`), an extracted PCSX2 2.7.524 (`tools/pcsx2/squashfs-root`), a headless PCSX2 harness and headless Ghidra scripts; the PS2 BIOS dump and the PCSX2 AppImage live under the home directory. All referenced through `tools/local.env`, never copied into this repository. |
-| **Found** | `clang-format`, `clang-tidy`, `vulkaninfo`, Xvfb, ffmpeg, podman and docker, Node.js 24.21 (for REA) |
+| **Found** | `clang-format`, `clang-tidy`, `vulkaninfo`, Xvfb, ffmpeg, podman and docker, Node.js 24.21 (for REA); paraLLEl-GS and its tools built under `work/parallel-gs/` (S5a); a Ghidra project of the boot ELF under `work/ghidra/base` (S2) |
 | **Not found** | `spirv-cross`, `xorriso` and `isoinfo` (the last two are not needed: our own ISO reader replaces them); `pre-commit`, `reuse`, `ccache`, `gh` (being installed with pacman) |
 | **Not checked** | RenderDoc, ImHex, a PS2 cross toolchain |
 

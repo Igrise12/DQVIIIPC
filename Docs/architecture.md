@@ -153,7 +153,7 @@ generation, `-O1` for cold code, a compiler cache, and an option for a prebuilt 
 - Each guest function becomes one native function that receives the **EE register context** (128-bit GPRs, HI/LO, FPU registers and flags, the VU0 register file, program counter) and the guest memory arena.
 - **Static calls** (`jal` to a known address) are direct native calls.
 - **Indirect calls and returns** (`jalr`, `jr`) go through a **flat dispatch table** indexed by guest address. The table covers the main program's code range and the overlay window (§4.3). Returns normally use the native call stack. The dispatcher handles the cases where guest code manipulates the return address (tail calls, coroutines, stack switching).
-- **Switch tables** (computed `jr` inside a function) must be resolved at analysis time and emitted as native `switch` statements. Unresolved ones are reported (§4.6).
+- **Switch tables** (computed `jr` inside a function) must be resolved at analysis time and emitted as native `switch` statements. Unresolved ones are reported (§4.6). Spike S2 measured the load on this path for the main program: 121 of 152 computed jumps have a resolved table, 31 do not, and 993 of 1,124 `jalr` sites have no static target.
 - **Unknown target.** A dispatch to an address with no function logs the address into the *unresolved-code report* and then either stops with a diagnostic or falls back to the interpreter (§4.6), depending on a setting.
 
 ### 4.3 Overlays
@@ -232,7 +232,7 @@ follows that model. The decision is tracked as ADR-0003.
 
 The EE kernel is implemented in the runtime, not executed. Syscalls arrive as calls with an ID and register arguments.
 
-- **Coverage order:** thread and semaphore control, event flags, alarms and timers, interrupt handler registration, cache flush (a no-op, but overlay-relevant), memory and heap services, program loading, and the SIF layer that carries RPC to the IOP.
+- **Coverage order:** thread and semaphore control, event flags, alarms and timers, interrupt handler registration, cache flush (a no-op, but overlay-relevant), memory and heap services, program loading, and the SIF layer that carries RPC to the IOP. Spike S2 found 78 `syscall` sites with 65 distinct numbers in the main program (54 positive, 11 negative interrupt-context variants) and 51 SDK-named kernel-call stubs; that list (`work/ghidra/base/census-base.csv`) is the initial HLE coverage target.
 - **Unimplemented syscalls** log and stop in development builds. They never silently return success.
 - **Thread semantics** are described in §12.
 
@@ -270,7 +270,7 @@ cannot all be found by reading the ELF.
 
 The launcher can offer an "Optimize" action that rebuilds the compiled VU1 set from the census gathered from the user's own play. Correctness never depends on it.
 
-VU0 macro mode is handled inside the EE code path (§4.4). Whether the game uses VU0 micro mode is unknown and is checked during analysis.
+VU0 macro mode is handled inside the EE code path (§4.4) and is used heavily (spike S2: 1,234 COP2 macro ops plus 954 `lqc2`/`sqc2`). VU0 micro mode is used at exactly two `vcallms` sites, so the VU0 microprogram path cannot be skipped but may stay an interpreter.
 
 ### 5.5 Timers and interrupts
 
@@ -288,7 +288,8 @@ The GS is the largest and riskiest component, so it sits behind one interface (`
 | The backend is told | The backend reports |
 |---|---|
 | GS register writes (with their order) | Supported internal scale factors |
-| Image data uploads to and downloads from GS memory | Whether it can capture draw lists, replace textures, or support widescreen |
+| Image data uploads to and downloads from GS memory (host-to-local transfers, local-to-host readbacks, direct VRAM access for save states) | Whether it can capture draw lists, replace textures, or support widescreen |
+| Writes to the privileged register page (PMODE, SMODE, DISPFB, DISPLAY, CSR, IMR, …), copied in at vsync | Which interrupt conditions it raises itself (parallel-gs raises none: FINISH, SIGNAL, LABEL and vsync bits are the runtime's job) |
 | Display and CRTC configuration, field and frame boundaries | Required GPU features, and whether the current device meets them |
 | Reset, settings changes, shutdown | Frame completion and timing statistics |
 
@@ -296,7 +297,7 @@ The GS is the largest and riskiest component, so it sits behind one interface (`
 
 | Backend | Technology | Provides | Limits | Plan |
 |---|---|---|---|---|
-| **parallel-gs** | paraLLEl-GS, Vulkan compute, LGPL-3.0-or-later, linked as a shared library | The most accurate GS emulation available to us. 2x to 16x supersampling. Works from the GS register stream. | Needs specific Vulkan features (descriptor indexing, timeline semaphores, 8 and 16-bit storage, scalar block layout, subgroup size control). It models GS memory, so scene-level features (widescreen, interpolation, texture identity) are limited. No documented embedding API: we write a wrapper. | **First backend**, targeted at M3 |
+| **parallel-gs** | paraLLEl-GS, Vulkan compute, LGPL-3.0-or-later, linked as a shared library | The most accurate GS emulation available to us. 2x to 16x supersampling. Works from the GS register stream. | Needs specific Vulkan features (descriptor indexing, timeline semaphores, 8 and 16-bit storage, scalar block layout, subgroup size control). Also needs `bufferDeviceAddress` and 32 KiB of compute shared memory (S5a). It models GS memory, so scene-level features (widescreen, interpolation, texture identity) are limited. Small embedding API (`GSInterface`, about 25 methods), proven headless in spike S5a; all calls must come from one thread, the renderer owns one helper thread, and host readbacks block the caller. Wrapper estimated at 1,000–1,500 lines. Reads PCSX2 dumps of state version 8–9, uncompressed only. | **First backend**, targeted at M3 |
 | **trace** | None: records packets to a dump file | Headless operation, replay input for tests and golden frames | Draws nothing | Early, for CI and tests |
 | **native** | Our own renderer over Vulkan (with OpenGL later if needed) | Render at any resolution, true widescreen, texture replacement, draw-list capture for interpolation, lighter GPU requirements | Must model GS framebuffer, texture and blending semantics. Large effort. Clean-room under our license, with no code copied from paraLLEl-GS. | Long-term, after M6. Research can start earlier. |
 
@@ -344,11 +345,12 @@ Guest sound drivers (IOP modules or HLE)
 
 ### 7.2 Movies
 
-`MOVIE/*.MVI` use a container that is not yet identified (spike S6). The usual PS2 route is MPEG-2 decoded by the IPU. The plan:
+Spike S6a identified the `MVI` container (`Docs/formats/mvi.md`): a standard MPEG-2 program stream in 16 KiB packs, XORed with a 2,048-byte table the game generates at run time; MPEG-2 Main profile video at 512 × 448, 30 fps, progressive; 16-bit PCM stereo audio carried as a Sony ADS stream in private stream 1; `_W` files are anamorphic 16:9 renders. The IPU decodes the video on the PS2. The plan:
 
-- Demux the container in `runtime/movie/`.
+- Demux in `runtime/movie/`: undo the 2,048-byte periodic XOR (the table comes from the region profile's generator constants, or from setup-time recovery on the user's disc; decision after S6b), then a small program-stream parser (packs, `0xE0` video, `0xBD/0xFF` audio).
 - **HLE the IPU interface the game uses** and decode on the host, delivering frames to the GS backend as image uploads so the game's own presentation code keeps working.
-- Decode through an `IMovieDecoder` interface, so a decoder library (tech-stack.md §5) can be swapped.
+- Decode through an `IMovieDecoder` interface (MPEG-2 Main profile is all that is needed), so a decoder library (tech-stack.md §5) can be swapped. Audio needs no decoder: PCM16 LE in 512-byte channel blocks, 48,048 Hz field.
+- Presentation applies the 4:3 or 16:9 stretch by file variant, never the MPEG aspect code.
 - Route movie audio through the same mixer as game audio.
 
 ---
@@ -536,7 +538,7 @@ sequenceDiagram
 | Thread | Role |
 |---|---|
 | **Machine thread** | Runs EE guest code, the IOP, the DMA model and the virtual clock on **one host thread**, in virtual-time slices. Determinism (P5) comes first. |
-| **Render thread** | Consumes the command queue from the GIF and drives the GS backend. |
+| **Render thread** | Consumes the command queue from the GIF and drives the GS backend. The parallel-gs backend requires all its calls from one thread and blocks that thread on host readbacks (S5a), so this is the only thread that touches `IGsBackend`. |
 | **Main thread** | Window events, input polling, presentation. |
 | **Audio thread** | Pulls from the mixer through the host audio stream. |
 | **I/O thread** | Disc reads and save writes. |

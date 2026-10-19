@@ -82,9 +82,11 @@ The "inferred" rows are working hypotheses that the first milestones must confir
 | Boot ELF CRC-32 | `a66a08b0` |
 | Code overlays | Six overlay files in `BIN/`: `BATTLE.BIN`, `CASINO.BIN`, `MENU.BIN`, `SHOP.BIN`, `TITLE.BIN`, `VIEWER.BIN` (1.1 KB to 156 KB each) |
 | Overlay container | `MWo3` header, 64 bytes, little-endian: magic, `overlay_id` (CASINO 1, VIEWER 2, SHOP 3, MENU 4, BATTLE 5, TITLE 6), `load_address` (`0x00461C80` for all six), `text_size`, `data_size`, `bss_size`, `table_start`/`table_end` (absolute addresses inside the overlay's data; 3 to 6 entries), 32-byte lowercase name; the payload (text, then data) follows at `+0x40`. `file_size == 64 + text + data` holds for all six. *Decoded from the headers; semantics to be confirmed by spike S3.* |
-| Overlay window | The ELF declares six zero-file-size load segments at `0x00461C80`, the largest `0x27E00` bytes, so the window is `0x00461C80` to `0x00489A80`. Each segment's `memsz` equals `64 + text + data + bss` of one overlay, in order CASINO, VIEWER, SHOP, MENU, BATTLE, TITLE (that is, by `overlay_id`), so the whole file including its header is resident and code starts at `0x00461CC0`. *Confirmed by size arithmetic; loader behaviour pending spike S3.* |
+| Overlay window | The ELF declares six zero-file-size load segments at `0x00461C80`, the largest `0x27E00` bytes, so the window is `0x00461C80` to `0x00489A80`. Each segment's `memsz` equals `64 + text + data + bss` of one overlay, in order CASINO, VIEWER, SHOP, MENU, BATTLE, TITLE (that is, by `overlay_id`), so the whole file including its header is resident and code starts at `0x00461CC0`. *Confirmed by size arithmetic; loader behaviour pending spike S3.* Ghidra does not map the window by itself (S2). |
 | Game data | `DATA.DAT` (1,804,218,368 bytes) and `DATA2.DAT` (752,971,776 bytes), each with an index file beside it: `DATA.HD6` (188,732 bytes, magic `HD6\0`) and `DATA2.HD6` (87,092 bytes). The ELF references `.HD6` once and `DATA.DAT` never, so lookups go through the index. `DMYDATA` (51,166,209 bytes) is presumably padding. **Index layout not yet decoded (spike S4); no public tooling found.** |
-| Movies | 38 `MOVIE/**/*.MVI` files, mostly in pairs `X.MVI` / `X_W.MVI` (likely 16:9 variants); 3.5 to 4 MB each in `MOVIE/E904`, two of 248 MB under `MOVIE/EV/`. The ELF contains `sceMpeg` strings. **Container format unknown (spike S6).** |
+| Movies | 38 `MOVIE/**/*.MVI` files in 19 pairs `X.MVI` / `X_W.MVI`; 91,322 frames (50.7 minutes) in all. **Format identified (spike S6a):** MPEG-2 program stream in 16 KiB packs, XORed with a 2,048-byte table that the game generates at run time; MPEG-2 Main profile video 512 × 448 progressive 30 fps; 16-bit PCM stereo audio as a Sony ADS stream in private stream 1 (no ADPCM); `_W` files are anamorphic 16:9 renders of the same movie. Details in `Docs/formats/mvi.md`; where the table is generated is spike S6b. |
+| Code discovery (Ghidra, S2) | Headless Ghidra 12.1.4 with the Emotion Engine extension finds **9,598 functions** in the main image (85.7 % of image bytes in function bodies, 1.0 % loose instructions, 98.6 % auto-named); 121 of 152 computed jumps have a resolved switch table; 993 of 1,124 indirect calls have no static target. The ELF loader maps none of the zero-file-size segments, so `tools/ghidra/MapElfSegmentTails.java` adds the `bss` and overlay-window blocks (120 function entries and 374 references land in the window). Import and analysis take 2–3 minutes. |
+| Instruction census (S2) | 640,430 instructions. 78 `syscall` sites with 65 distinct numbers (54 positive, 11 negative interrupt-context variants). VU0 micro mode is used at **2** `vcallms` sites; VU0 macro mode heavily (1,234 COP2 ops plus 600 `lqc2` / 354 `sqc2`); MMI 565 ops; 128-bit `lq`/`sq` 38,148 (6 % of all instructions). Also 3 `eret` and 2 `tlbwi` in a user-mode ELF (to be examined in M2). |
 | IOP modules | 16 `.IRX` files plus `IOPRP300.IMG` under `MODULES/`. Standard Sony modules (`LIBSD`, `SDRDRV`, `MCMAN`, `MCSERV`, `PADMAN`, `SIO2MAN`, `CDVDSTM`, `MODHSYN`, `MODMIDI`, `MODMSIN`, `MSIFRPC`) plus game-specific ones (`SKSOUND`, `SKMIDI`, `SKHSYNTH`, `SKMSIN`, `PCMPLAY`). The `SK*` and `PCMPLAY` modules appear to form the game's own sound driver stack. *Inferred from names.* |
 
 **What this tells us:**
@@ -92,7 +94,7 @@ The "inferred" rows are working hypotheses that the first milestones must confir
 1. The **stripped ELF** means no function names or boundaries come for free. Function discovery needs a disassembler pass (Ghidra) before recompilation.
 2. The **six overlays sharing one address window** are the single most important design constraint. General-purpose recompilers assume one flat program. Our dispatch layer must know which overlay is currently resident (architecture.md §4.3).
 3. The **sound stack is custom IOP code**, so audio needs either execution of the original IOP modules or an HLE of their interfaces (architecture.md §7).
-4. **The `HD6` archive index and the `MVI` container** must be reverse-engineered before we can stream game data natively or play movies (spikes S4 and S6).
+4. **The `HD6` archive index** (spike S4) and the **movie table generator** (spike S6b) must still be located before we can stream game data natively or play movies; the movie container itself is understood (S6a).
 
 The hashes above come from a single dump. Before they are pinned as the canonical values, cross-check them against a
 Redump entry for SLUS-21207. Until then they are recorded, not trusted.
@@ -128,7 +130,7 @@ evaluate. Feasibility notes are honest: several items depend on research that ha
 | Final-image scaling and sharpening (for example FSR 1 with RCAS) | P1 | |
 | Anti-aliasing options, de-interlacing choice | P1 | |
 | CRT and scanline filters | P2 | |
-| True widescreen (16:9 and ultrawide) | P1 | **Research needed.** The disc ships `_W` variants of its movies, so the game may already have a native 16:9 mode: verify in spike S7 first. If not, widening the view means patching projection and HUD placement |
+| True widescreen (16:9 and ultrawide) | P1 | **Partly native.** Every movie ships as an anamorphic 16:9 `_W` render (S6a), and spike S7 reports a *Normal 4:3 / Wide Screen 16:9* option in the game's first-boot settings (to be confirmed in its findings). Remaining research: what that mode does to the 3D view and HUD, and ultrawide beyond it |
 | Frame interpolation beyond the game's native frame rate | P2 | **Research needed.** Needs scene state, not just GS packets; likely requires the native renderer path |
 | Texture dump and replacement, PCSX2-style pack compatibility | P1 | A community HD texture and UI pack for PCSX2 has been reported, so compatibility is attractive |
 
@@ -146,7 +148,7 @@ evaluate. Feasibility notes are honest: several items depend on research that ha
 | Feature | Priority | Notes |
 |---|---|---|
 | Native audio output with volume control and device selection | P0 | |
-| Full-motion video playback | P0 | Depends on identifying the `MVI` format |
+| Full-motion video playback | P0 | Container, video and audio understood (S6a, `Docs/formats/mvi.md`); depends on S6b for the XOR-table source and the player interface |
 | Audio latency control | P1 | |
 
 ### Game and quality-of-life
@@ -238,11 +240,11 @@ Each milestone ends with a demonstrable result. A milestone is done only when it
 | Spike | Question |
 |---|---|
 | S1 | Does PS2Recomp build with the Linux toolchain on the development machine (GCC and Clang), and how long does it take? |
-| S2 | Can Ghidra with an Emotion Engine plugin load `SLUS_212.07` and export a usable function list? Does the exporter handle a stripped ELF of this size? |
+| S2 | Can Ghidra with an Emotion Engine plugin load `SLUS_212.07` and export a usable function list? Does the exporter handle a stripped ELF of this size? **Done:** yes, headless, in 2–3 minutes; 9,598 functions; the exporter runs unmodified with a `.properties` answer file. |
 | S3 | How does the overlay loader work? Find the function that reads `BIN/*.BIN` and the instruction sequence that makes new code live (cache flush). |
 | S4 | What is the `DATA.HD6` index layout, and how does the game read `DATA.DAT` through it? |
-| S5 | Can paraLLEl-GS be built standalone and fed a GS dump captured from PCSX2, with the output matching? |
-| S6 | What are the `MVI` movies (MPEG-2 through the IPU, or a custom codec)? |
+| S5 | Can paraLLEl-GS be built standalone and fed a GS dump captured from PCSX2, with the output matching? **S5a done:** builds unpatched with GCC and Clang, the RTX 4060 meets every requirement, the embedding API is the `GSInterface` class. S5b (replay of real dumps) waits for S7. |
+| S6 | What are the `MVI` movies (MPEG-2 through the IPU, or a custom codec)? **S6a done:** XOR-obfuscated MPEG-2 program streams with PCM audio (`Docs/formats/mvi.md`). S6b: locate the table generator and the player. |
 | S7 | What frame rate and resolution does the game run at in PCSX2, and which GS features does it use heavily? |
 
 ## 12. Risks and mitigations
@@ -250,11 +252,11 @@ Each milestone ends with a demonstrable result. A milestone is done only when it
 | # | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|---|
 | R1 | **Overlays break the flat-program assumption** of the recompiler and runtime | Certain | High | Overlay-aware dispatch designed in from day one; each overlay recompiled as a separate unit with its own function map (architecture.md §4.3); spike S3 |
-| R2 | **Stripped ELF**: incomplete or wrong function discovery causes crashes at run time | High | High | Ghidra analysis, run-time fallback that logs unresolved addresses, iterative triage loop, overrides for hard cases |
+| R2 | **Stripped ELF**: incomplete or wrong function discovery causes crashes at run time | Medium (was High; S2 found 9,598 functions covering 85.7 % of the image) | High | Ghidra analysis, run-time fallback that logs unresolved addresses (the residual risk is 31 unresolved switch tables and 993 indirect calls), iterative triage loop, overrides for hard cases |
 | R3 | **GS rendering speed and accuracy**: PS2Recomp's GS path is reported as very slow; an accurate renderer may need strong GPU features | High | High | Renderer behind an interface; start with paraLLEl-GS (accurate, supports supersampling) and keep a native HLE renderer as the long-term path (architecture.md §6) |
 | R4 | **VU1 microprogram performance** | Medium | High | Interpreter first for correctness, then ahead-of-time compilation of programs found at run time (architecture.md §5.4) |
 | R5 | **Custom IOP sound stack** (`SK*`, `PCMPLAY`) | High | Medium | Bootstrap by executing the original IOP modules, replace with HLE once behavior is understood (architecture.md §7) |
-| R6 | **Unknown archive and movie formats** | High | Medium | Early spikes S4 and S6; tooling lives in `tools/extract` with format docs under `Docs/` as discoveries are made |
+| R6 | **Unknown archive and movie formats** | Medium (movie container solved by S6a; archive index pending S4) | Medium | Early spikes S4 and S6; tooling lives in `tools/extract` with format docs under `Docs/formats/` as discoveries are made. Residual: the movie XOR-table source (S6b) |
 | R7 | **Timing, threads and interrupts**: recompiled code cannot be pre-empted at arbitrary instructions | Medium | High | Explicit yield points and a deterministic scheduler (architecture.md §12); tracing support |
 | R8 | **FPU semantics**: the R5900 FPU is not IEEE-754 (round-toward-zero, no NaN or infinity) and small differences can desynchronize or hang the game | Medium | High | Dedicated arithmetic helpers, controlled host rounding mode, differential tests (architecture.md §15) |
 | R9 | **Build time and disk usage** for users | High | Medium | Chunked generation, parallel builds, compiler cache, incremental setup, bundled toolchain option |
@@ -291,6 +293,7 @@ Decisions that need an answer from the project owner. Defaults are proposed so w
 | D6 | **Launcher toolkit** | Dear ImGui over SDL3 in phase 1, behind a front-end abstraction | One toolkit shared with the in-game overlay; can be replaced later |
 | D7 | **Which region profile ships first** | NTSC-U only | Test coverage and hash pinning |
 | D8 | **Hosting and community** | Public Git repository with issue tracker. Chat server later. | Needed before M7 |
+| D9 | **Function-map publication** | Keep the Ghidra function map local and regenerate it from the user's disc with `tools/ghidra/headless.sh` (about 2 minutes) until the legal review in §9; do not commit `config/functions/` in M0–M2. Proposed by spike S2. | The map is 98.6 % auto-names plus addresses and churns with every analysis change; committing it buys nothing yet and is the most derived artifact we would publish |
 
 ## 15. Prior art and references
 

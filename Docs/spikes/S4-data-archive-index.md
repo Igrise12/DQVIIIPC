@@ -39,3 +39,14 @@ begins with the magic `HD6\0`.
 ## Must not commit
 
 Names from the string table beyond counts and extensions, any extracted entry, hexdumps.
+
+## Update from spike S2 (2026-10-19)
+
+- Copy `work/ghidra/base` (it has the `bss` and `overlay_window` blocks); analysis of the main ELF is already done,
+  so your runs are `-process SLUS_212.07 -noanalysis -readOnly -postScript <script>` and take 15–30 s each.
+  `tools/ghidra/headless.sh <project> DQ8 ...` sources `tools/local.env` and puts `tools/ghidra` on the script path.
+- The census found 97 references to I/O registers, 29 to the scratchpad and 13 to IOP RAM in the main program; the
+  CD read path you are looking for is among the callers of the `sceCd*` stubs (51 kernel-call stubs carry SDK names
+  from the extension's patterns; SIF RPC binds are the way to the IOP).
+- The S6a spike found that the movies are XORed with a 2,048-byte table generated at run time; watch for the same
+  generator or table on the `DATA.DAT` read path.

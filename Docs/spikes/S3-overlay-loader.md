@@ -69,3 +69,19 @@ OverlayManager needs in M2/M3, and whether `table_start..table_end` must be mode
 ## Must not commit
 
 Decompiler or disassembly output, Ghidra project copies, save states, any bytes. Addresses and counts are fine.
+
+## Update from spike S2 (2026-10-19)
+
+- Copy `work/ghidra/base` (not `plain`): it carries the `bss` and `overlay_window` uninitialized blocks that
+  `tools/ghidra/MapElfSegmentTails.java` adds, because Ghidra's ELF loader silently maps none of the zero-file-size
+  segments. The project already holds **120 one-byte function entries inside the window and 374 references into
+  it** (`work/ghidra/base/census-base.csv`): that is your starting list for questions 1, 4 and 5.
+- To analyse overlay code with cross-references in both directions, work inside a copy of the main program rather
+  than importing the `BIN` as a separate program: write `tools/ghidra/LoadOverlay.java` (postScript with the BIN path
+  as its argument) that converts the `overlay_window` block to initialized memory, writes the whole file at
+  `0x00461C80` (header included, code at `0x00461CC0`), creates functions at the `table_start..table_end` entries
+  and at the 120 known entry points, and re-runs analysis. One project copy per overlay (`work/ghidra/s3-title`,
+  `s3-battle`, …). Headless import and analysis of the main ELF takes 2–3 minutes, not hours; `-analysisTimeoutPerFile 600` is plenty.
+- The 78 `syscall` sites and their `$v1` numbers are in the census; filter for `0x64` and `0x68` (question 3).
+- The main program has 31 computed `jr` sites without a resolved switch table and 993 `jalr` sites without a static
+  target; note which of them sit on the path into the window.
