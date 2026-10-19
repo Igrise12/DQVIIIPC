@@ -8,6 +8,7 @@ add_library(dq8_core STATIC
     error.cpp
     hash/hash.cpp
     iso/iso9660.cpp
+    elf/elf_headers.cpp
 )
 add_library(dq8::core ALIAS dq8_core)
 target_include_directories(dq8_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
