@@ -7,7 +7,7 @@ changes during a spike unless the brief says so (first-party helper scripts unde
 
 | Spike | Question | Depends on |
 |---|---|---|
-| [S0](S0-rea-capability.md) | Can REA (Ghidra MCP/CLI) open our R5900 ELF at all? | REA installed |
+| [S0](S0-rea-capability.md) | Can REA (Ghidra MCP/CLI) open our R5900 ELF at all? **Done: no.** | REA installed |
 | [S1](S1-ps2recomp-build.md) | Does PS2Recomp build here, and what does a game-module build cost? | nothing |
 | [S2](S2-ghidra-headless-export.md) | Can headless Ghidra + the EE extension analyse the stripped ELF and export a function map? | nothing |
 | [S3](S3-overlay-loader.md) | How does the game load `BIN/*.BIN` overlays into `0x00461C80`? | S2 import |
