@@ -38,7 +38,8 @@ ErrorCode code_of(const std::vector<std::uint8_t>& image) {
     } catch (const Error& e) {
         return e.code();
     }
-    FAIL("expected the image to be rejected");
+    // FAIL_CHECK records the failure without throwing, so the return below stays reachable (MSVC C4702 under /WX).
+    FAIL_CHECK("expected the image to be rejected");
     return ErrorCode::io_open;
 }
 
