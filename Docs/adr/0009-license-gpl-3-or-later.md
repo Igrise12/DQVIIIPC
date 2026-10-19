@@ -20,7 +20,7 @@ use GPL-3.0 (god-of-war-recomp) or MIT (ico-recomp, rac1-native-game, where no G
 All first-party code is licensed **GPL-3.0-or-later**.
 
 - The full license text is in `LICENSE` at the repository root.
-- Every first-party source file carries `SPDX-License-Identifier: GPL-3.0-or-later`. CI checks this with REUSE once CI exists.
+- Every first-party source file carries an SPDX header (`SPDX-License-Identifier` set to `GPL-3.0-or-later`). CI checks this with `reuse lint`.
 - Dependencies must be GPL-3.0-compatible, per the policy in tech-stack.md §10. GPL-2.0-only code is not allowed.
 - LGPL libraries (paraLLEl-GS, FFmpeg if used) are linked dynamically so users can substitute them.
 - Contributions are accepted under the same license with a Developer Certificate of Origin sign-off. There is no contributor license agreement.

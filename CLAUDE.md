@@ -27,6 +27,7 @@ its row in architecture.md §18 and brief §14, and use absolute dates.
 
 ```bash
 cmake --preset dev-clang && cmake --build --preset dev-clang --parallel   # presets: dev-gcc, dev-clang, release, asan, ci-*
+cmake --preset dev-clang -DCMAKE_CXX_COMPILER_LAUNCHER=ccache   # optional: cache object files between rebuilds
 ctest --preset unit-dev-clang                      # unit tests (label "unit", no game data); CI runs these
 ctest --preset unit-dev-clang -R '<regex>'         # one test by name
 ./build/dev-clang/tests/unit/dq8_unit_tests '<test name>'   # run a single Catch2 test directly
@@ -105,7 +106,7 @@ launcher, cli  ->  core only
 - C++20 for everything players run; Python and Java (Ghidra scripts) are contributor tools only and never on the
   end-user setup path. Scripts that read game files run with `python3 -I`.
 - `.clang-format` (LLVM base, 4 spaces, 110 columns, `PointerAlignment: Left`) and `.editorconfig` are authoritative.
-- Every first-party source file gets `SPDX-License-Identifier: GPL-3.0-or-later`. New dependencies must be
+- Every first-party source file gets an SPDX header (`SPDX-License-Identifier` set to `GPL-3.0-or-later`). New dependencies must be
   GPL-3.0-compatible (tech-stack §10) and recorded in `THIRD_PARTY_NOTICES.md` in the same commit.
 - Namespaces per layer: `dq8::core`, `dq8::rt`, `dq8::gs`, `dq8::features`.
 - Cross-references between docs use `file.md §N` form; when you renumber a section, grep the other docs for stale refs.
