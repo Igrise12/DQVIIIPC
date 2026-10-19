@@ -8,6 +8,7 @@ add_executable(dq8_unit_tests
     test_hash.cpp
     test_iso9660.cpp
     test_elf_headers.cpp
+    test_region_profile.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(dq8_unit_tests PRIVATE DQ8_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

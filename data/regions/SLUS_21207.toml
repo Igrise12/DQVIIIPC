@@ -1,0 +1,217 @@
+# Region profile: Dragon Quest VIII, NTSC-U (SLUS-21207). Schema: data/README.md.
+# Names, sizes, addresses and hashes only (architecture.md §14). Facts come from Docs/project-brief.md §6;
+# hashes for overlays and modules are filled in from `dq8ctl extract --emit-profile` on a verified disc.
+schema_version = 1
+
+[profile]
+id = "SLUS_21207"
+serial = "SLUS-21207"
+title = "Dragon Quest VIII: Journey of the Cursed King"
+region = "NTSC-U"
+video_mode = "NTSC"
+
+[image]
+size = 4180148224
+sector_size = 2048
+
+[boot]
+path = "SLUS_212.07"
+size = 2960032
+sha1 = "f24bfd21c21f6454c05934224ab52cde837bc90b"
+crc32 = "a66a08b0"
+entry = 0x00100008
+load_address = 0x00100000
+main_memsz = 0x361C80
+
+# The six zero-filesize PT_LOAD segments of the boot ELF, one per overlay, in segment order (== id order).
+[overlay_window]
+base = 0x00461C80
+end = 0x00489A80
+container = "MWo3"
+header_size = 64
+
+[[overlays]]
+name = "CASINO"
+id = 1
+path = "BIN/CASINO.BIN"
+segment_memsz = 0x20F00
+size = 129920
+sha1 = ""
+crc32 = ""
+
+[[overlays]]
+name = "VIEWER"
+id = 2
+path = "BIN/VIEWER.BIN"
+segment_memsz = 0x500
+size = 1152
+sha1 = ""
+crc32 = ""
+
+[[overlays]]
+name = "SHOP"
+id = 3
+path = "BIN/SHOP.BIN"
+segment_memsz = 0x17B00
+size = 86016
+sha1 = ""
+crc32 = ""
+
+[[overlays]]
+name = "MENU"
+id = 4
+path = "BIN/MENU.BIN"
+segment_memsz = 0x1CD00
+size = 109312
+sha1 = ""
+crc32 = ""
+
+[[overlays]]
+name = "BATTLE"
+id = 5
+path = "BIN/BATTLE.BIN"
+segment_memsz = 0x27E00
+size = 156032
+sha1 = ""
+crc32 = ""
+
+[[overlays]]
+name = "TITLE"
+id = 6
+path = "BIN/TITLE.BIN"
+segment_memsz = 0x5780
+size = 20864
+sha1 = ""
+crc32 = ""
+
+# Other files the intake extracts. size 0 and empty hashes mean "not recorded yet".
+[[files]]
+path = "SYSTEM.CNF"
+role = "system_cnf"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/IOPRP300.IMG"
+role = "iop_image"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/CDVDSTM.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/LIBSD.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/MCMAN.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/MCSERV.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/MODHSYN.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/MODMIDI.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/MODMSIN.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/MSIFRPC.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/PADMAN.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/PCMPLAY.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/SDRDRV.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/SIO2MAN.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/SKHSYNTH.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/SKMIDI.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/SKMSIN.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+[[files]]
+path = "MODULES/SKSOUND.IRX"
+role = "iop_module"
+size = 0
+sha1 = ""
+crc32 = ""
+
+# Never extracted: the runtime reads the archives from the image by sector (architecture.md §8.3), and the
+# movies are out of M1's scope. A trailing '/' marks a directory.
+[not_extracted]
+paths = ["DATA.DAT", "DATA2.DAT", "DATA.HD6", "DATA2.HD6", "DMYDATA", "MOVIE/"]
