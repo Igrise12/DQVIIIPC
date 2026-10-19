@@ -22,6 +22,11 @@ jobs:
       - name: Install Linux tools
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y ninja-build ${{ matrix.cc }}
+      - name: Register compiler problem matchers (errors become annotations readable without the logs)
+        shell: bash
+        run: |
+          echo "::add-matcher::.github/problem-matchers/gcc.json"
+          echo "::add-matcher::.github/problem-matchers/msvc.json"
       - name: Configure
         run: cmake --preset ${{ matrix.preset }} ${{ runner.os == 'Linux' && format('-DCMAKE_C_COMPILER={0} -DCMAKE_CXX_COMPILER={1}', matrix.cc, matrix.cxx) || '' }}
       - name: Build
@@ -41,6 +46,7 @@ jobs:
       - uses: actions/checkout@v5
         with: { submodules: recursive }
       - run: sudo apt-get update && sudo apt-get install -y ninja-build clang-18
+      - run: echo "::add-matcher::.github/problem-matchers/gcc.json"
       - run: cmake --preset asan -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
       - run: cmake --build --preset asan --parallel
       - run: ctest --preset unit-asan
