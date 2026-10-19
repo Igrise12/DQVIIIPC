@@ -116,7 +116,7 @@ flowchart LR
 | Stage | Input | Output | Notes |
 |---|---|---|---|
 | **1. Locate and verify** | Disc image path | Verified region profile | Reads ISO 9660 directly. Finds the boot file from `SYSTEM.CNF`, hashes it, and looks the hash up in `data/regions/`. **Unknown hash means stop**, with an actionable message (modified image, other region, bad dump). Also checks free disk space and toolchain availability. |
-| **2. Extract inputs** | Disc image | `baserom/<profile>/` with boot ELF, overlay files, IOP modules | `DATA.DAT` and `DATA2.DAT` are *not* extracted. The runtime reads them from the image (§8.3), which saves several gigabytes. The overlay container (`MWo3`) is parsed here into per-overlay code and data. |
+| **2. Extract inputs** | Disc image | `baserom/<profile>/` with boot ELF, overlay files, IOP modules | `DATA.DAT` and `DATA2.DAT` are *not* extracted. The runtime reads them from the image (§8.3), which saves several gigabytes. The overlay container (`MWo3`) is parsed here into per-overlay code and data. Spike S4 confirmed that the game reads archive members by sector itself, so nothing in the archives is needed at build time; the `.HD6` indexes are optional tooling inputs. |
 | **3. Load function map** | Region profile | Merged function map per code unit | Maps are authored data in `config/functions/<profile>/` (one per unit: main, and each overlay). **End users never run Ghidra.** Developers extend the maps with the analysis tools (tech-stack.md §7). |
 | **4. Generate recompiler config** | Function maps, stub and patch lists, template | One TOML config per code unit | The template, stub list and instruction patches are authored and versioned. Overlays get a config each. |
 | **5. Recompile** | ELF, overlay code, config | Generated C++ per unit, in `generated/` | Pinned PS2Recomp recompiler (§4.7). Output is chunked into many files for parallel compilation and is **deterministic**, so the content hash is a valid cache key. |
@@ -342,15 +342,16 @@ Guest sound drivers (IOP modules or HLE)
 - The SPU2 model is a **software mixer** whose output is pulled by the host audio callback. Latency is a setting.
 - Mixer timing follows the virtual clock so that audio, vblank and sound-driver behavior remain consistent when the game is throttled or fast-forwarded. Fast-forward may drop or time-stretch audio, but never desynchronizes the driver.
 - The game-specific `SK*` and `PCMPLAY` modules decide how music and effects reach the SPU2. How they are driven (disc streaming versus sound banks) is learned during stage A of §5.2.
+- Movie audio (spike S6b): the game copies 16-bit PCM into an IOP ring and drives `PCMPLAY.IRX` over SIF RPC (channel set-up, start, position query, stop, volume) and SIF DMA; the sound-stack HLE must offer that server and mix 48 kHz PCM. Video and audio run open-loop in the original game.
 
 ### 7.2 Movies
 
 Spike S6a identified the `MVI` container (`Docs/formats/mvi.md`): a standard MPEG-2 program stream in 16 KiB packs, XORed with a 2,048-byte table the game generates at run time; MPEG-2 Main profile video at 512 × 448, 30 fps, progressive; 16-bit PCM stereo audio carried as a Sony ADS stream in private stream 1; `_W` files are anamorphic 16:9 renders. The IPU decodes the video on the PS2. The plan:
 
-- Demux in `runtime/movie/`: undo the 2,048-byte periodic XOR (the table comes from the region profile's generator constants, or from setup-time recovery on the user's disc; decision after S6b), then a small program-stream parser (packs, `0xE0` video, `0xBD/0xFF` audio).
-- **HLE the IPU interface the game uses** and decode on the host, delivering frames to the GS backend as image uploads so the game's own presentation code keeps working.
-- Decode through an `IMovieDecoder` interface (MPEG-2 Main profile is all that is needed), so a decoder library (tech-stack.md §5) can be swapped. Audio needs no decoder: PCM16 LE in 512-byte channel blocks, 48,048 Hz field.
-- Presentation applies the 4:3 or 16:9 stretch by file variant, never the MPEG aspect code.
+- **No decryption in the runtime.** Spike S6b found that the XOR table is generated and applied by the game's own read routine from data in the ELF, so the recompiled game decrypts the stream itself; the runtime only serves raw `.MVI` bytes to the game's file reads. (The S6a recovery method remains a tool for tests.)
+- **HLE at the `sceMpeg` library boundary** (proposed; ADR when the runtime design is accepted): the library entry points S6b identified (`sceMpegCreate`, `AddCallback`, `AddStrCallback`, `DemuxPssRing`, `GetPicture`, `IsEnd`, `Reset` and the IPU init) are overridden so that the game's own demux ring, threads, GIF uploads (896 RGBA32 16 × 16 tiles per frame into its `moviework` buffer) and PCM feed keep running while `GetPicture` is served by a host decoder. The alternative, HLE at the IPU and DMAC level (channels 3 and 4, the IPU command set, macroblock-order RGBA32 output), is what emulators do and is far larger.
+- Decode through an `IMovieDecoder` interface (MPEG-2 Main profile 512 × 448 is all that is needed), so a decoder library (tech-stack.md §5) can be swapped. Audio needs no decoder: the game pushes PCM16 to `PCMPLAY.IRX` (§7.1) and ignores the 48,048 Hz header field.
+- Presentation: the player draws the frame pixel-for-pixel into the 512-wide frame buffer and relies on the CRTC's 4:3 or 16:9 stretch, selected by the game's screen-size byte; our presentation pipeline applies the same stretch, never the MPEG aspect code.
 - Route movie audio through the same mixer as game audio.
 
 ---
@@ -383,7 +384,7 @@ Physical device (SDL3 gamepad or keyboard)
 
 `IDiscSource` abstracts the disc. Implementations: an ISO 9660 image reader (primary), and a directory of extracted files (developer convenience).
 
-- The runtime reads `DATA.DAT` and `DATA2.DAT` **directly from the image** by sector, so no multi-gigabyte extraction is needed.
+- The runtime reads `DATA.DAT` and `DATA2.DAT` **directly from the image** by sector, so no multi-gigabyte extraction is needed. Spike S4 recorded the access pattern: one `sceCdSearchFile` per archive at start-up, then `sceCdRead` of 1 to 512 sectors at `LSN + sector` with `sceCdSync(0)` and `sceCdGetError` polling (plus `sceCdSeek` from the overlay loader); the `.HD6` indexes are read through the file-I/O RPC at boot. The disc model therefore needs random sector access by LSN and the ISO directory, and latency modelling can key on (LSN, count).
 - **Latency modes:** *Accurate* models disc timing, which some games depend on. *Fast* completes reads immediately (shorter loading). Both complete reads at deterministic points in virtual time.
 - Reads are asynchronous and cancellable, served from a dedicated I/O thread.
 - Compressed image formats are out of scope for 1.0.
@@ -659,6 +660,7 @@ The brief (§9) states the policy. This is how it is enforced.
 | **Region gate** | Setup refuses a boot file whose hash is not in `data/regions/`, so unknown builds are never mistranslated. |
 | **Local generation** | The recompiled C++ and the game module are produced and stay on the user's machine. |
 | **Shape-only data** | Tables in `data/` list labels, sizes and pointer slots without values. The runtime reads values from the user's disc at start-up. |
+| **Game-derived values that never enter the repository or tool output** | The movie XOR table and the string, immediates, multiplier and seed it is generated from (game code produces it at run time); the HD6 dictionary strings and path records; overlay and archive bytes; decompiled or disassembled code. Docs and tools carry addresses, counts and layouts only. |
 | **Contribution rules** | DCO sign-off, a checklist item in the pull-request template, and a ban on contributing from leaked or proprietary sources. |
 | **Privacy** | No telemetry. Update checks are opt-in and send nothing identifying. Support bundles are assembled locally and reviewed by the user before sharing. |
 
