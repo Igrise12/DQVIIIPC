@@ -1,0 +1,54 @@
+# ---------------------------------------------------------------------------
+# Game-derived content. NEVER commit any of this. See Docs/project-brief.md §9.
+# ---------------------------------------------------------------------------
+/Game/
+/baserom/
+/generated/
+/work/
+*.iso
+*.7z
+*.elf
+*.irx
+*.mvi
+SLUS_*
+SYSTEM.CNF
+DATA.DAT
+DATA2.DAT
+
+# ---------------------------------------------------------------------------
+# Build output and caches
+# ---------------------------------------------------------------------------
+/build/
+/out/
+/install/
+.cache/
+.ccache/
+compile_commands.json
+CMakeUserPresets.json
+CMakeFiles/
+CMakeCache.txt
+
+# ---------------------------------------------------------------------------
+# Local runtime state (settings, saves, logs, dumps)
+# ---------------------------------------------------------------------------
+/saves/
+/logs/
+*.log
+*.gsdump
+*.core
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+venv/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+*.ghidra
+*.gpr
+*.rep/
