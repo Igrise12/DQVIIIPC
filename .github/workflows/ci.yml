@@ -1,0 +1,67 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# CI never has game data. Only tests labelled "unit" run here.
+jobs:
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Linux GCC",   os: ubuntu-24.04, preset: ci-gcc,   cc: gcc-13,   cxx: g++-13 }
+          - { name: "Linux Clang", os: ubuntu-24.04, preset: ci-clang, cc: clang-18, cxx: clang++-18 }
+          - { name: "Windows MSVC", os: windows-2022, preset: ci-msvc }
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Install Linux tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y ninja-build ${{ matrix.cc }}
+      - name: Configure
+        run: cmake --preset ${{ matrix.preset }} ${{ runner.os == 'Linux' && format('-DCMAKE_C_COMPILER={0} -DCMAKE_CXX_COMPILER={1}', matrix.cc, matrix.cxx) || '' }}
+      - name: Build
+        run: cmake --build --preset ${{ matrix.preset }} --parallel
+      - name: Unit tests
+        run: ctest --preset unit-${{ matrix.preset }}
+      - name: Smoke-run dq8ctl
+        shell: bash
+        run: |
+          exe=$(find build/${{ matrix.preset }} -name 'dq8ctl' -o -name 'dq8ctl.exe' | head -1)
+          "$exe" --version
+
+  sanitizers:
+    name: Linux Clang ASan+UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build clang-18
+      - run: cmake --preset asan -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+      - run: cmake --build --preset asan --parallel
+      - run: ctest --preset unit-asan
+
+  lint:
+    name: Lint and policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: No game-derived content
+        run: python3 -I scripts/check_no_game_data.py --tree
+      - name: clang-format
+        run: |
+          sudo apt-get update && sudo apt-get install -y clang-format-18
+          git ls-files -z -- 'src/**/*.cpp' 'src/**/*.h' 'include/**/*.h' 'tests/**/*.cpp' 'tests/**/*.h' \
+            | xargs -0 -r clang-format-18 --dry-run -Werror
+      - name: REUSE compliance
+        uses: fsfe/reuse-action@v5
+      - name: Markdown links (local only)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress --include-fragments 'README.md' 'CLAUDE.md' 'Docs/**/*.md'
+          fail: true

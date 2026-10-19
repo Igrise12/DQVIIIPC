@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 DQ8-Native: an open-source native PC port of *Dragon Quest VIII* (PS2, NTSC-U, boot file `SLUS_212.07`) by
 static recompilation of the game's EE code to C++, run on a purpose-built runtime. Not an emulator. GPL-3.0-or-later.
 
-**Current state: documentation only.** There is no source code, no build system and no CI yet. The plan of record
-is the three documents in `Docs/`; read them before proposing or changing design:
+**Current state: scaffold only.** A CMake/CI skeleton, `libdq8core` (a version string), a `dq8ctl` stub and one
+unit test exist; there is no runtime code. The plan of record is the three documents in `Docs/`; read them before
+proposing or changing design:
 
 - `Docs/project-brief.md`: goals, scope, facts observed from the disc (§6), feature priorities, milestones and
   spikes (§11), risks, open decisions (§14).
@@ -24,11 +25,21 @@ its row in architecture.md §18 and brief §14, and use absolute dates.
 
 ## Commands
 
-No build, lint or test commands exist yet. When the first `CMakeLists.txt`, test or CI workflow lands, add the
-commands here (tech-stack.md §3, §8 and §9 describe what they should be: CMake + Ninja with presets, Catch2 under
-CTest with `unit` and `local` labels, clang-format/clang-tidy, a no-game-data check).
+```bash
+cmake --preset dev-clang && cmake --build --preset dev-clang --parallel   # presets: dev-gcc, dev-clang, release, asan, ci-*
+ctest --preset unit-dev-clang                      # unit tests (label "unit", no game data); CI runs these
+ctest --preset unit-dev-clang -R '<regex>'         # one test by name
+./build/dev-clang/tests/unit/dq8_unit_tests '<test name>'   # run a single Catch2 test directly
+ctest --preset local-dev-clang                     # label "local": needs DQ8_TEST_ISO; never in CI (none yet)
+python3 -I scripts/check_no_game_data.py --tree [--deep]   # the legal gate; --staged is the pre-commit hook
+pre-commit install                                 # once per clone: clang-format + the checker on every commit
+git ls-files -z -- 'src/*' 'include/*' 'tests/*' | grep -zE '\.(cpp|h)$' | xargs -0 clang-format --dry-run -Werror
+```
 
-Useful today:
+Every first-party target goes through `dq8_set_warnings()` and `dq8_enable_sanitizers()` (`cmake/`). New
+dependencies are git submodules under `third_party/` plus a row in `THIRD_PARTY_NOTICES.md`.
+
+Contributor tooling:
 
 ```bash
 git check-ignore -v Game    # must print a .gitignore match; the disc image is never tracked

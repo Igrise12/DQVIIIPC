@@ -1,0 +1,24 @@
+# Install once: pre-commit install   (needs the pre-commit package; on Arch: pacman -S pre-commit)
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: '\.md$'
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=512"]
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v20.1.8
+    hooks:
+      - id: clang-format
+        types_or: [c++, c]
+  - repo: local
+    hooks:
+      - id: no-game-data
+        name: no game-derived content
+        entry: python3 -I scripts/check_no_game_data.py --staged
+        language: system
+        pass_filenames: false
+        always_run: true

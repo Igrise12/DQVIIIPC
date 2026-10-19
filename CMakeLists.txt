@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+cmake_minimum_required(VERSION 3.25)
+project(dq8-native VERSION 0.0.1 LANGUAGES C CXX
+        DESCRIPTION "Native PC port of Dragon Quest VIII (PS2) by static recompilation")
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+include(Dq8Options)
+include(CompilerWarnings)
+include(Sanitizers)
+
+if(DQ8_BUILD_TESTS)
+    enable_testing()
+endif()
+
+add_subdirectory(third_party)
+add_subdirectory(src/core)
+add_subdirectory(src/cli)
+if(DQ8_BUILD_TESTS)
+    add_subdirectory(tests/unit)
+endif()

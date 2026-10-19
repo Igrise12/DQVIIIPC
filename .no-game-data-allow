@@ -1,0 +1,2 @@
+# Globs (relative to the repository root) of first-party binary files the no-game-data check may accept.
+# Add a line only for files this project authored (icons, fonts, synthetic fixtures). Never for disc content.

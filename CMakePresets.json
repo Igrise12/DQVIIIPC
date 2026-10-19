@@ -1,0 +1,49 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base", "hidden": true, "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": { "CMAKE_EXPORT_COMPILE_COMMANDS": "ON" }
+    },
+    { "name": "dev-gcc", "inherits": "base", "displayName": "Developer (GCC, Debug)",
+      "cacheVariables": { "CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++", "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "dev-clang", "inherits": "base", "displayName": "Developer (Clang, Debug)",
+      "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++", "CMAKE_BUILD_TYPE": "Debug" } },
+    { "name": "release", "inherits": "base", "displayName": "Release (RelWithDebInfo)",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "RelWithDebInfo" } },
+    { "name": "asan", "inherits": "dev-clang", "displayName": "Clang + AddressSanitizer + UBSan",
+      "cacheVariables": { "DQ8_SANITIZERS": "address,undefined" } },
+    { "name": "ci-gcc", "inherits": "dev-gcc", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "DQ8_WERROR": "ON" } },
+    { "name": "ci-clang", "inherits": "dev-clang", "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "DQ8_WERROR": "ON" } },
+    { "name": "ci-msvc", "generator": "Visual Studio 17 2022", "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": { "DQ8_WERROR": "ON" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" } }
+  ],
+  "buildPresets": [
+    { "name": "dev-gcc", "configurePreset": "dev-gcc" },
+    { "name": "dev-clang", "configurePreset": "dev-clang" },
+    { "name": "release", "configurePreset": "release" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "ci-gcc", "configurePreset": "ci-gcc" },
+    { "name": "ci-clang", "configurePreset": "ci-clang" },
+    { "name": "ci-msvc", "configurePreset": "ci-msvc", "configuration": "Release" }
+  ],
+  "testPresets": [
+    { "name": "unit-base", "hidden": true, "filter": { "include": { "label": "unit" } },
+      "output": { "outputOnFailure": true } },
+    { "name": "local-base", "hidden": true, "filter": { "include": { "label": "local" } },
+      "output": { "outputOnFailure": true } },
+    { "name": "unit-dev-gcc", "inherits": "unit-base", "configurePreset": "dev-gcc" },
+    { "name": "unit-dev-clang", "inherits": "unit-base", "configurePreset": "dev-clang" },
+    { "name": "unit-release", "inherits": "unit-base", "configurePreset": "release" },
+    { "name": "unit-asan", "inherits": "unit-base", "configurePreset": "asan" },
+    { "name": "unit-ci-gcc", "inherits": "unit-base", "configurePreset": "ci-gcc" },
+    { "name": "unit-ci-clang", "inherits": "unit-base", "configurePreset": "ci-clang" },
+    { "name": "unit-ci-msvc", "inherits": "unit-base", "configurePreset": "ci-msvc", "configuration": "Release" },
+    { "name": "local-dev-gcc", "inherits": "local-base", "configurePreset": "dev-gcc" },
+    { "name": "local-dev-clang", "inherits": "local-base", "configurePreset": "dev-clang" }
+  ]
+}

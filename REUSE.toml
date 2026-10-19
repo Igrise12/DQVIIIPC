@@ -1,0 +1,13 @@
+version = 1
+SPDX-PackageName = "DQ8-Native"
+SPDX-PackageSupplier = "DQ8-Native contributors"
+SPDX-PackageDownloadLocation = "https://github.com/Igrise12/DQVIIIPC"
+
+# Source files carry SPDX headers of their own. Everything else is covered here.
+[[annotations]]
+path = ["**/*.md", "**/*.toml", "**/*.json", "**/*.yml", "**/*.yaml", "**/*.txt", "**/*.example",
+        ".gitignore", ".gitmodules", ".gitattributes", ".editorconfig", ".clang-format",
+        ".pre-commit-config.yaml", ".no-game-data-allow", "LICENSE"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 DQ8-Native contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
