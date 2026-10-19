@@ -7,8 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 DQ8-Native: an open-source native PC port of *Dragon Quest VIII* (PS2, NTSC-U, boot file `SLUS_212.07`) by
 static recompilation of the game's EE code to C++, run on a purpose-built runtime. Not an emulator. GPL-3.0-or-later.
 
-**Current state: scaffold only.** A CMake/CI skeleton, `libdq8core` (a version string), a `dq8ctl` stub and one
-unit test exist; there is no runtime code. The plan of record is the three documents in `Docs/`; read them before
+**Current state: M1 disc intake landed; no runtime code.** `libdq8core` has the strict ISO 9660 reader, SHA-1/CRC-32,
+an ELF32 header parser, region profiles (`data/regions/SLUS_21207.toml`, hashes and sizes only) and `verify_image()` /
+`extract()`; `dq8ctl verify|extract|info` work on the real disc; 33 unit tests plus 3 local tests. The `MWo3` overlay
+parser (M1 part 2) waits for spike S3. The plan of record is the three documents in `Docs/`; read them before
 proposing or changing design:
 
 - `Docs/project-brief.md`: goals, scope, facts observed from the disc (§6), feature priorities, milestones and
@@ -31,7 +33,10 @@ cmake --preset dev-clang -DCMAKE_CXX_COMPILER_LAUNCHER=ccache   # optional: cach
 ctest --preset unit-dev-clang                      # unit tests (label "unit", no game data); CI runs these
 ctest --preset unit-dev-clang -R '<regex>'         # one test by name
 ./build/dev-clang/tests/unit/dq8_unit_tests '<test name>'   # run a single Catch2 test directly
-ctest --preset local-dev-clang                     # label "local": needs DQ8_TEST_ISO; never in CI (none yet)
+DQ8_TEST_ISO="$DQ8_ISO" ctest --preset local-dev-clang   # label "local": tests against your disc; never in CI
+./build/dev-clang/src/cli/dq8ctl verify "$DQ8_ISO" [--json]   # region gate: boot-file hash vs data/regions/*.toml
+./build/dev-clang/src/cli/dq8ctl extract "$DQ8_ISO" [--out DIR] [--emit-profile]   # ELF, overlays, IOP modules -> baserom/<id>/ (idempotent)
+./build/dev-clang/src/cli/dq8ctl info <iso|elf>    # volume listing or ELF headers
 python3 -I scripts/check_no_game_data.py --tree [--deep]   # the legal gate; --staged is the pre-commit hook
 pre-commit install                                 # once per clone: clang-format + the checker on every commit
 git ls-files -z -- 'src/*' 'include/*' 'tests/*' | grep -zE '\.(cpp|h)$' | xargs -0 clang-format --dry-run -Werror
