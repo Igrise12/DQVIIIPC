@@ -195,7 +195,7 @@ and a CI check enforce this (architecture.md §14).
 recompiler and runtime foundation we expect to build on, is GPL-3.0. Linking its runtime makes the combined work
 GPL-3.0. The renderer we expect to use, paraLLEl-GS, is LGPL-3.0-or-later, which is compatible. Dependencies must be
 GPL-3.0-compatible (tech-stack.md §10). A permissive license would require a clean-room runtime and recompiler,
-which is not the plan. Every first-party source file carries an `SPDX-License-Identifier: GPL-3.0-or-later` header.
+which is not the plan. Every first-party source file carries an SPDX header (`SPDX-License-Identifier` set to `GPL-3.0-or-later`).
 
 **Contributions.** Developer Certificate of Origin sign-off (`Signed-off-by`), no contributor license agreement.
 Contributions must not include game-derived content or code from sources whose license is incompatible. Contributors
