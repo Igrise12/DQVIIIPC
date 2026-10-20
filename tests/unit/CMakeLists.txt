@@ -15,10 +15,12 @@ add_executable(dq8_unit_tests
     test_elf_writer.cpp
     test_mips_asm.cpp
     test_process.cpp
+    test_function_map.cpp
+    test_recomp_config.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(dq8_unit_tests PRIVATE DQ8_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_link_libraries(dq8_unit_tests PRIVATE dq8::core Catch2::Catch2WithMain)
+target_link_libraries(dq8_unit_tests PRIVATE dq8::core toml11::toml11 Catch2::Catch2WithMain)
 dq8_set_warnings(dq8_unit_tests)
 dq8_enable_sanitizers(dq8_unit_tests)
 

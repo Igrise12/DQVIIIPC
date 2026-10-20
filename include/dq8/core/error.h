@@ -49,6 +49,7 @@ enum class ErrorCode {
     module_build_failed,   // configuring or building a game module failed
     tool_missing,          // a required program or template (ps2_recomp, cmake, cmake/module) was not found
     work_stale,            // the work directory lacks a stage's inputs or was prepared for another disc
+    invalid_argument,      // a caller-supplied option names something that does not exist (a unit, ...)
 };
 
 // Stable kebab-case spelling of a code, e.g. "unknown-image". Used in --json output.

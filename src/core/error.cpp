@@ -82,6 +82,8 @@ std::string_view to_string(ErrorCode code) noexcept {
         return "tool-missing";
     case ErrorCode::work_stale:
         return "work-stale";
+    case ErrorCode::invalid_argument:
+        return "invalid-argument";
     }
     return "unknown";
 }
