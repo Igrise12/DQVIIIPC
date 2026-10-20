@@ -4,6 +4,7 @@
 # test skips itself when the variable is unset. Run with: DQ8_TEST_ISO=/path/to.iso ctest --preset local-<cfg>
 add_executable(dq8_local_tests
     test_real_disc.cpp
+    test_real_overlays.cpp
 )
 target_compile_definitions(dq8_local_tests PRIVATE DQ8_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_link_libraries(dq8_local_tests PRIVATE dq8::core Catch2::Catch2WithMain)
