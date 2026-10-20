@@ -664,6 +664,7 @@ int run_game(const Options& o, const char* argv0) {
                          hex32(a.pc).c_str());
         });
         print_setup(s);
+        std::fflush(stdout); // before the run's stderr diagnostics
     }
     s.ee = std::make_unique<rt::EeRuntime>(s.memory, *s.dispatcher, s.kernel);
     rt::reset_context(s.ee->context(), s.elf.entry);
