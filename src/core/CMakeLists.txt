@@ -9,13 +9,17 @@ add_library(dq8_core STATIC
     hash/hash.cpp
     iso/iso9660.cpp
     elf/elf_headers.cpp
+    elf/elf_writer.cpp
     profile/region_profile.cpp
     overlay/mwo3.cpp
+    overlay/overlay_elf.cpp
+    platform/files.cpp
     intake/verify.cpp
     intake/extract.cpp
 )
 add_library(dq8::core ALIAS dq8_core)
 target_include_directories(dq8_core PUBLIC "${PROJECT_SOURCE_DIR}/include")
+target_include_directories(dq8_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_features(dq8_core PUBLIC cxx_std_20)
 target_compile_definitions(dq8_core PRIVATE DQ8_VERSION="${PROJECT_VERSION}")
 target_link_libraries(dq8_core PRIVATE toml11::toml11)

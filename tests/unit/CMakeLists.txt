@@ -12,6 +12,8 @@ add_executable(dq8_unit_tests
     test_mwo3.cpp
     test_region_profile.cpp
     test_intake.cpp
+    test_elf_writer.cpp
+    test_mips_asm.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(dq8_unit_tests PRIVATE DQ8_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
