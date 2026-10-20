@@ -33,6 +33,12 @@ enum class ErrorCode {
     unknown_image,         // the boot file's hash matches no region profile
     image_mismatch,        // a profile matched the hash but another fact disagrees (ELF headers, ...)
     extract_hash_mismatch, // an extracted file's hash differs from the profile's recorded hash
+    mwo3_magic,            // not an MWo3 overlay container (bad magic or shorter than a header)
+    mwo3_size,             // the file size is not 64 + text_size + data_size
+    mwo3_id,               // overlay_id is 0 or larger than mwo3_max_overlay_id
+    mwo3_range,            // load_address is not the window base, or the overlay does not fit the window
+    mwo3_table,            // the constructor table is misaligned, inverted or outside the data range
+    mwo3_name,             // the name is not NUL-terminated, NUL-padded, non-empty printable ASCII
 };
 
 // Stable kebab-case spelling of a code, e.g. "unknown-image". Used in --json output.

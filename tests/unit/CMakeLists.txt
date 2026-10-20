@@ -4,10 +4,12 @@
 # and live under tests/local/.
 add_executable(dq8_unit_tests
     support/iso_builder.cpp
+    support/mwo3_builder.cpp
     test_version.cpp
     test_hash.cpp
     test_iso9660.cpp
     test_elf_headers.cpp
+    test_mwo3.cpp
     test_region_profile.cpp
     test_intake.cpp
 )

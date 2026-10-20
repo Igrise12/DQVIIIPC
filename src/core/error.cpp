@@ -50,6 +50,18 @@ std::string_view to_string(ErrorCode code) noexcept {
         return "image-mismatch";
     case ErrorCode::extract_hash_mismatch:
         return "extract-hash-mismatch";
+    case ErrorCode::mwo3_magic:
+        return "mwo3-magic";
+    case ErrorCode::mwo3_size:
+        return "mwo3-size";
+    case ErrorCode::mwo3_id:
+        return "mwo3-id";
+    case ErrorCode::mwo3_range:
+        return "mwo3-range";
+    case ErrorCode::mwo3_table:
+        return "mwo3-table";
+    case ErrorCode::mwo3_name:
+        return "mwo3-name";
     }
     return "unknown";
 }

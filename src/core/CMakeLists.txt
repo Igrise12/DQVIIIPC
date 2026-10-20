@@ -10,6 +10,7 @@ add_library(dq8_core STATIC
     iso/iso9660.cpp
     elf/elf_headers.cpp
     profile/region_profile.cpp
+    overlay/mwo3.cpp
     intake/verify.cpp
     intake/extract.cpp
 )
