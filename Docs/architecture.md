@@ -734,18 +734,18 @@ This table is the practical meaning of "scalable". Each row says what to add and
 
 ## 18. Decision log
 
-Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are accepted. The first batch is proposed here. ADR-0009 was accepted on 2026-10-19 (see `Docs/adr/0009-license-gpl-3-or-later.md`). The others still await the project owner's confirmation of the corresponding items in the brief (§14).
+Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are accepted. The first batch is proposed here. ADR-0009 was accepted on 2026-10-19 and ADRs 0003, 0004 and 0008 on 2026-10-20 (files in `Docs/adr/`). The others still await the project owner's confirmation of the corresponding items in the brief (§14).
 
 | ADR | Decision | Status | Rationale in one line |
 |---|---|---|---|
 | 0001 | Native port by static recompilation, not emulation, not matching decompilation | Proposed | Delivers a native game with feasible effort. Decompilation stays possible through overrides. |
 | 0002 | Split into redistributable host and locally built game module over a versioned C ABI | Proposed | Keeps the legal boundary clean and avoids rebuilding the game on every host update. |
-| 0003 | PS2Recomp as a pinned dependency with a patch queue, own runtime | Proposed, evidence complete (S1, S2); draft in `Docs/adr/` | Experimental upstream, no overlay support, we need control of the runtime. |
-| 0004 | GS behind an interface, parallel-gs first, native renderer later, trace backend early | Proposed, evidence complete (S5a, S5b, S7); draft in `Docs/adr/` | Accuracy and resolution scaling now, flexibility later, testability throughout. |
+| 0003 | PS2Recomp as a pinned dependency with a patch queue, own runtime | **Accepted** (2026-10-20; `Docs/adr/0003-ps2recomp-pinned-dependency.md`) | Experimental upstream, no overlay support, we need control of the runtime. |
+| 0004 | GS behind an interface, parallel-gs first, native renderer later, trace backend early | **Accepted** (2026-10-20; `Docs/adr/0004-parallel-gs-first-backend.md`) | Accuracy and resolution scaling now, flexibility later, testability throughout. |
 | 0005 | SDL3 for window, input and audio | Proposed | Cross-platform, gamepad API, already used by sibling projects. |
 | 0006 | Schema-driven settings and launcher | Proposed | New features add settings without UI code. |
 | 0007 | One deterministic machine thread with fibers, separate render, audio and I/O threads | Proposed | Determinism and testability before parallelism. |
-| 0008 | Local setup build from the user's disc | Proposed, evidence complete (S1); draft in `Docs/adr/` | Only approach consistent with the legal stance. |
+| 0008 | Local setup build from the user's disc | **Accepted** (2026-10-20; `Docs/adr/0008-local-game-module-build.md`) | Only approach consistent with the legal stance. |
 | 0009 | GPL-3.0-or-later | **Accepted** (2026-10-19) | Follows from using PS2Recomp. |
 | 0010 | Launcher is a thin front end over `libdq8core`, Dear ImGui first | Proposed | One toolkit with the in-game overlay, replaceable later. |
 

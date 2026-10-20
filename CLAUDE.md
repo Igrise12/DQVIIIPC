@@ -10,7 +10,7 @@ static recompilation of the game's EE code to C++, run on a purpose-built runtim
 **Current state: M1 disc intake landed; no runtime code.** `libdq8core` has the strict ISO 9660 reader, SHA-1/CRC-32,
 an ELF32 header parser, region profiles (`data/regions/SLUS_21207.toml`, hashes and sizes only) and `verify_image()` /
 `extract()`; `dq8ctl verify|extract|info` work on the real disc; 33 unit tests plus 3 local tests. The `MWo3` overlay
-parser (M1 part 2) waits for spike S3. The plan of record is the three documents in `Docs/`; read them before
+parser (M1 part 2) is in progress on a worktree branch. The plan of record is the three documents in `Docs/`; read them before
 proposing or changing design:
 
 - `Docs/project-brief.md`: goals, scope, facts observed from the disc (§6), feature priorities, milestones and
@@ -21,8 +21,9 @@ proposing or changing design:
 - `Docs/spikes/`: one brief per M0 spike (S0–S7); a spike session executes its brief and appends `## Findings`.
   `Docs/spikes/README.md` has the rules and the findings template.
 
-Only D1 (name) and D2 (license, ADR-0009) in brief §14 are decided. D3 to D8 and ADR-0001 to 0008 and 0010 are
-**proposals**; do not present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
+Decided in brief §14: D1 (name), D2 (license, ADR-0009), D3 (local game-module build, ADR-0008), D4 (PS2Recomp pinned
+plus patch queue, ADR-0003) and D5 (paraLLEl-GS first, ADR-0004). D6 to D9 and ADR-0001, 0002, 0005, 0006, 0007 and
+0010 are **proposals**; do not present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
 its row in architecture.md §18 and brief §14, and use absolute dates.
 
 ## Commands
@@ -118,8 +119,9 @@ launcher, cli  ->  core only
 - Figures in the docs that came from a single observation are marked *inferred* or "to be confirmed"; keep that
   honesty when adding facts, and say where a number came from.
 
-## Next work (brief §11, M0 spikes)
+## Next work
 
-S1 build PS2Recomp with GCC/Clang here · S2 load the ELF in Ghidra and export functions · S3 find the overlay
-loader · S4 `DATA.DAT` index · S5 paraLLEl-GS standalone · S6 `MVI` format · S7 frame rate / GS usage in PCSX2.
+All M0 spikes (S0–S7) are done; their findings live in `Docs/spikes/` and are folded into the three docs and
+`Docs/formats/`. Next: M1 part 2 (`MWo3` parser and profile fields, in progress), then M2 (first recompile: one
+synthetic ELF per overlay, prefixed dispatch tables, the precompiled-header build, early HLE of the file-I/O RPC).
 Do not start implementation work the user has not asked for.

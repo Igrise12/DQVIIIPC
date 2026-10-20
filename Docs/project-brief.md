@@ -284,15 +284,15 @@ even if full-speed playthrough takes longer than hoped.
 
 ## 14. Open decisions
 
-Decisions that need an answer from the project owner. Defaults are proposed so work can proceed, but each is recorded in the ADR log (architecture.md §18) once decided. D1 and D2 were decided on 2026-10-19; D3 to D8 are still proposals.
+Decisions that need an answer from the project owner. Defaults are proposed so work can proceed, but each is recorded in the ADR log (architecture.md §18) once decided. D1 and D2 were decided on 2026-10-19, D3, D4 and D5 on 2026-10-20; D6 to D9 are still proposals.
 
 | # | Decision | Decision or proposed default | Why it matters |
 |---|---|---|---|
 | D1 | **Project name** | **Decided:** keep the working name **DQ8-Native**. It can still change before the first public announcement. | Trademark and discoverability |
 | D2 | **License** | **Decided:** GPL-3.0-or-later (ADR-0009). `LICENSE` added. | PS2Recomp is GPL-3.0; changes what can be linked |
-| D3 | **How the game module is produced** | Local build on the user's machine from their disc (first-run setup); system compiler on Linux, bundled toolchain planned for Windows. **Evidence complete (S1); ADR-0008 drafted, awaiting acceptance.** | Legally safest; costs 15–40 minutes of first-run compile. The alternative of shipping pre-built recompiled code is not acceptable under §9. |
-| D4 | **Relationship to PS2Recomp** | Pin `eb8688b` plus a patch queue (empty today), write our own runtime on top. **Evidence complete (S1, S2); ADR-0003 drafted, awaiting acceptance.** | A fork diverges quickly; the per-code-unit changes we need are small and local to `ps2xRecomp` |
-| D5 | **First GS backend** | paraLLEl-GS (Vulkan), with a native HLE renderer later. **Evidence complete (S5a, S5b, S7); ADR-0004 drafted, awaiting acceptance.** | Determines the resolution-scaling story and GPU requirements |
+| D3 | **How the game module is produced** | Local build on the user's machine from their disc (first-run setup); system compiler on Linux, bundled toolchain planned for Windows. **Decided 2026-10-20 (ADR-0008).** | Legally safest; costs 15–40 minutes of first-run compile. The alternative of shipping pre-built recompiled code is not acceptable under §9. |
+| D4 | **Relationship to PS2Recomp** | Pin `eb8688b` plus a patch queue (empty today), write our own runtime on top. **Decided 2026-10-20 (ADR-0003).** | A fork diverges quickly; the per-code-unit changes we need are small and local to `ps2xRecomp` |
+| D5 | **First GS backend** | paraLLEl-GS (Vulkan), with a native HLE renderer later. **Decided 2026-10-20 (ADR-0004).** | Determines the resolution-scaling story and GPU requirements |
 | D6 | **Launcher toolkit** | Dear ImGui over SDL3 in phase 1, behind a front-end abstraction | One toolkit shared with the in-game overlay; can be replaced later |
 | D7 | **Which region profile ships first** | NTSC-U only | Test coverage and hash pinning |
 | D8 | **Hosting and community** | Public Git repository with issue tracker. Chat server later. | Needed before M7 |

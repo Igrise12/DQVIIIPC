@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Proposed (evidence complete: spikes S5a, S5b and S7, 2026-10-19); awaiting the project owner |
+| **Status** | **Accepted** 2026-10-20 by the project owner (evidence: spikes S5a, S5b and S7, 2026-10-19) |
 | **Related** | project-brief.md §14 (D5), architecture.md §6 and §12, tech-stack.md §4.2 and §5 |
 
 ## Context
