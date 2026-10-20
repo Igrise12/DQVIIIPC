@@ -333,9 +333,10 @@ void setup_iso(const Options& o, const char* argv0, Session& s) {
     const std::vector<rt::UnitSpec> specs = dq8::game::unit_specs(profile);
     rt::ModuleSet set = rt::load_modules(specs, *o.module_dir);
     if (!set.ok()) {
-        throw SetupProblems(std::to_string(set.problems.size()) + " problem(s) with the game modules in " +
-                                o.module_dir->string() + " for " + profile.id,
-                            std::move(set.problems));
+        const std::string summary = std::to_string(set.problems.size()) +
+                                    " problem(s) with the game modules in " + o.module_dir->string() +
+                                    " for " + profile.id;
+        throw SetupProblems(summary, std::move(set.problems));
     }
     s.units = std::move(set.units);
     s.overlays = rt::OverlayManager(dq8::game::overlay_window_spec(profile));
@@ -400,9 +401,9 @@ void setup_elf(const Options& o, Session& s) {
                            ", expected exactly one");
     }
     if (!problems.empty()) {
-        throw SetupProblems(std::to_string(problems.size()) + " problem(s) with the game modules in " +
-                                o.module_dir->string(),
-                            std::move(problems));
+        const std::string summary = std::to_string(problems.size()) +
+                                    " problem(s) with the game modules in " + o.module_dir->string();
+        throw SetupProblems(summary, std::move(problems));
     }
     install_units(s);
     if (o.window) {

@@ -64,10 +64,10 @@ class GameModule {
     std::filesystem::path path_;
 };
 
-// <dir>/<platform file name of dq8_unit_<unit>>, e.g. dir/libdq8_unit_main.so.
+// <dir>/<platform file name of dq8_unit_<unit>>, e.g. dir/dq8_unit_main.so.
 std::filesystem::path module_path(const std::filesystem::path& dir, std::string_view unit_name);
 
-// The unit name a module file name encodes ("libdq8_unit_battle.so" -> "battle"), or empty when the name is
+// The unit name a module file name encodes ("dq8_unit_battle.so" -> "battle"), or empty when the name is
 // not a unit module's on this platform.
 std::string unit_name_from_module_file(const std::filesystem::path& file);
 

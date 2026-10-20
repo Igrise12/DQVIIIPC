@@ -79,13 +79,15 @@ void* DynamicLibrary::symbol(const char* name) const noexcept {
 #endif
 }
 
+// Game modules carry no "lib" prefix on any platform: cmake/module builds dq8_unit_<name>.so / .dylib / .dll
+// (PREFIX ""), and dq8ctl copies them under that name.
 std::string shared_library_file_name(const std::string& name) {
 #if defined(_WIN32)
     return name + ".dll";
 #elif defined(__APPLE__)
-    return "lib" + name + ".dylib";
+    return name + ".dylib";
 #else
-    return "lib" + name + ".so";
+    return name + ".so";
 #endif
 }
 

@@ -5,14 +5,7 @@
 # DQ8_BUILD_ABI_MODULE_TEST, a sample unit in the recompiler's shape builds through cmake/module into a module that
 # loads, describes itself and runs. See README.md.
 
-# Declared here rather than in cmake/Dq8Options.cmake, which another M2 session owns; move it there when merging.
-if(WIN32)
-    set(_dq8_abi_module_test_default OFF) # the loader test is POSIX-only; the template's MSVC path is unverified
-else()
-    set(_dq8_abi_module_test_default ON)
-endif()
-option(DQ8_BUILD_ABI_MODULE_TEST "Build tests/abi/sample_unit through cmake/module and test loading it"
-       ${_dq8_abi_module_test_default})
+# DQ8_BUILD_ABI_MODULE_TEST is declared in cmake/Dq8Options.cmake.
 
 set(_abi_include "${PROJECT_SOURCE_DIR}/include")
 set(_abi_ps2recomp "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")

@@ -42,6 +42,9 @@ ALLOWLIST_FILE = ROOT / ".no-game-data-allow"  # one glob per line, for first-pa
 MAX_SIZE = 1024 * 1024
 ENTROPY_MIN_SIZE = 32 * 1024
 ENTROPY_LIMIT = 7.0
+# --deep ignores low-diversity windows (runs of '=', '-', spaces, zeros): they occur in any text file and in the
+# boot ELF alike and identify nothing.
+MIN_WINDOW_DISTINCT = 8
 TEXT_RULES = [
     ("hex-run", re.compile(r"(?:\b[0-9A-Fa-f]{2}\b[ ,]){16,}")),
     ("escaped-bytes", re.compile(r"(?:\\x[0-9A-Fa-f]{2}){16,}")),
@@ -106,7 +109,9 @@ class Checker:
             if src.is_file():
                 data = src.read_bytes()
                 for off in range(0, len(data) - 32, 16):
-                    self.windows.add(data[off : off + 32])
+                    window = data[off : off + 32]
+                    if len(set(window)) >= MIN_WINDOW_DISTINCT:
+                        self.windows.add(window)
         if not self.windows:
             print("note: --deep found no baserom/raw inputs; skipping byte-window comparison", file=sys.stderr)
 
@@ -145,7 +150,8 @@ class Checker:
                     self.refuse(rel, rule, f"line {line}")
         if self.windows and len(data) >= 47:
             for off in range(0, len(data) - 32):
-                if data[off : off + 32] in self.windows:
+                window = data[off : off + 32]
+                if window in self.windows and len(set(window)) >= MIN_WINDOW_DISTINCT:
                     self.refuse(rel, "bytes-from-disc", f"offset {off}")
                     break
 

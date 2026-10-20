@@ -8,6 +8,15 @@ option(DQ8_USE_SYSTEM_TOML11 "Use an installed toml11 instead of the submodule" 
 option(DQ8_USE_SYSTEM_CATCH2 "Use an installed Catch2 instead of the submodule" OFF)
 option(DQ8_BUILD_RECOMP "Build ps2_recomp from the pinned third_party/PS2Recomp (cmake/Ps2Recomp.cmake)" OFF)
 option(DQ8_BUILD_E2E "Build the end-to-end recompile tests (label e2e; needs DQ8_BUILD_RECOMP)" OFF)
+# Builds tests/abi/sample_unit through cmake/module and loads it. Off on Windows until the loader test and the
+# template's MSVC path are verified there.
+if(WIN32)
+    set(_dq8_abi_module_test_default OFF)
+else()
+    set(_dq8_abi_module_test_default ON)
+endif()
+option(DQ8_BUILD_ABI_MODULE_TEST "Build the ABI sample module through cmake/module and test loading it"
+       ${_dq8_abi_module_test_default})
 set(DQ8_SANITIZERS "" CACHE STRING "Comma-separated -fsanitize= list, e.g. address,undefined (GCC/Clang only)")
 
 get_property(_dq8_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)

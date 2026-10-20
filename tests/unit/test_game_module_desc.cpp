@@ -267,5 +267,5 @@ TEST_CASE("module loading: the contract unit as a real shared library", "[module
 }
 
 TEST_CASE("module loading: a library that does not load", "[module]") {
-    CHECK_THROWS_AS(GameModule::open("does/not/exist/libdq8_unit_x.so"), DynlibError);
+    CHECK_THROWS_AS(GameModule::open("does/not/exist/dq8_unit_x.so"), DynlibError);
 }

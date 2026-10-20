@@ -11,8 +11,11 @@ add_library(dq8_unit_contract SHARED
     support/contract_unit_module.cpp
 )
 target_include_directories(dq8_unit_contract PRIVATE "${PROJECT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}")
+# The ABI include root, as cmake/module gives it to generated code. SYSTEM: the macro header is adapted upstream code.
+target_include_directories(dq8_unit_contract SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")
 target_compile_features(dq8_unit_contract PRIVATE cxx_std_20)
 set_target_properties(dq8_unit_contract PROPERTIES
+    PREFIX ""
     CXX_VISIBILITY_PRESET hidden
     VISIBILITY_INLINES_HIDDEN ON
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/contract_modules"
@@ -43,6 +46,7 @@ add_executable(dq8_unit_tests
     test_kernel_calls.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(dq8_unit_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")
 target_compile_definitions(dq8_unit_tests PRIVATE
     DQ8_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     DQ8_CONTRACT_MODULE_DIR="$<TARGET_FILE_DIR:dq8_unit_contract>")

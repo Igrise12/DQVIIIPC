@@ -21,8 +21,9 @@
 //   recurse; nop
 #include "support/contract_unit.h"
 
-// TODO(M2 merge): include "ps2_runtime_macros.h", "ps2_syscalls.h" and "ps2_stubs.h" from session A instead.
-#include "support/ps2_runtime_macros_shim.h"
+#include "ps2_runtime_macros.h"
+#include "ps2_stubs.h"
+#include "ps2_syscalls.h"
 
 #include <stdexcept>
 
