@@ -228,8 +228,8 @@ Each milestone ends with a demonstrable result. A milestone is done only when it
 
 | # | Milestone | Exit criteria |
 |---|---|---|
-| **M0** | **Foundations** | Workspace, docs, CI skeleton, toolchain spikes done (below). Decisions in §14 resolved. |
-| **M1** | **Disc and binary intake** | Tool reads the ISO, verifies hashes, extracts the ELF, overlays and IOP modules, and parses the `MWo3` overlay container. (The archive index layout is spike S4's deliverable, not an M1 gate: the game reads its archives itself through sector I/O.) |
+| **M0** | **Foundations** | **Done 2026-10-20.** Workspace, docs, CI, all eight spikes (S0–S7) with findings; D1–D5 decided (ADRs 0003, 0004, 0008, 0009); D6 deferred to M5; D7–D9 pending. |
+| **M1** | **Disc and binary intake** | **Done 2026-10-20.** `dq8ctl` reads the ISO, verifies the boot hash and the ELF against the region profile, extracts the ELF, overlays and IOP modules idempotently, and parses and cross-checks the six `MWo3` overlay containers; 39 unit and 4 local tests. (The archive index was spike S4's deliverable, not an M1 gate.) |
 | **M2** | **Analysis and first recompile** | Ghidra function map for the main ELF and all six overlays. Recompiler generates C++ that compiles and links. Program starts and reaches the first unimplemented syscall. |
 | **M3** | **Boots** | Memory, kernel HLE, threads, CDVD and overlay switching work. Game reaches the title screen. First pixels through the GS backend. |
 | **M4** | **Playable core** | Pad, memory card, audio, VU1 and movies work. A new game can be started, a battle fought (battle overlay), the menu and shop used, and a save made and reloaded. |

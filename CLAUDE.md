@@ -7,10 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 DQ8-Native: an open-source native PC port of *Dragon Quest VIII* (PS2, NTSC-U, boot file `SLUS_212.07`) by
 static recompilation of the game's EE code to C++, run on a purpose-built runtime. Not an emulator. GPL-3.0-or-later.
 
-**Current state: M1 disc intake landed; no runtime code.** `libdq8core` has the strict ISO 9660 reader, SHA-1/CRC-32,
-an ELF32 header parser, region profiles (`data/regions/SLUS_21207.toml`, hashes and sizes only) and `verify_image()` /
-`extract()`; `dq8ctl verify|extract|info` work on the real disc; 33 unit tests plus 3 local tests. The `MWo3` overlay
-parser (M1 part 2) is in progress on a worktree branch. The plan of record is the three documents in `Docs/`; read them before
+**Current state: milestone M1 (disc intake) complete; no runtime code.** `libdq8core` has the strict ISO 9660 reader,
+SHA-1/CRC-32, an ELF32 header parser, the `MWo3` overlay-container parser, region profiles
+(`data/regions/SLUS_21207.toml`: hashes, sizes, addresses and the S3 loader facts, never bytes) and `verify_image()` /
+`extract()`; `dq8ctl verify|extract|info <iso|elf|bin>` work on the real disc (verify cross-checks all six overlay
+headers); 39 unit tests plus 4 local tests. The plan of record is the three documents in `Docs/`; read them before
 proposing or changing design:
 
 - `Docs/project-brief.md`: goals, scope, facts observed from the disc (§6), feature priorities, milestones and
@@ -122,6 +123,6 @@ launcher, cli  ->  core only
 ## Next work
 
 All M0 spikes (S0–S7) are done; their findings live in `Docs/spikes/` and are folded into the three docs and
-`Docs/formats/`. Next: M1 part 2 (`MWo3` parser and profile fields, in progress), then M2 (first recompile: one
-synthetic ELF per overlay, prefixed dispatch tables, the precompiled-header build, early HLE of the file-I/O RPC).
+`Docs/formats/`. Next: M2 (first recompile: one synthetic ELF per overlay, prefixed dispatch tables, the
+precompiled-header build, early HLE of the file-I/O RPC), planned with the project owner first.
 Do not start implementation work the user has not asked for.
