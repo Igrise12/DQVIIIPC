@@ -1,0 +1,6 @@
+SPDX-License-Identifier: GPL-3.0-only
+SPDX-FileCopyrightText: 2025-2026 PS2Recomp contributors (ran-j/PS2Recomp)
+
+ps2_call_list.h is a byte-for-byte copy of ps2xRuntime/include/ps2_call_list.h from the pinned PS2Recomp
+submodule (third_party/PS2Recomp), so it carries no header of its own. The CTest abi.call_list_parity fails when
+the two differ; copy the file again whenever the submodule moves.

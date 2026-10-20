@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+# A verbatim upstream copy (see ps2_call_list.h.license); reformatting it would break abi.call_list_parity.
+ps2_call_list.h
