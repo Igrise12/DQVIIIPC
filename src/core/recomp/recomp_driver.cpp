@@ -114,7 +114,9 @@ void parse_event_line(std::string_view line, RecompReport& report) {
     event.category = std::string(rest.substr(0, rest.find(' ')));
     event.text = std::string(text);
     ++report.events_by_category[event.severity + ":" + event.category];
-    if (event.category != "unhandled-instruction" && report.notable_events.size() < max_notable_events) {
+    const bool notable = event.severity == "warning" || event.severity == "error";
+    if (notable && event.category != "unhandled-instruction" &&
+        report.notable_events.size() < max_notable_events) {
         report.notable_events.push_back(std::move(event));
     }
 }

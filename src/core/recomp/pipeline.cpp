@@ -2,10 +2,12 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #include "dq8/core/recomp/pipeline.h"
 
+#include "dq8/core/elf_headers.h"
 #include "dq8/core/error.h"
 #include "dq8/core/hash.h"
 #include "dq8/core/intake.h"
 #include "dq8/core/iso9660.h"
+#include "dq8/core/mwo3.h"
 #include "dq8/core/overlay_elf.h"
 #include "dq8/core/recomp/function_map.h"
 #include "dq8/core/recomp/recomp_config.h"
@@ -17,6 +19,9 @@
 #include <chrono>
 #include <ctime>
 #include <map>
+#include <memory>
+#include <optional>
+#include <set>
 #include <sstream>
 #include <toml.hpp>
 
@@ -28,8 +33,7 @@ using detail::path_utf8;
 
 namespace {
 
-constexpr int units_schema_version = 1;
-constexpr int manifest_schema_version = 1;
+constexpr int record_schema_version = 1; // units.toml and build-manifest.toml
 constexpr std::uint64_t max_unit_source = 64u << 20;
 
 // --- small TOML helpers (toml11 stays private to this library) ----------------------------------------
@@ -47,15 +51,21 @@ std::string header_comment(const std::string& what) {
            "it.\n";
 }
 
-toml::ordered_value read_toml(const fs::path& file) {
-    std::istringstream stream(platform::read_text_file(file));
-    auto parsed = toml::try_parse<toml::ordered_type_config>(stream, path_utf8(file));
-    if (parsed.is_err()) {
-        throw Error(ErrorCode::work_stale, "'" + path_utf8(file) +
-                                               "' is not valid TOML; rerun the stage that "
-                                               "writes it");
+std::optional<toml::ordered_value> read_toml(const fs::path& file) {
+    std::error_code ec;
+    if (!fs::is_regular_file(file, ec)) {
+        return std::nullopt;
     }
-    return std::move(parsed.unwrap());
+    try {
+        std::istringstream stream(platform::read_text_file(file));
+        auto parsed = toml::try_parse<toml::ordered_type_config>(stream, path_utf8(file));
+        if (parsed.is_err()) {
+            return std::nullopt;
+        }
+        return std::move(parsed.unwrap());
+    } catch (const std::exception&) {
+        return std::nullopt; // a damaged record only means the work it described is redone
+    }
 }
 
 std::string str_of(const toml::ordered_value& t, const char* key) {
@@ -64,6 +74,39 @@ std::string str_of(const toml::ordered_value& t, const char* key) {
 
 std::int64_t int_of(const toml::ordered_value& t, const char* key) {
     return t.contains(key) && t.at(key).is_integer() ? t.at(key).as_integer() : 0;
+}
+
+// The [[units]] rows of an earlier record written for the same source, by unit name.
+std::map<std::string, toml::ordered_value> earlier_rows(const fs::path& file, const std::string& profile,
+                                                        const std::string& identity) {
+    std::map<std::string, toml::ordered_value> rows;
+    const std::optional<toml::ordered_value> old = read_toml(file);
+    if (old && str_of(*old, "profile") == profile && str_of(*old, "source") == identity &&
+        old->contains("units") && old->at("units").is_array()) {
+        for (const toml::ordered_value& t : old->at("units").as_array()) {
+            rows[str_of(t, "name")] = t;
+        }
+    }
+    return rows;
+}
+
+std::string record_text(const std::string& what, const std::string& profile, const std::string& identity,
+                        const std::vector<std::string>& order,
+                        std::map<std::string, toml::ordered_value>& rows) {
+    toml::ordered_value units(toml::ordered_array{});
+    for (const std::string& name : order) {
+        if (const auto it = rows.find(name); it != rows.end()) {
+            units.as_array().push_back(std::move(it->second));
+        }
+    }
+    units.as_array_fmt().fmt = toml::array_format::array_of_tables;
+    toml::ordered_value root(toml::ordered_table{});
+    root["schema_version"] = record_schema_version;
+    root["profile"] = profile;
+    root["source"] = identity;
+    root["tool_version"] = std::string(version());
+    root["units"] = std::move(units);
+    return header_comment(what) + toml::format(root);
 }
 
 std::string utc_timestamp() {
@@ -100,128 +143,6 @@ std::string sha1_text(const std::string& text) {
         std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(text.data()), text.size())));
 }
 
-// --- units/units.toml -------------------------------------------------------------------------------------
-
-struct UnitRecord {
-    std::string name;
-    UnitKind kind = UnitKind::main;
-    std::uint32_t overlay_id = 0;
-    std::string source_path;
-    std::string source_sha1;
-    std::uint32_t entry = 0;
-    fs::path elf;
-    fs::path config;
-    fs::path map;
-};
-
-struct UnitsFile {
-    std::string profile;
-    std::string boot_sha1;
-    std::vector<UnitRecord> units;
-
-    const UnitRecord* find(std::string_view name) const {
-        for (const UnitRecord& u : units) {
-            if (u.name == name) {
-                return &u;
-            }
-        }
-        return nullptr;
-    }
-};
-
-UnitsFile read_units_file(const WorkLayout& layout, const VerifiedImage& v) {
-    const fs::path file = layout.units_file();
-    std::error_code ec;
-    if (!fs::is_regular_file(file, ec)) {
-        throw Error(ErrorCode::work_stale,
-                    "'" + path_utf8(file) + "' does not exist; run `dq8ctl recomp prepare` first");
-    }
-    const toml::ordered_value root = read_toml(file);
-    if (int_of(root, "schema_version") != units_schema_version) {
-        throw Error(ErrorCode::work_stale,
-                    "'" + path_utf8(file) + "' has another schema version; rerun prepare");
-    }
-    UnitsFile f;
-    f.profile = str_of(root, "profile");
-    f.boot_sha1 = str_of(root, "boot_sha1");
-    if (f.profile != v.profile.id || f.boot_sha1 != v.boot.sha1) {
-        throw Error(ErrorCode::work_stale, "the work directory '" + path_utf8(layout.root()) +
-                                               "' was prepared for another disc (profile '" + f.profile +
-                                               "'); run `dq8ctl recomp prepare` for this one");
-    }
-    if (root.contains("units") && root.at("units").is_array()) {
-        for (const toml::ordered_value& t : root.at("units").as_array()) {
-            UnitRecord r;
-            r.name = str_of(t, "name");
-            r.kind = str_of(t, "kind") == "overlay" ? UnitKind::overlay : UnitKind::main;
-            r.overlay_id = static_cast<std::uint32_t>(int_of(t, "overlay_id"));
-            r.source_path = str_of(t, "source_path");
-            r.source_sha1 = str_of(t, "source_sha1");
-            r.entry = static_cast<std::uint32_t>(int_of(t, "entry"));
-            r.elf = fs::path(str_of(t, "elf"));
-            r.config = fs::path(str_of(t, "config"));
-            r.map = fs::path(str_of(t, "map"));
-            f.units.push_back(std::move(r));
-        }
-    }
-    return f;
-}
-
-// Writes units.toml with this run's units plus the earlier records of units this run did not touch.
-void write_units_file(const WorkLayout& layout, const VerifiedImage& v, const std::vector<CodeUnit>& order,
-                      const std::vector<PreparedUnit>& prepared) {
-    std::map<std::string, toml::ordered_value> rows;
-    std::error_code ec;
-    if (fs::is_regular_file(layout.units_file(), ec)) {
-        try {
-            const toml::ordered_value old = read_toml(layout.units_file());
-            if (str_of(old, "profile") == v.profile.id && str_of(old, "boot_sha1") == v.boot.sha1 &&
-                old.contains("units") && old.at("units").is_array()) {
-                for (const toml::ordered_value& t : old.at("units").as_array()) {
-                    rows[str_of(t, "name")] = t;
-                }
-            }
-        } catch (const Error&) {
-            // A damaged record only costs re-preparing the units it described.
-        }
-    }
-    for (const PreparedUnit& p : prepared) {
-        toml::ordered_value t(toml::ordered_table{});
-        t["name"] = p.unit.name;
-        t["kind"] = std::string(to_string(p.unit.kind));
-        t["overlay_id"] = static_cast<std::int64_t>(p.unit.overlay_id);
-        t["source_path"] = p.unit.source_path;
-        t["source_sha1"] = p.source_sha1;
-        t["entry"] = hex_value(p.unit.entry);
-        t["code_start"] = hex_value(p.unit.code_start);
-        t["code_end"] = hex_value(p.unit.code_end);
-        t["elf"] = path_utf8(p.elf);
-        t["config"] = path_utf8(p.config);
-        t["map"] = path_utf8(p.map_csv);
-        t["functions"] = static_cast<std::int64_t>(p.functions);
-        t["stubs"] = static_cast<std::int64_t>(p.stubs);
-        t["entry_points"] = static_cast<std::int64_t>(p.entry_points);
-        t["jump_tables"] = static_cast<std::int64_t>(p.jump_tables);
-        rows[p.unit.name] = std::move(t);
-    }
-    toml::ordered_value units(toml::ordered_array{});
-    for (const CodeUnit& u : order) {
-        if (const auto it = rows.find(u.name); it != rows.end()) {
-            units.as_array().push_back(it->second);
-        }
-    }
-    units.as_array_fmt().fmt = toml::array_format::array_of_tables;
-    toml::ordered_value root(toml::ordered_table{});
-    root["schema_version"] = units_schema_version;
-    root["profile"] = v.profile.id;
-    root["boot_sha1"] = v.boot.sha1;
-    root["tool_version"] = std::string(version());
-    root["units"] = std::move(units);
-    platform::write_file_if_changed(layout.units_file(),
-                                    header_comment("Code units written by `dq8ctl recomp prepare`.") +
-                                        toml::format(root));
-}
-
 // --- stamps/<unit>.generate.toml ---------------------------------------------------------------------------
 
 struct GenerateRecord {
@@ -231,30 +152,25 @@ struct GenerateRecord {
 };
 
 std::optional<GenerateRecord> read_generate_record(const fs::path& file) {
-    std::error_code ec;
-    if (!fs::is_regular_file(file, ec)) {
+    const std::optional<toml::ordered_value> root = read_toml(file);
+    if (!root) {
         return std::nullopt;
     }
-    try {
-        const toml::ordered_value root = read_toml(file);
-        GenerateRecord r;
-        r.key = str_of(root, "key");
-        r.generator = str_of(root, "generator");
-        r.result.elapsed = std::chrono::milliseconds(int_of(root, "elapsed_ms"));
-        r.result.files = static_cast<std::size_t>(int_of(root, "files"));
-        r.result.bytes = static_cast<std::uint64_t>(int_of(root, "bytes"));
-        r.result.report.found = true;
-        if (root.contains("counts") && root.at("counts").is_table()) {
-            for (const auto& [k, v] : root.at("counts").as_table()) {
-                if (v.is_integer()) {
-                    r.result.report.counts.emplace_back(k, static_cast<std::uint64_t>(v.as_integer()));
-                }
+    GenerateRecord r;
+    r.key = str_of(*root, "key");
+    r.generator = str_of(*root, "generator");
+    r.result.elapsed = std::chrono::milliseconds(int_of(*root, "elapsed_ms"));
+    r.result.files = static_cast<std::size_t>(int_of(*root, "files"));
+    r.result.bytes = static_cast<std::uint64_t>(int_of(*root, "bytes"));
+    r.result.report.found = true;
+    if (root->contains("counts") && root->at("counts").is_table()) {
+        for (const auto& [k, v] : root->at("counts").as_table()) {
+            if (v.is_integer()) {
+                r.result.report.counts.emplace_back(k, static_cast<std::uint64_t>(v.as_integer()));
             }
         }
-        return r;
-    } catch (const std::exception&) {
-        return std::nullopt; // a damaged record means "run again"
     }
+    return r;
 }
 
 void write_generate_record(const fs::path& file, const GenerateRecord& r) {
@@ -275,9 +191,9 @@ void write_generate_record(const fs::path& file, const GenerateRecord& r) {
                                     toml::format(root));
 }
 
-std::string generate_key(const std::string& generator, const UnitRecord& u) {
-    return sha1_text("generator=" + generator + "\nconfig=" + platform::sha1_file(u.config) +
-                     "\nelf=" + platform::sha1_file(u.elf) + "\nmap=" + platform::sha1_file(u.map) + "\n");
+std::string generate_key(const std::string& generator, const PreparedUnit& u) {
+    return sha1_text("generator=" + generator + "\nconfig=" + platform::sha1_file(u.config) + "\nelf=" +
+                     platform::sha1_file(u.elf) + "\nmap=" + platform::sha1_file(u.map_csv) + "\n");
 }
 
 // A digest of a generated tree: SHA-1 over each regular file's relative path and SHA-1, in path order.
@@ -318,49 +234,142 @@ bool copy_if_changed(const fs::path& from, const fs::path& to) {
     return true;
 }
 
-void ensure_gitignore(const fs::path& root) {
-    platform::write_file_if_changed(root / ".gitignore", std::string_view("*\n"));
+std::vector<std::string> names_of(const std::vector<PreparedUnit>& units) {
+    std::vector<std::string> out;
+    for (const PreparedUnit& p : units) {
+        out.push_back(p.unit.name);
+    }
+    return out;
 }
 
 } // namespace
 
-PrepareReport prepare_units(const VerifiedImage& v, const PipelineOptions& o) {
+UnitSource disc_units(const VerifiedImage& v) {
+    UnitSource source;
+    source.profile_id = v.profile.id;
+    source.identity = v.boot.sha1;
+    source.units = code_units(v);
+    auto image = std::make_shared<iso::Image>(iso::Image::open(v.image_path));
+    const Mwo3Window window{v.profile.overlay_window.base, v.profile.overlay_window.end};
+    const std::uint32_t elf_flags = v.elf.flags;
+    const std::string boot_sha1 = v.boot.sha1;
+    source.load = [image, window, elf_flags, boot_sha1](const CodeUnit& unit) {
+        const std::vector<std::uint8_t> bytes =
+            image->read_all(image->require(unit.source_path), max_unit_source);
+        UnitImage out;
+        out.source_sha1 = to_hex(Sha1::of(bytes));
+        if (unit.kind == UnitKind::main) {
+            if (out.source_sha1 != boot_sha1) {
+                throw Error(ErrorCode::image_mismatch, "the boot file read back with SHA-1 " +
+                                                           out.source_sha1 + ", not the verified " +
+                                                           boot_sha1);
+            }
+            out.elf = bytes; // the boot ELF is its own unit ELF
+        } else {
+            out.elf = make_overlay_unit_elf(bytes, elf_flags, window).elf;
+        }
+        return out;
+    };
+    return source;
+}
+
+UnitSource elf_units(const std::vector<std::pair<std::string, fs::path>>& elfs, std::string profile_id) {
+    UnitSource source;
+    source.profile_id = std::move(profile_id);
+    source.identity = "dev";
+    std::set<std::string> seen;
+    std::map<std::string, fs::path> paths;
+    for (const auto& [name, path] : elfs) {
+        const bool valid_name = !name.empty() && std::all_of(name.begin(), name.end(), [](char c) {
+            return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+        });
+        if (!valid_name || !seen.insert(name).second) {
+            throw Error(ErrorCode::invalid_argument,
+                        "unit name '" + name + "' is repeated or not [a-z0-9_]+");
+        }
+        const std::vector<std::uint8_t> bytes = platform::read_file(path, max_unit_source);
+        const ElfHeaders h = parse_elf_headers(bytes);
+        const ElfSegment* text = nullptr;
+        for (const ElfSegment* s : h.load_segments()) {
+            if ((s->flags & elf_pf_x) != 0 && s->filesz != 0) {
+                text = s;
+                break;
+            }
+        }
+        if (text == nullptr || static_cast<std::uint64_t>(text->offset) + text->filesz > bytes.size()) {
+            throw Error(ErrorCode::elf_format,
+                        "'" + path_utf8(path) + "' has no executable load segment with data");
+        }
+        CodeUnit unit;
+        unit.name = name;
+        unit.kind = name == "main" ? UnitKind::main : UnitKind::overlay;
+        unit.source_path = path_utf8(path);
+        unit.entry = unit.kind == UnitKind::main ? h.entry : 0;
+        unit.code_start = text->vaddr;
+        unit.code_end = text->vaddr + text->filesz;
+        unit.load_address = text->vaddr;
+        const std::span<const std::uint8_t> segment(bytes.data() + text->offset, text->filesz);
+        if (unit.kind == UnitKind::overlay && looks_like_mwo3(segment)) {
+            try {
+                unit.overlay_id = parse_mwo3_header(segment, segment.size()).overlay_id;
+            } catch (const Error&) {
+                unit.overlay_id = 0;
+            }
+        }
+        source.units.push_back(unit);
+        paths[name] = path;
+    }
+    // Pipeline order: main first, then the overlays as given.
+    std::stable_partition(source.units.begin(), source.units.end(),
+                          [](const CodeUnit& u) { return u.kind == UnitKind::main; });
+    source.load = [paths](const CodeUnit& unit) {
+        UnitImage out;
+        out.elf = platform::read_file(paths.at(unit.name), max_unit_source);
+        out.source_sha1 = to_hex(Sha1::of(out.elf));
+        if (unit.kind == UnitKind::overlay) {
+            // The container, when the segment holds one, identifies an overlay as its file does on a disc.
+            const ElfHeaders h = parse_elf_headers(out.elf);
+            for (const ElfSegment* s : h.load_segments()) {
+                if (s->vaddr == unit.load_address && s->filesz != 0) {
+                    const std::span<const std::uint8_t> segment(out.elf.data() + s->offset, s->filesz);
+                    if (looks_like_mwo3(segment)) {
+                        out.source_sha1 = to_hex(Sha1::of(segment));
+                    }
+                    break;
+                }
+            }
+        }
+        return out;
+    };
+    return source;
+}
+
+PrepareReport prepare_units(const UnitSource& source, const PipelineOptions& o) {
     if (o.maps_dir.empty()) {
         throw Error(ErrorCode::invalid_argument, "prepare needs the function-map directory (--maps DIR)");
     }
     const WorkLayout layout(o.work_dir);
-    const std::vector<CodeUnit> all = code_units(v);
-    const std::vector<CodeUnit> selected = select_units(all, o.units);
+    const std::vector<CodeUnit> selected = select_units(source.units, o.units);
     platform::make_directories(layout.root());
-    ensure_gitignore(layout.root());
-    const iso::Image image = iso::Image::open(v.image_path);
-    const Mwo3Window window{v.profile.overlay_window.base, v.profile.overlay_window.end};
+    platform::write_file_if_changed(layout.root() / ".gitignore", std::string_view("*\n"));
 
     PrepareReport report;
-    report.profile_id = v.profile.id;
+    report.profile_id = source.profile_id;
+    report.source_identity = source.identity;
+    report.work_dir = layout.root();
     report.units_file = layout.units_file();
+    std::map<std::string, toml::ordered_value> rows =
+        earlier_rows(layout.units_file(), source.profile_id, source.identity);
     for (const CodeUnit& unit : selected) {
         check_cancel(o);
-        progress(o, unit.name, "reading " + unit.source_path + " from the disc");
+        progress(o, unit.name, "reading " + unit.source_path);
         PreparedUnit p;
         p.unit = unit;
-        const std::vector<std::uint8_t> source =
-            image.read_all(image.require(unit.source_path), max_unit_source);
-        p.source_sha1 = to_hex(Sha1::of(source));
-        std::vector<std::uint8_t> elf;
-        if (unit.kind == UnitKind::main) {
-            if (p.source_sha1 != v.boot.sha1) {
-                throw Error(ErrorCode::image_mismatch, "the boot file read back with SHA-1 " + p.source_sha1 +
-                                                           ", not the verified " + v.boot.sha1);
-            }
-            elf = source; // the boot ELF is its own unit ELF
-        } else {
-            elf = make_overlay_unit_elf(source, v.elf.flags, window).elf;
-        }
+        const UnitImage image = source.load(unit);
+        p.source_sha1 = image.source_sha1;
         p.elf = fs::absolute(layout.unit_elf(unit.name));
-        p.elf_written = platform::write_file_if_changed(p.elf, elf);
+        p.elf_written = platform::write_file_if_changed(p.elf, image.elf);
 
-        progress(o, unit.name, "reading the function map");
         FunctionMap map = load_function_map(o.maps_dir, unit.name);
         p.warnings = validate_function_map(map, unit.code_start, unit.code_end);
         p.map_csv = fs::absolute(map.csv_path);
@@ -369,7 +378,7 @@ PrepareReport prepare_units(const VerifiedImage& v, const PipelineOptions& o) {
 
         RecompConfigInput in;
         in.unit = unit.name;
-        in.profile_id = v.profile.id;
+        in.profile_id = source.profile_id;
         in.elf = p.elf;
         in.output_dir = fs::absolute(layout.generated_dir(unit.name));
         in.map_csv = p.map_csv;
@@ -383,54 +392,72 @@ PrepareReport prepare_units(const VerifiedImage& v, const PipelineOptions& o) {
                  std::to_string(p.functions) + " functions, " + std::to_string(p.stubs) + " stub bindings, " +
                      std::to_string(p.entry_points) + " entry points, " + std::to_string(p.jump_tables) +
                      " jump tables");
+
+        toml::ordered_value t(toml::ordered_table{});
+        t["name"] = unit.name;
+        t["kind"] = std::string(to_string(unit.kind));
+        t["overlay_id"] = static_cast<std::int64_t>(unit.overlay_id);
+        t["source_path"] = unit.source_path;
+        t["source_sha1"] = p.source_sha1;
+        t["entry"] = hex_value(unit.entry);
+        t["code_start"] = hex_value(unit.code_start);
+        t["code_end"] = hex_value(unit.code_end);
+        t["elf"] = path_utf8(p.elf);
+        t["config"] = path_utf8(p.config);
+        t["map"] = path_utf8(p.map_csv);
+        t["functions"] = static_cast<std::int64_t>(p.functions);
+        t["stubs"] = static_cast<std::int64_t>(p.stubs);
+        t["entry_points"] = static_cast<std::int64_t>(p.entry_points);
+        t["jump_tables"] = static_cast<std::int64_t>(p.jump_tables);
+        rows[unit.name] = std::move(t);
         report.units.push_back(std::move(p));
     }
-    write_units_file(layout, v, all, report.units);
+    std::vector<std::string> order;
+    for (const CodeUnit& u : source.units) {
+        order.push_back(u.name);
+    }
+    platform::write_file_if_changed(layout.units_file(),
+                                    record_text("Code units written by `dq8ctl recomp prepare`.",
+                                                source.profile_id, source.identity, order, rows));
     return report;
 }
 
-GenerateReport generate_units(const VerifiedImage& v, const PipelineOptions& o) {
-    const WorkLayout layout(o.work_dir);
-    const std::vector<CodeUnit> selected = select_units(code_units(v), o.units);
-    const UnitsFile units = read_units_file(layout, v);
+GenerateReport generate_units(const PrepareReport& prepared, const PipelineOptions& o) {
+    const WorkLayout layout(prepared.work_dir);
     if (o.ps2_recomp.empty()) {
         throw Error(ErrorCode::tool_missing, "generate needs the recompiler (--ps2-recomp PATH)");
     }
     const std::optional<fs::path> exe = find_program(o.ps2_recomp);
     if (!exe) {
-        throw Error(ErrorCode::tool_missing, "cannot find the recompiler '" + path_utf8(o.ps2_recomp) + "'");
+        throw Error(ErrorCode::tool_missing,
+                    "cannot find the recompiler '" + path_utf8(o.ps2_recomp) + "' (pass --ps2-recomp PATH)");
     }
     GenerateReport report;
     report.ps2_recomp = *exe;
     report.generator_id = "ps2_recomp sha1:" + platform::sha1_file(*exe).substr(0, 12);
 
-    for (const CodeUnit& unit : selected) {
+    for (const PreparedUnit& unit : prepared.units) {
         check_cancel(o);
-        const UnitRecord* rec = units.find(unit.name);
-        if (rec == nullptr) {
-            throw Error(ErrorCode::work_stale,
-                        "unit '" + unit.name + "' has not been prepared; run `dq8ctl recomp prepare` first");
-        }
         GeneratedUnit g;
-        g.name = unit.name;
-        g.output_dir = layout.generated_dir(unit.name);
-        g.log_file = layout.log_file(unit.name, "generate");
-        const std::string key = generate_key(report.generator_id, *rec);
-        const fs::path record_file = layout.generate_record(unit.name);
+        g.name = unit.unit.name;
+        g.output_dir = layout.generated_dir(g.name);
+        g.log_file = layout.log_file(g.name, "generate");
+        const std::string key = generate_key(report.generator_id, unit);
+        const fs::path record_file = layout.generate_record(g.name);
         const std::optional<GenerateRecord> record = read_generate_record(record_file);
         std::error_code ec;
         if (!o.force && record && record->key == key &&
             fs::is_regular_file(g.output_dir / "register_functions.cpp", ec)) {
             g.skipped = true;
             g.result = record->result;
-            progress(o, unit.name, "generated sources are up to date");
+            progress(o, g.name, "generated sources are up to date");
             report.units.push_back(std::move(g));
             continue;
         }
-        progress(o, unit.name, "running ps2_recomp");
+        progress(o, g.name, "running ps2_recomp");
         GenerateOptions go;
         go.ps2_recomp = *exe;
-        go.config = rec->config;
+        go.config = unit.config;
         go.output_dir = g.output_dir;
         go.log_file = g.log_file;
         go.cancel = o.cancel;
@@ -438,7 +465,7 @@ GenerateReport generate_units(const VerifiedImage& v, const PipelineOptions& o) 
         fs::remove(record_file, ec); // a failed run must not leave a matching key behind
         g.result = run_recompiler(go);
         write_generate_record(record_file, GenerateRecord{key, report.generator_id, g.result});
-        progress(o, unit.name,
+        progress(o, g.name,
                  std::to_string(g.result.report.count("functions_recompiled")) + " functions recompiled, " +
                      std::to_string(g.result.report.count("unhandled_instructions")) +
                      " unhandled instructions, " + std::to_string(g.result.files) + " files (" +
@@ -448,68 +475,57 @@ GenerateReport generate_units(const VerifiedImage& v, const PipelineOptions& o) 
     return report;
 }
 
-BuildReport build_units(const VerifiedImage& v, const PipelineOptions& o) {
-    const WorkLayout layout(o.work_dir);
-    const std::vector<CodeUnit> all = code_units(v);
-    const std::vector<CodeUnit> selected = select_units(all, o.units);
-    const UnitsFile units = read_units_file(layout, v);
-
+BuildReport build_units(const PrepareReport& prepared, const GenerateReport& generated,
+                        const PipelineOptions& o) {
+    const WorkLayout layout(prepared.work_dir);
     BuildReport report;
     report.jobs = o.jobs != 0 ? o.jobs : default_build_jobs();
-    report.modules_dir = layout.modules_dir(v.profile.id);
-    report.manifest = layout.build_manifest(v.profile.id);
+    report.modules_dir = layout.modules_dir(prepared.profile_id);
+    report.manifest = layout.build_manifest(prepared.profile_id);
 
-    // The manifest keeps the rows of units this run does not rebuild.
-    std::map<std::string, toml::ordered_value> rows;
-    std::error_code ec;
-    if (fs::is_regular_file(report.manifest, ec)) {
-        try {
-            const toml::ordered_value old = read_toml(report.manifest);
-            if (str_of(old, "profile") == v.profile.id && str_of(old, "boot_sha1") == v.boot.sha1 &&
-                old.contains("units") && old.at("units").is_array()) {
-                for (const toml::ordered_value& t : old.at("units").as_array()) {
-                    rows[str_of(t, "name")] = t;
-                }
-            }
-        } catch (const Error&) {
+    // The manifest keeps the rows of units this run does not rebuild (when it describes the same source).
+    std::map<std::string, toml::ordered_value> rows =
+        earlier_rows(report.manifest, prepared.profile_id, prepared.source_identity);
+    std::vector<std::string> order;
+    if (const std::optional<toml::ordered_value> units = read_toml(prepared.units_file);
+        units && units->contains("units") && units->at("units").is_array()) {
+        for (const toml::ordered_value& t : units->at("units").as_array()) {
+            order.push_back(str_of(t, "name"));
+        }
+    }
+    for (const std::string& name : names_of(prepared.units)) {
+        if (std::find(order.begin(), order.end(), name) == order.end()) {
+            order.push_back(name);
         }
     }
 
-    for (const CodeUnit& unit : selected) {
+    for (const PreparedUnit& unit : prepared.units) {
         check_cancel(o);
-        const UnitRecord* rec = units.find(unit.name);
-        if (rec == nullptr) {
-            throw Error(ErrorCode::work_stale,
-                        "unit '" + unit.name + "' has not been prepared; run `dq8ctl recomp prepare` first");
+        const auto gen = std::find_if(generated.units.begin(), generated.units.end(),
+                                      [&](const GeneratedUnit& g) { return g.name == unit.unit.name; });
+        if (gen == generated.units.end()) {
+            throw Error(ErrorCode::work_stale, "unit '" + unit.unit.name + "' was not generated");
         }
-        const std::optional<GenerateRecord> generated =
-            read_generate_record(layout.generate_record(unit.name));
-        const fs::path generated_dir = layout.generated_dir(unit.name);
-        if (!generated || !fs::is_regular_file(generated_dir / "register_functions.cpp", ec)) {
-            throw Error(ErrorCode::work_stale,
-                        "unit '" + unit.name +
-                            "' has no generated sources; run `dq8ctl recomp generate` first");
-        }
-
         BuiltUnit b;
-        b.name = unit.name;
-        b.log_file = layout.log_file(unit.name, "build");
+        b.name = unit.unit.name;
+        b.log_file = layout.log_file(b.name, "build");
+        std::error_code ec;
         fs::remove(b.log_file, ec);
         ModuleUnit mu;
-        mu.name = unit.name;
-        mu.kind = rec->kind;
-        mu.overlay_id = rec->overlay_id;
-        mu.profile_id = v.profile.id;
-        mu.source_sha1 = rec->source_sha1;
-        mu.entry_point = rec->entry;
-        mu.generated_dir = generated_dir;
+        mu.name = unit.unit.name;
+        mu.kind = unit.unit.kind;
+        mu.overlay_id = unit.unit.overlay_id;
+        mu.profile_id = prepared.profile_id;
+        mu.source_sha1 = unit.source_sha1;
+        mu.entry_point = unit.unit.entry;
+        mu.generated_dir = fs::absolute(gen->output_dir);
         ModuleBuildOptions mo;
         mo.cmake = o.cmake;
         mo.cmake_generator = o.cmake_generator;
         mo.module_source_dir = o.module_source_dir;
         mo.abi_include_dir = o.abi_include_dir;
-        mo.build_dir = layout.build_dir(unit.name);
-        mo.generator_id = generated->generator;
+        mo.build_dir = layout.build_dir(b.name);
+        mo.generator_id = generated.generator_id;
         mo.pch = o.pch;
         mo.debug_info = o.debug_info;
         mo.jobs = report.jobs;
@@ -517,63 +533,48 @@ BuildReport build_units(const VerifiedImage& v, const PipelineOptions& o) {
         mo.log_file = b.log_file;
         mo.cancel = o.cancel;
         mo.on_output = o.on_tool_output;
-        progress(o, unit.name, "building the module with " + std::to_string(report.jobs) + " jobs");
+        progress(o, b.name, "building the module with " + std::to_string(report.jobs) + " jobs");
         b.result = build_module(mo, mu);
         b.module = report.modules_dir / b.result.library.filename();
         b.module_updated = copy_if_changed(b.result.library, b.module);
 
         std::size_t files = 0;
         std::uint64_t bytes = 0;
-        const std::string generated_sha1 = tree_sha1(generated_dir, files, bytes);
+        const std::string generated_sha1 = tree_sha1(gen->output_dir, files, bytes);
+        const RecompReport& rep = gen->result.report;
         toml::ordered_value t(toml::ordered_table{});
-        t["name"] = unit.name;
-        t["kind"] = std::string(to_string(rec->kind));
-        t["overlay_id"] = static_cast<std::int64_t>(rec->overlay_id);
+        t["name"] = b.name;
+        t["kind"] = std::string(to_string(unit.unit.kind));
+        t["overlay_id"] = static_cast<std::int64_t>(unit.unit.overlay_id);
         t["module"] = path_utf8(b.module.filename());
         t["module_sha1"] = platform::sha1_file(b.module);
-        t["source_path"] = rec->source_path;
-        t["source_sha1"] = rec->source_sha1;
-        t["elf_sha1"] = platform::sha1_file(rec->elf);
-        t["config_sha1"] = platform::sha1_file(rec->config);
-        t["map_sha1"] = platform::sha1_file(rec->map);
-        t["generator"] = generated->generator;
+        t["source_path"] = unit.unit.source_path;
+        t["source_sha1"] = unit.source_sha1;
+        t["elf_sha1"] = platform::sha1_file(unit.elf);
+        t["config_sha1"] = platform::sha1_file(unit.config);
+        t["map_sha1"] = platform::sha1_file(unit.map_csv);
+        t["generator"] = generated.generator_id;
         t["generated_files"] = static_cast<std::int64_t>(files);
         t["generated_bytes"] = static_cast<std::int64_t>(bytes);
         t["generated_sha1"] = generated_sha1;
-        t["functions_recompiled"] =
-            static_cast<std::int64_t>(generated->result.report.count("functions_recompiled"));
-        t["unhandled_instructions"] =
-            static_cast<std::int64_t>(generated->result.report.count("unhandled_instructions"));
+        t["functions_recompiled"] = static_cast<std::int64_t>(rep.count("functions_recompiled"));
+        t["functions_stubbed"] = static_cast<std::int64_t>(rep.count("functions_stubbed"));
+        t["unhandled_instructions"] = static_cast<std::int64_t>(rep.count("unhandled_instructions"));
         t["jobs"] = static_cast<std::int64_t>(b.result.jobs);
-        t["generate_seconds"] = seconds(generated->result.elapsed);
+        t["generate_seconds"] = seconds(gen->result.elapsed);
         t["configure_seconds"] = seconds(b.result.configure_time);
         t["build_seconds"] = seconds(b.result.build_time);
         t["built_at"] = utc_timestamp();
-        rows[unit.name] = std::move(t);
-        progress(o, unit.name,
+        rows[b.name] = std::move(t);
+        progress(o, b.name,
                  path_utf8(b.module.filename()) + (b.module_updated ? " updated" : " unchanged") +
                      " (build " + std::to_string(b.result.build_time.count() / 1000) + " s)");
         report.units.push_back(std::move(b));
     }
-
-    toml::ordered_value list(toml::ordered_array{});
-    for (const CodeUnit& u : all) {
-        if (const auto it = rows.find(u.name); it != rows.end()) {
-            list.as_array().push_back(it->second);
-        }
-    }
-    list.as_array_fmt().fmt = toml::array_format::array_of_tables;
-    toml::ordered_value root(toml::ordered_table{});
-    root["schema_version"] = manifest_schema_version;
-    root["profile"] = v.profile.id;
-    root["boot_sha1"] = v.boot.sha1;
-    root["tool_version"] = std::string(version());
-    root["units"] = std::move(list);
     platform::write_file_atomic(
-        report.manifest,
-        header_comment("Game modules built by `dq8ctl recomp build`: input hashes, generator, "
-                       "timings.") +
-            toml::format(root));
+        report.manifest, record_text("Game modules built by `dq8ctl recomp build`: input hashes, generator, "
+                                     "timings.",
+                                     prepared.profile_id, prepared.source_identity, order, rows));
     return report;
 }
 

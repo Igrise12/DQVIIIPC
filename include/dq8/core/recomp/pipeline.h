@@ -8,17 +8,20 @@
 #include "dq8/core/recomp/units.h"
 
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // Stages 3 to 6 of the setup pipeline (architecture.md §3) over a work directory, for `dq8ctl recomp` and the
-// launcher. Each stage is idempotent and resumable: prepare rewrites a file only when its bytes change,
-// generate skips a unit whose recorded input key (recompiler, config, unit ELF and map hashes) still matches,
-// and build runs an incremental CMake/Ninja build. Everything under the work directory is derived from the
-// user's disc and stays local; prepare writes a ".gitignore" of "*" at its root.
+// launcher. The stages chain: prepare -> generate -> build, each taking the previous one's report, and each
+// is idempotent and resumable: prepare rewrites a file only when its bytes change, generate skips a unit
+// whose recorded input key (recompiler, config, unit ELF and map hashes) still matches, and build runs an
+// incremental CMake/Ninja build. Everything under the work directory is derived from the user's disc and
+// stays local; prepare writes a ".gitignore" of "*" at its root.
 namespace dq8::core {
 struct VerifiedImage;
 }
@@ -26,7 +29,7 @@ struct VerifiedImage;
 namespace dq8::core::recomp {
 
 // The work directory:
-//   units/units.toml            what prepare wrote: profile, boot hash, per unit kind, ranges, hashes, counts
+//   units/units.toml            what prepare wrote: source, per unit kind, ranges, hashes and map counts
 //   units/<unit>.elf            the unit ELF (main: the boot ELF unchanged; overlays: make_overlay_unit_elf)
 //   units/<unit>.toml           the recompiler config
 //   generated/<unit>/           the recompiler's output
@@ -62,6 +65,31 @@ class WorkLayout {
     std::filesystem::path root_;
 };
 
+// One unit's ELF and the SHA-1 that identifies where it came from (the boot file, or the overlay container).
+struct UnitImage {
+    std::vector<std::uint8_t> elf;
+    std::string source_sha1;
+};
+
+// Where the code units come from.
+struct UnitSource {
+    std::string profile_id;      // names modules/<profile>/ and goes into every module descriptor
+    std::string identity;        // the boot file's SHA-1; "dev" for unit ELFs given directly
+    std::vector<CodeUnit> units; // in pipeline order
+    std::function<UnitImage(const CodeUnit&)> load;
+};
+
+// The verified disc: code_units(verified), the boot ELF as main's unit ELF, make_overlay_unit_elf() for the
+// overlays (window from the profile, e_flags from the boot ELF).
+UnitSource disc_units(const VerifiedImage& verified);
+
+// Developer mode (synthetic tests, experiments): unit ELFs given as (name, path). "main" is the main unit
+// with the ELF's entry point; any other name is an overlay, its overlay_id read from the MWo3 header at the
+// start of its executable segment (0 when there is none). The code range is the first executable load segment
+// with data. Throws invalid_argument for a repeated or malformed name, elf_format for an unreadable ELF.
+UnitSource elf_units(const std::vector<std::pair<std::string, std::filesystem::path>>& elfs,
+                     std::string profile_id);
+
 struct PipelineOptions {
     std::filesystem::path work_dir;
     std::filesystem::path maps_dir;          // prepare: <unit>.csv, .jump_tables.toml, .stats.toml
@@ -83,7 +111,7 @@ struct PipelineOptions {
 
 struct PreparedUnit {
     CodeUnit unit;
-    std::string source_sha1; // of the boot file or the overlay file on the disc
+    std::string source_sha1;
     std::filesystem::path elf;
     std::filesystem::path config;
     std::filesystem::path map_csv;
@@ -98,8 +126,10 @@ struct PreparedUnit {
 
 struct PrepareReport {
     std::string profile_id;
+    std::string source_identity; // UnitSource::identity
+    std::filesystem::path work_dir;
     std::filesystem::path units_file;
-    std::vector<PreparedUnit> units;
+    std::vector<PreparedUnit> units; // the selected units, in pipeline order
 };
 
 struct GeneratedUnit {
@@ -113,7 +143,7 @@ struct GeneratedUnit {
 struct GenerateReport {
     std::filesystem::path ps2_recomp; // resolved
     std::string generator_id;         // "ps2_recomp sha1:<12 hex>"
-    std::vector<GeneratedUnit> units;
+    std::vector<GeneratedUnit> units; // as in the prepare report
 };
 
 struct BuiltUnit {
@@ -131,19 +161,18 @@ struct BuildReport {
     std::vector<BuiltUnit> units;
 };
 
-// Stage 3-4: writes every selected unit's ELF and recompiler config from the disc and the maps, then
+// Stages 3-4: writes every selected unit's ELF and recompiler config from the source and the maps, then
 // units/units.toml. Throws the map, container and I/O errors of the pieces, invalid_argument for an unknown
-// unit, image_mismatch when a file read back differs from what verify hashed.
-PrepareReport prepare_units(const VerifiedImage& verified, const PipelineOptions& options);
+// unit or a missing --maps, image_mismatch when a file read back differs from what verify hashed.
+PrepareReport prepare_units(const UnitSource& source, const PipelineOptions& options);
 
-// Stage 5: runs the recompiler on every selected unit whose inputs changed. Throws work_stale when prepare
-// has not run for a unit or ran for another disc, tool_missing when the recompiler cannot be found, and the
-// driver's errors.
-GenerateReport generate_units(const VerifiedImage& verified, const PipelineOptions& options);
+// Stage 5: runs the recompiler on every prepared unit whose inputs changed. Throws tool_missing when the
+// recompiler cannot be found, and the driver's errors.
+GenerateReport generate_units(const PrepareReport& prepared, const PipelineOptions& options);
 
-// Stage 6: builds every selected unit's module, copies it to modules/<profile>/ and updates
-// build-manifest.toml (input hashes, generator, job count, timings). Throws work_stale when generate has not
-// run for a unit, and the module build's errors.
-BuildReport build_units(const VerifiedImage& verified, const PipelineOptions& options);
+// Stage 6: builds every generated unit's module, copies it to modules/<profile>/ and updates
+// build-manifest.toml (input hashes, generator, job count, timings). Throws the module build's errors.
+BuildReport build_units(const PrepareReport& prepared, const GenerateReport& generated,
+                        const PipelineOptions& options);
 
 } // namespace dq8::core::recomp

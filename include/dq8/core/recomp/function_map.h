@@ -17,7 +17,8 @@
 //   <unit>.jump_tables.toml  [[jump_tables.table]] address, base_register, entries = [{index, target}, ...]
 //                            (optional; the table's data address keys the table, as the recompiler expects)
 //   <unit>.stats.toml        link_return_entries = [0x...] (return points of bgezal/bltzal/bal calls that
-//                            leave their function) plus integer counts (optional)
+//                            leave their function) plus integer counts, top-level or under [counts]
+//                            (optional; other keys are the exporter's diagnostics and are ignored)
 //
 // Readers report malformed input as Error(map_parse) and inconsistent input as Error(map_invalid), both with
 // "<file>:<line>: " in front of the message. Maps describe a disc's code (addresses), so they stay local.
@@ -47,7 +48,7 @@ struct FunctionMap {
     std::vector<MapFunction> functions;                      // sorted by start
     std::vector<JumpTable> jump_tables;                      // sorted by address
     std::vector<std::uint32_t> link_return_entries;          // sorted, unique
-    std::vector<std::pair<std::string, std::int64_t>> stats; // the stats file's other integer keys, in order
+    std::vector<std::pair<std::string, std::int64_t>> stats; // integer keys and [counts], in file order
     std::filesystem::path csv_path;                          // the files read; empty when absent
     std::filesystem::path jump_tables_path;
     std::filesystem::path stats_path;

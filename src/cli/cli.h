@@ -133,13 +133,16 @@ class Json {
 struct Args {
     std::string command;
     std::vector<std::string> positional;
-    std::map<std::string, std::string> values; // --name VALUE
-    std::set<std::string> flags;               // --name
+    std::map<std::string, std::string> values;             // --name VALUE
+    std::set<std::string> flags;                           // --name
+    std::map<std::string, std::vector<std::string>> lists; // --name VALUE, repeatable
 };
 
 inline const std::set<std::string> value_options{
-    "regions",         "out",         "maps",     "work", "units", "jobs", "ps2-recomp", "cmake", "boot",
-    "module-template", "abi-include", "generator"};
+    "regions",    "out",   "maps", "work",      "units",           "jobs",
+    "ps2-recomp", "cmake", "boot", "generator", "module-template", "abi-include-dir",
+    "profile-id"};
+inline const std::set<std::string> list_options{"unit-elf"}; // may repeat; values collect in order
 inline const std::set<std::string> flag_options{"json",    "force",  "emit-profile", "no-verify-hashes",
                                                 "verbose", "no-pch", "debug-info"};
 
@@ -157,7 +160,7 @@ inline bool parse_args(int argc, char** argv, Args& args, std::string& error) {
                 name.erase(eq);
                 has_value = true;
             }
-            if (value_options.count(name) != 0) {
+            if (value_options.count(name) != 0 || list_options.count(name) != 0) {
                 if (!has_value) {
                     if (i + 1 >= argc) {
                         error = "--" + name + " needs a value";
@@ -165,7 +168,11 @@ inline bool parse_args(int argc, char** argv, Args& args, std::string& error) {
                     }
                     value = argv[++i];
                 }
-                args.values[name] = value;
+                if (list_options.count(name) != 0) {
+                    args.lists[name].push_back(value);
+                } else {
+                    args.values[name] = value;
+                }
             } else if (flag_options.count(name) != 0 && !has_value) {
                 args.flags.insert(name);
             } else {

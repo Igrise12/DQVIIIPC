@@ -68,8 +68,8 @@ unsigned default_build_jobs();
 std::vector<std::string> module_configure_args(const ModuleBuildOptions& options, const ModuleUnit& unit);
 // `cmake --build <build> --config <type> --parallel <jobs>`.
 std::vector<std::string> module_build_args(const ModuleBuildOptions& options);
-// The library's file name on this platform, first the expected one ("libdq8_unit_main.so",
-// "dq8_unit_main.dll", ...), then the alternatives a template might choose.
+// The library's file name on this platform, first the one cmake/module produces ("dq8_unit_main.so",
+// "dq8_unit_main.dll"), then fallbacks. build_module() looks in <build>/module/, then the whole build tree.
 std::vector<std::string> module_file_names(std::string_view unit);
 
 // Configures and builds. Throws Error(process_spawn) when cmake cannot start, process_timeout /

@@ -102,7 +102,7 @@ fs::path module_template_dir(const Args& args, const char* argv0) {
 }
 
 fs::path abi_include_dir(const Args& args, const char* argv0) {
-    if (const auto it = args.values.find("abi-include"); it != args.values.end()) {
+    if (const auto it = args.values.find("abi-include-dir"); it != args.values.end()) {
         return it->second;
     }
     const fs::path found = find_data_dir(argv0, "include", fs::path("dq8") / "abi" / "game_module.h");
@@ -307,14 +307,22 @@ std::vector<std::uint8_t> read_small_file(const fs::path& path, std::uint64_t li
 int run_recomp(const Args& args, const char* argv0) {
     const bool json = args.flags.count("json") != 0;
     const std::vector<std::string> stages{"prepare", "generate", "build", "all"};
-    if (args.positional.size() != 2 ||
+    const auto unit_elfs = args.lists.find("unit-elf");
+    const bool developer = unit_elfs != args.lists.end();
+    // A stage and the disc, or (developer mode) a stage and --unit-elf NAME=PATH for every unit.
+    if (args.positional.size() != (developer ? 1u : 2u) ||
         std::find(stages.begin(), stages.end(), args.positional[0]) == stages.end()) {
-        std::fputs("dq8ctl recomp: expected a stage (prepare, generate, build or all) and an <iso>\n",
-                   stderr);
+        std::fputs(
+            "dq8ctl recomp: expected a stage (prepare, generate, build or all) and an <iso>, or a stage "
+            "and --unit-elf NAME=PATH options\n",
+            stderr);
         return usage(stderr);
     }
+    // Each stage brings the ones before it up to date first; all of them skip work whose inputs did not
+    // change.
     const std::string stage = args.positional[0];
-    const bool all = stage == "all";
+    const bool run_generate = stage != "prepare";
+    const bool run_build = stage == "build" || stage == "all";
 
     recomp::PipelineOptions o;
     o.work_dir = value_or(args, "work", (fs::path("work") / "recomp").string());
@@ -343,30 +351,46 @@ int run_recomp(const Args& args, const char* argv0) {
         };
     }
 
-    const auto profiles = dq8::core::load_region_profiles(regions_dir(args, argv0));
-    const dq8::core::VerifiedImage v = dq8::core::verify_image(args.positional[1], profiles);
+    recomp::UnitSource source;
+    std::vector<std::string> warnings;
+    if (developer) {
+        std::vector<std::pair<std::string, fs::path>> elfs;
+        for (const std::string& spec : unit_elfs->second) {
+            const std::size_t eq = spec.find('=');
+            if (eq == std::string::npos || eq == 0 || eq + 1 == spec.size()) {
+                throw Error(ErrorCode::invalid_argument, "--unit-elf needs NAME=PATH, not '" + spec + "'");
+            }
+            elfs.emplace_back(spec.substr(0, eq), fs::path(spec.substr(eq + 1)));
+        }
+        source = recomp::elf_units(elfs, value_or(args, "profile-id", "dev"));
+    } else {
+        const auto profiles = dq8::core::load_region_profiles(regions_dir(args, argv0));
+        const dq8::core::VerifiedImage v = dq8::core::verify_image(args.positional[1], profiles);
+        warnings = v.warnings;
+        source = recomp::disc_units(v);
+    }
     Json j;
     Json* jp = json ? &j : nullptr;
     j.begin_object();
     j.member("ok", true);
     j.member("stage", stage);
-    j.member("profile", v.profile.id);
+    j.member("profile", source.profile_id);
     j.member("work", utf8(o.work_dir));
     if (!json) {
-        print_warnings(v.warnings, stdout);
-        std::printf("profile:  %s  work: %s\n", v.profile.id.c_str(), utf8(o.work_dir).c_str());
+        print_warnings(warnings, stdout);
+        std::printf("profile:  %s  work: %s\n", source.profile_id.c_str(), utf8(o.work_dir).c_str());
     }
-    if (all || stage == "prepare") {
-        report_prepare(recomp::prepare_units(v, o), jp, stdout);
-    }
-    if (all || stage == "generate") {
+    const recomp::PrepareReport prepared = recomp::prepare_units(source, o);
+    report_prepare(prepared, jp, stdout);
+    if (run_generate) {
         o.ps2_recomp = ps2_recomp_path(args, argv0);
-        report_generate(recomp::generate_units(v, o), jp, stdout);
-    }
-    if (all || stage == "build") {
-        o.module_source_dir = module_template_dir(args, argv0);
-        o.abi_include_dir = abi_include_dir(args, argv0);
-        report_build(recomp::build_units(v, o), jp, stdout);
+        const recomp::GenerateReport generated = recomp::generate_units(prepared, o);
+        report_generate(generated, jp, stdout);
+        if (run_build) {
+            o.module_source_dir = module_template_dir(args, argv0);
+            o.abi_include_dir = abi_include_dir(args, argv0);
+            report_build(recomp::build_units(prepared, generated, o), jp, stdout);
+        }
     }
     j.end_object();
     if (json) {

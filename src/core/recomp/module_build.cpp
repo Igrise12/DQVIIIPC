@@ -88,7 +88,7 @@ ProcessResult run_step(const ModuleBuildOptions& o, const std::vector<std::strin
 fs::path find_library(const fs::path& build_dir, std::string_view unit) {
     const std::vector<std::string> names = module_file_names(unit);
     for (const std::string& n : names) {
-        const fs::path candidate = build_dir / "out" / n;
+        const fs::path candidate = build_dir / "module" / n; // where cmake/module puts it
         std::error_code ec;
         if (fs::is_regular_file(candidate, ec)) {
             return candidate;
@@ -129,18 +129,18 @@ unsigned default_build_jobs() {
 }
 
 std::vector<std::string> module_file_names(std::string_view unit) {
+    // cmake/module builds a MODULE library without the "lib" prefix; the others are fallbacks.
     const std::string base = "dq8_unit_" + std::string(unit);
 #if defined(_WIN32)
     return {base + ".dll", "lib" + base + ".dll"};
 #elif defined(__APPLE__)
-    return {"lib" + base + ".dylib", base + ".dylib", "lib" + base + ".so", base + ".so"};
+    return {base + ".so", base + ".dylib", "lib" + base + ".so", "lib" + base + ".dylib"};
 #else
-    return {"lib" + base + ".so", base + ".so"};
+    return {base + ".so", "lib" + base + ".so"};
 #endif
 }
 
 std::vector<std::string> module_configure_args(const ModuleBuildOptions& o, const ModuleUnit& u) {
-    const std::string out_dir = cmake_path(o.build_dir / "out");
     std::vector<std::string> args{
         "-S",
         cmake_path(o.module_source_dir),
@@ -160,8 +160,6 @@ std::vector<std::string> module_configure_args(const ModuleBuildOptions& o, cons
         "-DDQ8_ABI_INCLUDE_DIR=" + cmake_path(o.abi_include_dir),
         std::string("-DDQ8_MODULE_PCH=") + (o.pch ? "ON" : "OFF"),
         std::string("-DDQ8_MODULE_DEBUG_INFO=") + (o.debug_info ? "ON" : "OFF"),
-        "-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=" + out_dir,
-        "-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=" + out_dir,
     };
     args.insert(args.end(), o.extra_configure_args.begin(), o.extra_configure_args.end());
     return args;

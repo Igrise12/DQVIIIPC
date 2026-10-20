@@ -198,12 +198,13 @@ TEST_CASE("map stats carry link-return entries and counts", "[core][recomp][map]
     recomp::FunctionMap map;
     recomp::parse_map_stats(
         "functions = 12\nunresolved_sites = 3\nlink_return_entries = [0x00200048, \"0x10\"]\n"
-        "note = \"ignored\"\n",
+        "note = \"ignored\"\nholes = [{at = 0x00200010}]\n[counts]\nrows = 5\n",
         "unit.stats.toml", map);
     CHECK(map.link_return_entries == std::vector<std::uint32_t>{0x00200048, 0x10});
-    REQUIRE(map.stats.size() == 2);
+    REQUIRE(map.stats.size() == 3);
     CHECK(map.stats[0] == std::pair<std::string, std::int64_t>{"functions", 12});
     CHECK(map.stats[1].first == "unresolved_sites");
+    CHECK(map.stats[2] == std::pair<std::string, std::int64_t>{"rows", 5}); // from [counts]
 }
 
 TEST_CASE("load_function_map reads the three files of a unit", "[core][recomp][map]") {

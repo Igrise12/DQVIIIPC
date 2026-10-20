@@ -228,6 +228,12 @@ void parse_map_stats(std::string_view text, const std::string& source, FunctionM
             }
         } else if (value.is_integer()) {
             map.stats.emplace_back(key, value.as_integer());
+        } else if (key == "counts" && value.is_table()) {
+            for (const auto& [count_key, count] : value.as_table()) {
+                if (count.is_integer()) {
+                    map.stats.emplace_back(count_key, count.as_integer());
+                }
+            }
         }
     }
 }

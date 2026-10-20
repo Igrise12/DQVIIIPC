@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+#include "dq8/core/elf_writer.h"
 #include "dq8/core/error.h"
 #include "dq8/core/recomp.h"
+#include "support/mips_asm.h"
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
@@ -149,6 +151,7 @@ TEST_CASE("the recompiler report is parsed into named counts and events", "[core
         "Correctness-critical guest fallbacks: 1, failures: 0\n"
         "Warnings: 3, errors: 5\n"
         "\nEvents:\n"
+        "  [info] elf - ELF entry point: 0x200000\n"
         "  [warning] ghidra-map - Ignored 2 Ghidra function(s) outside executable sections.\n"
         "  [warning] control-flow function=f addr=0x200010 - unresolved JR/JALR at 0x200010\n"
         "  [error] unhandled-instruction function=g addr=0x200020 - x raw=0x0\n"
@@ -175,7 +178,8 @@ TEST_CASE("the recompiler report is parsed into named counts and events", "[core
     CHECK(r.count("no_such_key") == 0);
     CHECK(r.events_by_category.at("warning:ghidra-map") == 1);
     CHECK(r.events_by_category.at("error:unhandled-instruction") == 1);
-    REQUIRE(r.notable_events.size() == 2); // unhandled instructions are counted, not listed
+    CHECK(r.events_by_category.at("info:elf") == 1); // counted, not listed
+    REQUIRE(r.notable_events.size() == 2);           // unhandled instructions are counted, not listed
     CHECK(r.notable_events[0].category == "ghidra-map");
     CHECK_THAT(r.notable_events[1].text, ContainsSubstring("unresolved JR/JALR"));
 
@@ -290,7 +294,6 @@ TEST_CASE("the module build passes the template's cache variables", "[core][reco
     CHECK(has("-DCMAKE_BUILD_TYPE=Release"));
     CHECK(has_prefix("-DDQ8_UNIT_GENERATED_DIR="));
     CHECK(has_prefix("-DDQ8_ABI_INCLUDE_DIR="));
-    CHECK(has_prefix("-DCMAKE_LIBRARY_OUTPUT_DIRECTORY="));
     CHECK(args.back() == "-DCMAKE_CXX_COMPILER=clang++");
     for (const std::string& a : args) {
         CHECK(a.find('\\') == std::string::npos); // CMake gets forward slashes
@@ -298,5 +301,66 @@ TEST_CASE("the module build passes the template's cache variables", "[core][reco
     const auto build = recomp::module_build_args(o);
     CHECK(build.front() == "--build");
     CHECK(build.back() == "6");
-    CHECK_THAT(recomp::module_file_names("title").front(), ContainsSubstring("dq8_unit_title"));
+    CHECK_THAT(recomp::module_file_names("title").front(), StartsWith("dq8_unit_title."));
+}
+
+TEST_CASE("prepare and generate over unit ELFs are idempotent", "[core][recomp][pipeline]") {
+    // Developer mode over a synthetic main unit: our own instructions and addresses.
+    namespace m = dq8::test::mips;
+    const fs::path dir = fresh_dir("dq8-test-recomp-pipeline");
+    m::Program p(0x00100000);
+    p.emit(m::lui(m::a0, 0x1234));
+    p.emit(m::jr(m::ra));
+    p.emit(m::nop());
+    p.emit(m::nop());
+    dq8::core::ElfWriter writer;
+    writer.set_entry(0x00100000);
+    dq8::core::ElfSection text;
+    text.name = ".text";
+    text.flags = dq8::core::elf_shf_alloc | dq8::core::elf_shf_execinstr;
+    text.address = 0x00100000;
+    text.data = p.bytes();
+    writer.add_section(std::move(text));
+    writer.write(dir / "in" / "main.elf");
+    fs::create_directories(dir / "maps");
+    std::ofstream(dir / "maps" / "main.csv") << "Name,Start,End,Size\nstart,0x00100000,0x00100010,16\n";
+
+    const recomp::UnitSource source = recomp::elf_units({{"main", dir / "in" / "main.elf"}}, "dev");
+    REQUIRE(source.units.size() == 1);
+    CHECK(source.units[0].kind == recomp::UnitKind::main);
+    CHECK(source.units[0].entry == 0x00100000);
+    CHECK(source.units[0].code_end == 0x00100010);
+
+    recomp::PipelineOptions o;
+    o.work_dir = dir / "work";
+    o.maps_dir = dir / "maps";
+    o.ps2_recomp = DQ8_TEST_CHILD; // plays ps2_recomp (see process_child.cpp)
+    const recomp::PrepareReport first = recomp::prepare_units(source, o);
+    REQUIRE(first.units.size() == 1);
+    CHECK(first.units[0].elf_written);
+    CHECK(first.units[0].config_written);
+    CHECK(first.units[0].functions == 1);
+    CHECK(fs::is_regular_file(dir / "work" / "units" / "units.toml"));
+    CHECK(fs::is_regular_file(dir / "work" / ".gitignore"));
+
+    const recomp::PrepareReport again = recomp::prepare_units(source, o);
+    CHECK_FALSE(again.units[0].elf_written);
+    CHECK_FALSE(again.units[0].config_written);
+
+    const recomp::GenerateReport generated = recomp::generate_units(again, o);
+    REQUIRE(generated.units.size() == 1);
+    CHECK_FALSE(generated.units[0].skipped);
+    CHECK(generated.units[0].result.report.count("functions_recompiled") == 2); // the stand-in's report
+    CHECK_THAT(generated.generator_id, StartsWith("ps2_recomp sha1:"));
+    const recomp::GenerateReport skipped = recomp::generate_units(again, o);
+    CHECK(skipped.units[0].skipped);
+    CHECK(skipped.units[0].result.report.count("functions_recompiled") == 2); // from the record
+
+    o.force = true;
+    CHECK_FALSE(recomp::generate_units(again, o).units[0].skipped);
+
+    o.units = {"title"};
+    CHECK_THROWS_AS(recomp::prepare_units(source, o), Error);
+    CHECK_THROWS_AS(recomp::elf_units({{"Main", dir / "in" / "main.elf"}}, "dev"), Error);
+    fs::remove_all(dir);
 }
