@@ -11,6 +11,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -45,8 +46,8 @@ class EeRuntime {
     EeRuntime(const EeRuntime&) = delete;
     EeRuntime& operator=(const EeRuntime&) = delete;
 
-    R5900Context& context() noexcept { return ctx_; }
-    const R5900Context& context() const noexcept { return ctx_; }
+    R5900Context& context() noexcept { return *ctx_; }
+    const R5900Context& context() const noexcept { return *ctx_; }
     GuestMemory& memory() noexcept { return memory_; }
     // What generated code receives as `runtime`.
     PS2Runtime* adapter() noexcept { return &adapter_; }
@@ -78,7 +79,9 @@ class EeRuntime {
     GuestMemory& memory_;
     const Dispatcher& dispatcher_;
     const KernelHle& kernel_;
-    R5900Context ctx_;
+    // On the heap: R5900Context is 16-byte aligned, and embedding it would pad every object that holds an
+    // EeRuntime (MSVC warns about that at /W4).
+    std::unique_ptr<R5900Context> ctx_;
     PS2Runtime adapter_;
     TraceSink trace_;
     RunOptions options_;

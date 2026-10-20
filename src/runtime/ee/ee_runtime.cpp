@@ -216,7 +216,7 @@ const dq8_runtime_api& EeRuntime::api() noexcept {
 }
 
 EeRuntime::EeRuntime(GuestMemory& memory, const Dispatcher& dispatcher, const KernelHle& kernel)
-    : memory_(memory), dispatcher_(dispatcher), kernel_(kernel) {
+    : memory_(memory), dispatcher_(dispatcher), kernel_(kernel), ctx_(std::make_unique<R5900Context>()) {
     adapter_.api = &api_table;
     adapter_.host = this;
     trace_ = [](std::string_view line) {
@@ -230,7 +230,7 @@ void EeRuntime::count_dispatch(std::uint32_t target, std::uint32_t source, std::
     if (options_.max_dispatches != 0 && dispatches_ >= options_.max_dispatches) {
         StopInfo s;
         s.reason = StopReason::max_dispatches;
-        s.pc = ctx_.pc;
+        s.pc = ctx_->pc;
         s.address = target;
         s.source = source;
         s.message = "dispatch budget of " + std::to_string(options_.max_dispatches) + " used up before " +
@@ -254,7 +254,7 @@ void EeRuntime::count_dispatch(std::uint32_t target, std::uint32_t source, std::
 void EeRuntime::stop_missing(std::uint32_t target, std::uint32_t source, std::string_view how) {
     StopInfo s;
     s.reason = StopReason::missing_function;
-    s.pc = ctx_.pc;
+    s.pc = ctx_->pc;
     s.address = target;
     s.source = source;
     s.message = dispatcher_.describe_miss(target);
@@ -399,7 +399,7 @@ RunResult EeRuntime::run(const RunOptions& options) {
     };
     for (;;) {
         try {
-            const std::uint32_t pc = ctx_.pc;
+            const std::uint32_t pc = ctx_->pc;
             if (pc == 0) {
                 StopInfo s;
                 s.reason = StopReason::program_end;
@@ -412,22 +412,22 @@ RunResult EeRuntime::run(const RunOptions& options) {
                 stop_missing(pc, 0, "run-loop");
             }
             depth_ = 0;
-            target.fn(memory_.rdram(), &ctx_, &adapter_);
+            target.fn(memory_.rdram(), ctx_.get(), &adapter_);
         } catch (const GuestStop& stop) {
             return finish(stop.info());
         } catch (const std::exception& e) {
             StopInfo s;
             s.reason = StopReason::guest_error;
-            s.pc = ctx_.pc;
-            s.address = ctx_.pc;
-            s.message = std::string("generated code threw at ") + hex32(ctx_.pc) + ": " + e.what();
+            s.pc = ctx_->pc;
+            s.address = ctx_->pc;
+            s.message = std::string("generated code threw at ") + hex32(ctx_->pc) + ": " + e.what();
             return finish(std::move(s));
         } catch (...) {
             StopInfo s;
             s.reason = StopReason::guest_error;
-            s.pc = ctx_.pc;
-            s.address = ctx_.pc;
-            s.message = "generated code threw a non-standard exception at " + hex32(ctx_.pc);
+            s.pc = ctx_->pc;
+            s.address = ctx_->pc;
+            s.message = "generated code threw a non-standard exception at " + hex32(ctx_->pc);
             return finish(std::move(s));
         }
     }
