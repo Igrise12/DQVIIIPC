@@ -494,7 +494,9 @@ void json_stop(JsonWriter& j, const rt::StopInfo& stop) {
         j.key("last_branch");
         j.begin_object();
         j.member("kind", stop.last_branch);
-        j.member("source", hex32(stop.last_source));
+        if (stop.last_branch != "run-loop") {
+            j.member("source", hex32(stop.last_source));
+        }
         j.member("target", hex32(stop.last_target));
         j.end_object();
     }
@@ -605,8 +607,10 @@ void print_setup(const Session& s) {
 void print_result(const Session& s, const rt::RunResult& r) {
     std::printf("stopped after %llu dispatches: %s: %s\n", static_cast<unsigned long long>(r.dispatches),
                 std::string(rt::to_string(r.stop.reason)).c_str(), r.stop.message.c_str());
-    if (!r.stop.last_branch.empty()) {
-        std::printf("last branch: %s %s -> %s\n", r.stop.last_branch.c_str(),
+    if (r.stop.last_branch == "run-loop") {
+        std::printf("last dispatch: run loop -> %s\n", hex32(r.stop.last_target).c_str());
+    } else if (!r.stop.last_branch.empty()) {
+        std::printf("last dispatch: %s %s -> %s\n", r.stop.last_branch.c_str(),
                     hex32(r.stop.last_source).c_str(), hex32(r.stop.last_target).c_str());
     }
     std::fputs(rt::format_context(s.ee->context()).c_str(), stdout);
