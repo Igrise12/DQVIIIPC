@@ -137,6 +137,9 @@ TEST_CASE("descriptor: identity, range and entry checks", "[module]") {
         dev.entry_point = 0x00100008u;
         d.profile_id = "ANYTHING";
         CHECK(validate_descriptor(&d, dev).empty());
+        d.profile_id = "";
+        CHECK(validate_descriptor(&d, dev).empty());
+        CHECK(has(validate_descriptor(&d, main_spec()), "profile id is empty"));
     }
     SECTION("the entry point must have a function") {
         g_slots[2] = nullptr;

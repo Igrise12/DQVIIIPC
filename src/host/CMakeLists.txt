@@ -5,3 +5,7 @@ add_executable(dq8-game main.cpp)
 target_link_libraries(dq8-game PRIVATE dq8::game dq8::runtime dq8::core)
 dq8_set_warnings(dq8-game)
 dq8_enable_sanitizers(dq8-game)
+
+include(GNUInstallDirs)
+# Next to ps2_recomp (cmake/Ps2Recomp.cmake installs it to the same directory).
+install(TARGETS dq8-game RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT game)

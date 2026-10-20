@@ -42,15 +42,16 @@ std::string quoted(std::string_view s) {
     return "\"" + std::string(s) + "\"";
 }
 
-// Checks one string field: present, non-empty, and equal to `expected` when that is non-empty.
+// Checks one string field: present, non-empty unless `may_be_empty`, and equal to `expected` when that is
+// non-empty.
 void check_string(std::vector<std::string>& problems, std::string_view field, const char* value,
-                  std::string_view expected) {
+                  std::string_view expected, bool may_be_empty = false) {
     if (value == nullptr) {
         problems.push_back(std::string(field) + " is null");
         return;
     }
     const std::string_view v(value);
-    if (v.empty()) {
+    if (v.empty() && !(may_be_empty && expected.empty())) {
         problems.push_back(std::string(field) + " is empty");
     } else if (!expected.empty() && v != expected) {
         problems.push_back(std::string(field) + " is " + quoted(v) + ", expected " + quoted(expected));
@@ -90,7 +91,8 @@ std::vector<std::string> validate_descriptor(const dq8_game_module_desc* desc, c
                     std::to_string(spec.overlay_id));
     }
     check_string(p, "unit name", desc->unit_name, spec.name);
-    check_string(p, "profile id", desc->profile_id, spec.profile_id);
+    // A developer-mode unit (no profile in the spec) may carry no profile id.
+    check_string(p, "profile id", desc->profile_id, spec.profile_id, true);
     if (desc->source_sha1 == nullptr) {
         p.emplace_back("source SHA-1 is null");
     } else if (!is_hex40(desc->source_sha1)) {
