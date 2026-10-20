@@ -1,0 +1,47 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+//
+// The one exported symbol of game module dq8_unit_@DQ8_UNIT_NAME@ (include/dq8/abi/game_module.h). Configured by
+// cmake/module/CMakeLists.txt; the table globals are the recompiler's g_ps2RecompiledFunctionTable* from
+// register_functions.cpp, renamed per unit on the command line.
+#include "dq8/abi/game_module.h"
+#include "ps2_runtime.h"
+
+#include <cstdint>
+
+extern const std::uint32_t dq8_unit_@DQ8_UNIT_NAME@_table_base;
+extern const std::uint32_t dq8_unit_@DQ8_UNIT_NAME@_table_end;
+extern const std::uint32_t dq8_unit_@DQ8_UNIT_NAME@_table_slot_count;
+extern PS2Runtime::RecompiledFunction dq8_unit_@DQ8_UNIT_NAME@_table[];
+
+namespace {
+
+dq8_game_module_desc make_descriptor() noexcept {
+    dq8_game_module_desc desc{};
+    desc.magic = DQ8_GAME_MODULE_MAGIC;
+    desc.abi_version = DQ8_GAME_MODULE_ABI_VERSION;
+    desc.struct_size = static_cast<std::uint32_t>(sizeof(dq8_game_module_desc));
+    desc.unit_kind = @DQ8_UNIT_KIND_ENUM@;
+    desc.overlay_id = @DQ8_UNIT_OVERLAY_ID@u;
+    desc.unit_name = "@DQ8_UNIT_NAME@";
+    desc.profile_id = "@DQ8_UNIT_PROFILE_ID@";
+    desc.source_sha1 = "@DQ8_UNIT_SOURCE_SHA1@";
+    desc.generator = "@DQ8_GENERATOR@";
+    desc.context_size = static_cast<std::uint32_t>(sizeof(R5900Context));
+    desc.context_align = static_cast<std::uint32_t>(alignof(R5900Context));
+    desc.entry_point = @DQ8_UNIT_ENTRY_POINT@u;
+    desc.table_base = dq8_unit_@DQ8_UNIT_NAME@_table_base;
+    desc.table_end = dq8_unit_@DQ8_UNIT_NAME@_table_end;
+    desc.table_slot_count = dq8_unit_@DQ8_UNIT_NAME@_table_slot_count;
+    desc.table = dq8_unit_@DQ8_UNIT_NAME@_table;
+    return desc;
+}
+
+} // namespace
+
+extern "C" DQ8_MODULE_EXPORT const dq8_game_module_desc* dq8_game_module_describe(void) {
+    // The table itself is filled by register_functions.cpp's static initialiser, which has run by the time the
+    // host can look this symbol up.
+    static const dq8_game_module_desc desc = make_descriptor();
+    return &desc;
+}
