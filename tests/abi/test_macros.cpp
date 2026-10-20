@@ -183,8 +183,11 @@ TEST_CASE("MMI helpers", "[abi][macros]") {
 
 TEST_CASE("FPU macros follow the PS2 float rules", "[abi][macros]") {
     const float max = std::bit_cast<float>(0x7FFFFFFFu); // a NaN on the host, the largest value on the PS2
-    CHECK(bits(FPU_DIV_S(1.0f, 0.0f)) == 0x7FFFFFFFu);
-    CHECK(bits(FPU_DIV_S(-1.0f, 0.0f)) == 0xFFFFFFFFu);
+    // Through a volatile so MSVC cannot constant-fold the division (C4723 under /WX); guest code divides by a
+    // register, never by a literal zero.
+    volatile float zero = 0.0f;
+    CHECK(bits(FPU_DIV_S(1.0f, zero)) == 0x7FFFFFFFu);
+    CHECK(bits(FPU_DIV_S(-1.0f, zero)) == 0xFFFFFFFFu);
     CHECK(bits(FPU_ADD_S(max, max)) == 0x7FFFFFFFu);
     CHECK(bits(FPU_MUL_S(max, -2.0f)) == 0xFFFFFFFFu);
     CHECK(bits(FPU_ADD_S(1.5f, 2.25f)) == bits(3.75f));
