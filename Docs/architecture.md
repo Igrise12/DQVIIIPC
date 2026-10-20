@@ -148,7 +148,7 @@ multi-megabyte units, a job count chosen from free RAM, and a compiler cache key
 - Guest addresses are 32-bit. Kernel-segment mirrors of RAM are normalized by masking. Generated loads and stores take a **fast path for RAM** (mask, add base, access) and a slow path that dispatches to device handlers for register ranges.
 - **No host pointer is ever stored in guest memory.** Host objects are referred to by handles that the guest treats as opaque integers. This keeps guest memory a pure function of guest behavior, which makes snapshots, differential tests and replay possible.
 - Guest memory is little-endian, matching all supported hosts, so loads and stores need no byte swapping.
-- Debug builds can place watchpoints on guest ranges and can detect writes into code ranges (self-modifying code has not been ruled out for this game; spike S3 checks).
+- Debug builds can place watchpoints on guest ranges and can detect writes into code ranges (spike S3 found no self-modifying code: zero write references into any code range from the main program or the six overlays, so all seven code units can be compiled ahead of time and the window treated as read-only code between loads).
 - At start-up the runtime loads the boot ELF segments into guest RAM from the user's image. The code bytes stay in guest memory because the game may read its own data and tables; the code that **executes** is native.
 
 ### 4.2 Functions and dispatch
@@ -171,13 +171,15 @@ recompilers assume, so it is designed in from the start.
 
 | Responsibility | Mechanism |
 |---|---|
-| Know when an overlay becomes resident | **Primary:** override the game's overlay-loader function (identified in spike S3) so the manager is told which file was loaded. **Fallback:** the overlay header is resident at the window base, so read `overlay_id` at `window + 4` after each disc read that targets the window; hashing the resident bytes against per-overlay fingerprints is the last resort. |
+| Know when an overlay becomes resident | **Primary (S3):** replace the loader `0x00100330` with a native implementation that reads the file from the image into guest RAM at `dest`, tells the manager which overlay is now resident (name-table index or the resident `overlay_id`), repoints the window's dispatch slots **before** returning (the loader itself then runs the constructor table through `jalr`), zeroes bss and returns 1. **Cheaper variant:** hook the empty `0x00100320(dest)` that the game calls after the read and before the flush. **Fallback:** read `overlay_id` at `window + 4`; the header stays resident and nothing ever writes the window. |
 | Route dispatch | The dispatch table has one slot range for the window. The manager points that range at the resident overlay's table when it changes, and at an "empty" table (diagnostic stop) when none is resident. |
 | Keep guest memory honest | The loader still places the overlay bytes in guest RAM exactly as the game expects, because overlay files contain data as well as code. Only the *execution* is native. |
 | Detect desynchronization | Debug builds periodically verify the resident bytes against the expected fingerprint and report a mismatch. |
 | Handle stale returns | A return into an overlay that has been replaced is a guest bug that the original game never exhibits. Debug builds detect it with a generation counter on the call stack. |
 
 **Region handling.** Each region profile lists its overlays, window address and fingerprints. Nothing in the runtime hardcodes `0x00461C80` or the overlay names.
+
+**What spike S3 established.** Overlays never load overlays and contain no syscalls; the 12-mode state machine in `0x001693B0` (mode variable `0x003D2740`) plus 13 constant-index load sites are the only switch logic. Code exists inside the overlays' *data* ranges (constructor thunks, vtable targets), so the per-unit function maps decide what is code, not the header's `text_size`. 168 direct `jal` sites in 43 main functions target 120 window entries, and 63 pointer-table words in main data (the mode init/update/exit tables among them) are the other entry mechanism; the constructor walk `0x00100DE0` calls overlay code through `jalr` immediately after a load. A dispatch range of at most 40,832 slots covers the window. The main program was linked against each overlay's addresses, so a call into the window is valid only while the right overlay is resident; the generation counter in debug builds catches the rest.
 
 ### 4.4 Arithmetic fidelity
 
@@ -235,7 +237,7 @@ follows that model. The decision is tracked as ADR-0003.
 
 The EE kernel is implemented in the runtime, not executed. Syscalls arrive as calls with an ID and register arguments.
 
-- **Coverage order:** thread and semaphore control, event flags, alarms and timers, interrupt handler registration, cache flush (a no-op, but overlay-relevant), memory and heap services, program loading, and the SIF layer that carries RPC to the IOP. Spike S2 found 78 `syscall` sites with 65 distinct numbers in the main program (54 positive, 11 negative interrupt-context variants) and 51 SDK-named kernel-call stubs; that list (`work/ghidra/base/census-base.csv`) is the initial HLE coverage target.
+- **Coverage order:** thread and semaphore control, event flags, alarms and timers, interrupt handler registration, cache flush (a no-op, but overlay-relevant), memory and heap services, program loading, and the SIF layer that carries RPC to the IOP. Spike S2 found 78 `syscall` sites with 65 distinct numbers in the main program (54 positive, 11 negative interrupt-context variants) and 51 SDK-named kernel-call stubs; that list (`work/ghidra/base/census-base.csv`) is the initial HLE coverage target. The first overlay load happens before the title screen, so the file-I/O RPC (`open`/`lseek`/`read`/`close` by `cdrom0:` path) must be HLE'd early; `FlushCache(0)`/`FlushCache(2)`, the only cache calls on that path, and `sceCdSeek` are no-ops for us (S3).
 - **Unimplemented syscalls** log and stop in development builds. They never silently return success.
 - **Thread semantics** are described in §12.
 
@@ -391,6 +393,7 @@ Physical device (SDL3 gamepad or keyboard)
 - The runtime reads `DATA.DAT` and `DATA2.DAT` **directly from the image** by sector, so no multi-gigabyte extraction is needed. Spike S4 recorded the access pattern: one `sceCdSearchFile` per archive at start-up, then `sceCdRead` of 1 to 512 sectors at `LSN + sector` with `sceCdSync(0)` and `sceCdGetError` polling (plus `sceCdSeek` from the overlay loader); the `.HD6` indexes are read through the file-I/O RPC at boot. The disc model therefore needs random sector access by LSN and the ISO directory, and latency modelling can key on (LSN, count).
 - **Latency modes:** *Accurate* models disc timing, which some games depend on. *Fast* completes reads immediately (shorter loading). Both complete reads at deterministic points in virtual time.
 - Reads are asynchronous and cancellable, served from a dedicated I/O thread.
+- The overlay window ends where the heap begins (`0x00489A80`); nothing else is ever placed in the window (S3).
 - Compressed image formats are out of scope for 1.0.
 
 ---
@@ -647,7 +650,7 @@ flowchart BT
 
 - C++20. One namespace per layer (`dq8::core`, `dq8::rt`, `dq8::gs`, `dq8::features`, and so on).
 - A short `README.md` in each top-level source directory explains its purpose and rules (already in place).
-- Region profiles in `data/regions/<serial>.toml`, function maps in `config/functions/<profile>/<unit>.csv`, settings schemas in `config/settings/`.
+- Region profiles in `data/regions/<serial>.toml`, function maps in `config/functions/<profile>/<unit>.csv`, settings schemas in `config/settings/`. The overlay section of a region profile carries the loader facts from S3 (`code_offset`, `window_pointer`, `loader`, `loader_hook`, `load_by_index`, `name_table` and its order, `lsn_cache`, `ctor_walker`, `flush_cache_stub`, `mode_variable`) and, per overlay, `index`, `segment_index`, `memsz` and the header fields as integrity values.
 - Decisions that change this document are recorded as ADRs in `Docs/adr/` (§18).
 
 ---
