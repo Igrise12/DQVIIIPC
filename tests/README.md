@@ -7,7 +7,9 @@
 | `oracle/` | `oracle` | Yes (differential tests against the reference interpreter; none yet) | No |
 | `fixtures/` | | Synthetic inputs only; nothing from a disc | |
 
-`unit/support/` holds the synthetic-input builders: `IsoBuilder` writes small, valid ISO 9660 images (both path tables, both-byte-order fields, nested directories, `;1` identifiers, files spanning sectors) and records where each field landed so a test can corrupt one; `fake_boot_elf()` builds an ELF32 header over seeded random bytes; `seeded_bytes()` is the only source of "data". Keep it that way: a fixture that resembles disc content is a policy violation (architecture.md §14), not a test asset.
+`unit/support/` holds the synthetic-input builders: `IsoBuilder` writes small, valid ISO 9660 images (both path tables, both-byte-order fields, nested directories, `;1` identifiers, files spanning sectors) and records where each field landed so a test can corrupt one; `fake_boot_elf()` builds an ELF32 header over seeded random bytes; `build_mwo3()` builds an `MWo3` overlay container from an `Mwo3Spec` of our own sizes and addresses over seeded bytes (`put_le32()` corrupts one word); `seeded_bytes()` is the only source of "data". Keep it that way: a fixture that resembles disc content is a policy violation (architecture.md §14), not a test asset.
+
+`local/` checks the disc only against facts the region profile already records (names, sizes, hashes, header values); `test_real_overlays.cpp` parses the six overlays from the image and checks `64 + text + data + bss == segment memsz` and the profile rows.
 
 ```bash
 ctest --preset unit-dev-clang                                   # CI's suite
