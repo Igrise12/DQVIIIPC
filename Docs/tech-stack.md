@@ -83,7 +83,7 @@ toolchain (Ubuntu 24.04's GCC and Clang) so the stated minimums stay honest.
 |---|---|
 | **CPU** | x86-64 with **SSE4.1** as a baseline. PS2Recomp notes SSE4 and AVX host support for some vector paths. Decide whether AVX is optional once helpers are written. |
 | **GPU API** | **Vulkan 1.3** capable device on Windows and Linux |
-| **Features needed by parallel-gs** | Documented: `descriptorIndexing`, `timelineSemaphore`, `storageBuffer8BitAccess`, `storageBuffer16BitAccess`, `shaderInt16`, `scalarBlockLayout`, subgroup operations (basic, vote, arithmetic, ballot, shuffle; clustered is not needed), subgroup size control with full subgroups for sizes 4–64 (16–64 only for 16x super-sampling). Checked by the code but undocumented: `bufferDeviceAddress` and at least 32 KiB of compute shared memory. All verified on the RTX 4060 on 2026-10-19 (spike S5a). Reported as fine on current desktop drivers; tested by its author on RADV, AMDVLK, amdgpu-pro, Steam Deck, NVIDIA RTX and Intel Arc. |
+| **Features needed by parallel-gs** | Documented: `descriptorIndexing`, `timelineSemaphore`, `storageBuffer8BitAccess`, `storageBuffer16BitAccess`, `shaderInt16`, `scalarBlockLayout`, subgroup operations (basic, vote, arithmetic, ballot, shuffle; clustered is not needed), subgroup size control with full subgroups for sizes 4–64 (16–64 only for 16x super-sampling). Checked by the code but undocumented: `bufferDeviceAddress` and at least 32 KiB of compute shared memory. All verified on the RTX 4060 on 2026-10-19 (spike S5a); measured on this game's frames (S5b): 5 ms of GPU per field frame at 1x, 18.5 ms at 16x, 576–720 MiB of device memory. Reported as fine on current desktop drivers; tested by its author on RADV, AMDVLK, amdgpu-pro, Steam Deck, NVIDIA RTX and Intel Arc. |
 | **Reference performance machine** | 6 cores, RTX 4060 class GPU, 16 GB RAM |
 
 The launcher's Diagnostics page reports whether the current device satisfies the active backend's requirements (architecture.md §11.2).
@@ -113,7 +113,7 @@ Versions: use the **latest stable release at the time each dependency is added**
 | **Compression** | zstd | BSD-3-Clause | Caches and dumps. |
 | **Image loading** | stb_image and stb_image_write | Public domain or MIT | Texture packs and screenshots. |
 | **Movie decoding** | **FFmpeg libavcodec**, LGPL build, dynamically linked, `mpeg2video` decoder only (recommended by spikes S6a and S6b; ADR with the runtime design). Fallback: libmpeg2 | LGPL-2.1+; GPL-2.0+ | Behind `IMovieDecoder`, fed by an `sceMpeg`-level HLE (architecture.md §7.2): the game's own code decrypts and demuxes, so no libavformat, no demux library and no audio codec are needed; the decoder only handles MPEG-2 Main profile 512 × 448 at 30 fps (`Docs/formats/mvi.md`). `pl_mpeg` (MIT) is MPEG-1 only and unsuitable. |
-| **Recompiler** | **PS2Recomp** (`ps2xRecomp`, `ps2xAnalyzer`, and its IOP executor) | GPL-3.0 | Pinned commit (`eb8688b`, 2026-10-14) plus patch queue. It has no git submodules: `ps2xRecomp` fetches ELFIO `Release_3.12`, toml11 `v4.4.0`, fmt `12.1.0`, libdwarf `v2.2.0` and rabbitizer `1.14.3` with CMake FetchContent at configure time, so offline, reproducible builds need `FETCHCONTENT_SOURCE_DIR_<NAME>` overrides to our own pinned copies (spike S1). |
+| **Recompiler** | **PS2Recomp** (`ps2xRecomp`, `ps2xAnalyzer`, and its IOP executor) | GPL-3.0 | Pinned commit (`eb8688b`, 2026-10-14) plus patch queue. It has no git submodules: FetchContent pulls nine repositories at configure time (`ps2xRecomp`: ELFIO `Release_3.12`, toml11 `v4.4.0`, fmt `12.1.0`, libdwarf `v2.2.0`, rabbitizer `1.14.3`; `ps2xAnalyzer`: nlohmann/json `v3.11.3`; `ps2xRuntime`: raylib `5.5`, Dear ImGui `v1.92.7-docking`, rlImGui, plus system FFmpeg on Linux). Only the first six matter for the tools we keep. `FETCHCONTENT_FULLY_DISCONNECTED=ON` with `FETCHCONTENT_SOURCE_DIR_<NAME>` overrides configures offline in 4.5 s (verified, S1). Builds unpatched with GCC 16 and Clang 23 (60–80 s, 445/445 tests); upstream CI already covers Linux GCC and Clang, so the README's "tested mainly with MSVC" is stale. |
 | **Profiling** | Tracy (optional) | BSD-3-Clause | Development builds only. |
 | **HTTP for update checks** | Platform HTTP API or libcurl, in the launcher only, optional | OS or curl license | Not needed until the opt-in update check is built. |
 
@@ -128,19 +128,19 @@ This is the least conventional part of the stack and the main usability risk, so
 
 ### 6.1 Characteristics
 
-- A comparable PS2 recompilation produced about 6,400 generated files for roughly 6,400 functions, took 20 to 40 minutes on a clean build, used about 20 GB of disk, and recommended 16 GB of RAM. Our numbers are unknown until spike S1.
-- Our program has a boot ELF plus six overlays, each its own code unit.
+- Measured by spike S1 on the boot ELF with the analyzer's heuristic map (8,314 functions): the recompiler runs in 2 s and 0.6 GiB and writes 8,335 files, 201 MB, 4.77 M lines of C++ (deterministic: byte-identical across worker settings). A typical unit is 6 KB of source but preprocesses to 174 k lines, so it costs about 1.6 CPU-s with GCC 16 or Clang 23 at `-O1` or `-O2` alike; the 23 MB dispatch table (`register_functions.cpp`) costs 122 CPU-s and 2 GiB, the largest single function (7.2 MB) 204 CPU-s and 3 GiB. Whole tree: about 15,000–16,000 CPU-s, about 6,000 with a precompiled header; 30–40 minutes on six cores (≈15 with the PCH); objects about 125 MB.
+- Our program has a boot ELF plus six overlays, each its own code unit; expect fewer and cleaner functions with the S2 map (9,598).
 
 ### 6.2 Build settings
 
 | Setting | Choice | Reason |
 |---|---|---|
 | Chunking | Many functions per file, controlled by the generator, not one file per function | Fewer, larger translation units compile faster than thousands of tiny ones. PS2Recomp exposes `single_file_output`, `low_memory_mode` and `output_worker_threads` for this. |
-| Optimization | `-O1` for the bulk, `-O2` for hot units identified by profiling | Compile time against run time. |
-| Language flags | No exceptions, no RTTI | The generated code needs neither. |
+| Optimization | `-O2` for all function units; `-O0` or `-O1` for the generated dispatch table | S1: `-O2` costs the same CPU as `-O1` on typical units (front end dominates), so the split buys nothing there; the table is a static initialiser with nothing to optimise. |
+| Language flags | No exceptions, no RTTI (goal) | At `eb8688b` the emitter writes `throw` on unhandled instructions (422 units under the heuristic map), so this needs a clean function map or an emitter patch first (S1). |
 | LTO | Off for the module | Link time grows sharply and benefits are small across a C ABI. |
-| Precompiled header | The context and helper headers | Saves repeated parsing. |
-| Output | One shared library **per code unit** (main plus each overlay) is the working assumption | Parallel linking, and a change to one overlay's map rebuilds only that library. Re-evaluate once measured. |
+| Precompiled header | The four runtime headers every unit includes | Measured 0.37× per unit (1.6 → 0.6 CPU-s, S1): the single largest saving; on by default. |
+| Output | One shared library **per code unit** (main plus each overlay) | Parallel linking, and a change to one overlay's map rebuilds only that library. Required anyway: each recompiler run emits its own dispatch table under the same symbol names, so units cannot share one image unprefixed (S1). The few multi-megabyte single-function units set the critical path and should be split by the emitter or the map. |
 | Cache | ccache or sccache, keyed on generated content | The recompiler is deterministic, so unchanged output is a cache hit. |
 | Short work path on Windows | Build under a short directory such as `%LOCALAPPDATA%\dq8\w` | Another PS2 port hit the 260-character path limit. |
 
@@ -167,7 +167,7 @@ These are for **contributors**. Players do not need any of them, because the fun
 |---|---|---|---|
 | **Ghidra** 12.1.4 | Disassembly, function discovery, the PS2Recomp export script (`ExportPS2Functions.java`) | Apache-2.0 | With the `ghidra-emotionengine-reloaded` extension (2.1.38, language `r5900:LE:32:default`). Needs JDK 21 or newer; JDK 27 is accepted. The export script is interactive (`askFile`), so headless runs need a `.properties` answer file; spike S2 confirmed it runs unmodified that way. Headless import and analysis of the boot ELF take 2–3 minutes and 3.7 GB RSS (JDK 27). First-party scripts in `tools/ghidra/`: `headless.sh`, `Dq8AnalysisOptions.java`, `MapElfSegmentTails.java` (maps the bss and overlay window that the ELF loader skips), `InstructionCensus.java`, `ExportPS2Functions.properties`, `QueryRefs.java` (string, reference, constant, caller and decompile queries in one read-only run; S4) and `MovieXrefs.java` (S6b). The exporter's CSV lists labels as well as functions (68,791 records for 9,718 functions) and must be filtered before use. |
 | **REA** (`rea-agents` 6.7.0) | MCP server and CLI over the Ghidra install, for interactive queries from agent sessions (functions, xrefs, bytes, decompile) | MIT | Spike S0 (2026-10-19): it **refuses our R5900 ELF** at its own admission step (`architecture_unsupported`, MIPS32/32R2 only, no PS2 profile), with or without the language override, so all analysis of the game runs on headless Ghidra (`tools/ghidra/`). REA stays registered for host-side binaries and for a possible upstream PS2 profile (`Docs/spikes/S0-rea-capability.md`). Installed with `npm install --global rea-agents`, registered with `rea setup --client claude_code`. |
-| **PCSX2** | Ground truth for behavior, debugger, GS dump capture, texture dumping, ISO sanity checks | GPL-3.0 | The oracle of last resort (architecture.md §15). |
+| **PCSX2** 2.7.524 | Ground truth for behavior, debugger, GS dump capture, texture dumping, ISO sanity checks | GPL-3.0 | The oracle of last resort (architecture.md §15). `tools/pcsx2/headless_run.py` runs it headless under a private Xvfb with an isolated profile, scripted input, OSD OCR (tesseract), raw `.gs` dumps and uncompressed save states; `tools/gsdump/gsdump_stats.py` parses dumps into register, primitive and transfer histograms (S7). |
 | **ImHex** | Hex editor with a pattern language for documenting the `HD6`, `MVI` and `MWo3` formats | GPL-2.0 | Patterns we write are committed under `tools/extract/`; the first is `hd6.hexpat` (spike S4; not yet verified in ImHex, which is not installed here). |
 | **QuickBMS** | Quick archive probing once an index format is understood | Per its own terms | Dev use only. Our own extractor lives in `tools/extract`. |
 | **GNU binutils** (`readelf`, `objdump`) | ELF inspection | GPL | Already used to inspect the boot ELF. |
@@ -287,7 +287,7 @@ The primary development machine, as found by inspection. Treat it as the referen
 | Graphics and platform | SDL3 3.4.16 and SDL2 2.32.72 development packages, Vulkan 1.4.357 (headers and loader), `glslc` 2026.3 |
 | GPU | NVIDIA GeForce RTX 4060 |
 | **Found in the sibling `MGS2_Undub` project** | Ghidra 12.1.4 with the Emotion Engine extension (`tools/ghidra_12.1.4_PUBLIC`), an extracted PCSX2 2.7.524 (`tools/pcsx2/squashfs-root`), a headless PCSX2 harness and headless Ghidra scripts; the PS2 BIOS dump and the PCSX2 AppImage live under the home directory. All referenced through `tools/local.env`, never copied into this repository. |
-| **Found** | `clang-format`, `clang-tidy`, `vulkaninfo`, Xvfb, ffmpeg, podman and docker, Node.js 24.21 (for REA); paraLLEl-GS and its tools built under `work/parallel-gs/` (S5a); a Ghidra project of the boot ELF under `work/ghidra/base` (S2) |
+| **Found** | `clang-format`, `clang-tidy`, `vulkaninfo`, Xvfb, ffmpeg, podman and docker, Node.js 24.21 (for REA); paraLLEl-GS and its tools built under `work/parallel-gs/` (S5a); a Ghidra project of the boot ELF under `work/ghidra/base` (S2); `tesseract` for OSD OCR; Xvfb works inside the Bash sandbox (S7) |
 | **Not found** | `spirv-cross`, `xorriso` and `isoinfo` (the last two are not needed: our own ISO reader replaces them); `pre-commit`, `reuse`, `ccache`, `gh` (being installed with pacman) |
 | **Not checked** | RenderDoc, ImHex, a PS2 cross toolchain |
 
