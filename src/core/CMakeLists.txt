@@ -14,6 +14,8 @@ add_library(dq8_core STATIC
     overlay/mwo3.cpp
     overlay/overlay_elf.cpp
     platform/files.cpp
+    platform/process.cpp
+    platform/system_info.cpp
     intake/verify.cpp
     intake/extract.cpp
 )
