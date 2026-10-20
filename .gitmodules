@@ -4,3 +4,18 @@
 [submodule "third_party/Catch2"]
 	path = third_party/Catch2
 	url = https://github.com/catchorg/Catch2.git
+[submodule "third_party/PS2Recomp"]
+	path = third_party/PS2Recomp
+	url = https://github.com/ran-j/PS2Recomp.git
+[submodule "third_party/ELFIO"]
+	path = third_party/ELFIO
+	url = https://github.com/serge1/ELFIO.git
+[submodule "third_party/fmt"]
+	path = third_party/fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "third_party/libdwarf-code"]
+	path = third_party/libdwarf-code
+	url = https://github.com/davea42/libdwarf-code.git
+[submodule "third_party/rabbitizer"]
+	path = third_party/rabbitizer
+	url = https://github.com/Decompollaborate/rabbitizer.git
