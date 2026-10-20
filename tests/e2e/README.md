@@ -31,11 +31,9 @@ For each fixture: `units/<unit>.elf` and the Ghidra exporter's map format, `maps
 
 `run_e2e.cmake` runs one step; CTest fixtures order the steps. Work files go to `<build>/tests/e2e/work/`.
 
-**Status (2026-10-20):** the generator and `e2e.fixtures` run, and `ps2_recomp` accepts all four units
-(exit 0, no unhandled instructions). The four pipeline steps are written against the M2 brief and register only
-once `dq8-game` and `cmake/module` exist; the options they pass that the brief leaves open (how `dq8ctl` gets a
-unit ELF without a disc, where `build` finds the template, the shape of `dq8-game --json`) are grouped at the top
-of `run_e2e.cmake`.
+The steps use `dq8ctl recomp`'s developer mode (`--unit-elf <unit>=<path>`, no disc; modules land in
+`<work>/modules/dev/`) and the `stop` and `context.gpr` members of `dq8-game --json`; those choices are grouped at the
+top of `run_e2e.cmake`. The pipeline steps register only when `dq8-game` and `cmake/module` exist.
 
 ```bash
 cmake --preset dev-gcc -DDQ8_BUILD_RECOMP=ON -DDQ8_BUILD_E2E=ON && cmake --build --preset dev-gcc --parallel

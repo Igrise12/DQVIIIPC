@@ -14,16 +14,16 @@
 # EXPECT_A0, EXPECT_V0.
 cmake_minimum_required(VERSION 3.25)
 
-# --- Interfaces of sessions B and C that the M2 brief leaves open; checked when they are merged. ----------
-# How generate/build receive a unit's ELF without a disc (C).
+# --- The parts of dq8ctl (session C) and dq8-game (session B) the M2 brief leaves open. ---------------------
+# dq8ctl recomp developer mode: no disc; `main` is the main unit, any other name an overlay whose id comes from
+# the MWo3 header in its ELF. Modules land in <work>/modules/<profile id, default "dev">/.
 set(unit_elf_option "--unit-elf")                 # repeated: --unit-elf <unit>=<path>
-# Where build finds the module template and the ABI headers from a build tree (C).
 set(module_template_option "--module-template")
 set(abi_include_option "--abi-include-dir")
-# Paths of the stop report in dq8-game's --json output (B), as string(JSON GET) member lists.
-set(json_stop_kind stop kind)                     # "syscall"
-set(json_syscall_number stop syscall)             # number or "0x..." string
-set(json_reg_prefix registers)                    # registers.<name>: number or "0x..." string
+# dq8-game --json prints one object per line; the last one is the run report. Member paths for string(JSON):
+set(json_stop_kind stop reason)                   # "syscall"
+set(json_syscall_number stop number)              # "0x3C"
+set(json_reg_prefix context gpr)                  # context.gpr.<name>: 64-bit "0x..." strings
 # -----------------------------------------------------------------------------------------------------------
 
 foreach(var STEP FIXTURE_DIR WORK_DIR UNITS)
