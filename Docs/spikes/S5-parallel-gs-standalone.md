@@ -342,3 +342,182 @@ PCSX2 integration's size; the trace backend and tests are extra.
    through the deinterlacer and the field-aware super-sampling path; compare raw fields (`--conservative-crtc`)
    before judging the weave output, and note that `adapt_to_internal_horizontal_resolution` is the switch that
    avoids the extra horizontal blur on 512-wide frames.
+
+### S5b
+
+**Session:** 2026-10-19, continued in the S5a session after S7 delivered dumps. **Stop reason:** done for every
+scene S7 captured (title, title menu, first-run settings, field in 4:3 and 16:9, main menu, opening movie, the
+in-engine flyover); battle does not exist as a dump yet.
+
+**Method**
+
+- Inputs: S7's uncompressed state-version-9 dumps (`work/pcsx2/.../*.gs`; the four multi-frame ones hold 26
+  vsyncs, the single-frame ones 4). Every dump header embeds a 640x480 RGBA screenshot of PCSX2's software
+  renderer at the moment the dump started (`screenshot_*` header fields); `work/parallel-gs/scripts-s5b/
+  extract_dump_screenshot.py` pulls it out, and that image is the reference for each scene
+  (`work/parallel-gs/ref/<scene>-rgba.png`). PCSX2's display settings in S7's profile were anti-blur on, CRTC
+  offsets off, overscan off, deinterlace "Automatic", bilinear presentation of the 512x448 frame into a 640x480
+  window. — evidence: `work/pcsx2/profile/PCSX2/inis/PCSX2.ini` lines 125-141 and 218.
+- Replay: the patched `parallel-gs-replayer` (GCC build; the patch gained `--timestamps` for per-stage GPU
+  time and `--backbuffer-promotion`), driven by `work/parallel-gs/scripts-s5b/replay_all.sh`. The dump reader's
+  default scanout (force-progressive, anti-blur, adapt to the internal horizontal resolution) matches PCSX2's
+  settings above and yields one 512x448 progressive image per rendered frame; the reader merges the empty
+  vsync of each 30 Hz pair into the next frame, so the tool's "per VBlank" figures are per rendered frame
+  (13 per 26-vsync dump, 26 for the 60 Hz menu).
+- Comparison: our frame scaled to 640x480 and compared with the reference by SSIM over RGB with `ffmpeg`
+  (`scripts-s5b/ssim_all.sh`; `s5b-ssim.csv`, `s5b-ssim-filter.csv`). Two scaling filters are reported:
+  bilinear, which matches PCSX2's presentation, and bicubic. Frame 0 of every replay is the display buffer as
+  PCSX2 left it in the dumped VRAM (the game blits last frame's render target into the display buffer before
+  drawing), so it is identical at every super-sampling rate; **frame 1 is the first frame rendered entirely by
+  parallel-gs** and is the number that matters. — inferred from frame 0 being bit-identical across rates.
+- Noise floor: two PCSX2 captures of the same scene a moment apart (the dump-embedded screenshot against
+  PCSX2's own screenshot file) agree at SSIM 0.709 (title, whose background moves), 0.965 (field 4:3), 0.997
+  (field 16:9) and 0.987 (menu). Parity at or above those values is parity at the limit of the method.
+
+**Parity** (SSIM, ours against the dump's own PCSX2 screenshot; bilinear-matched first, bicubic second)
+
+| Scene (dump) | Frame 0 (PCSX2's pixels through our scanout) | Frame 1, 1x (PSNR) | Frame 1, 2x | Frame 1, 4x | Our own frame 0 to 1 change |
+|---|---|---|---|---|---|
+| Title (`title-multi.gs`) | 0.986 / 0.980 | 0.942 / 0.932 (32.6 dB) | 0.932 | 0.932 | 0.943 |
+| Title menu (`title-menu.gs`) | 0.944 / 0.935 | 0.929 / 0.918 (32.3 dB) | 0.916 | 0.916 | 0.982 |
+| First-run settings (`settings-screen.gs`) | 0.998 / 0.996 | 0.996 / 0.994 (34.2 dB) | 0.993 | 0.992 | |
+| Field 4:3 (`field-multi.gs`, probe-202427) | 0.995 / 0.986 | **0.996 / 0.988 (40.6 dB)** | 0.935 | 0.928 | 0.992 |
+| Field 16:9 (`field-multi.gs`, new-game-field-204003) | 0.995 / 0.985 | **0.996 / 0.987 (40.0 dB)** | 0.932 | 0.924 | |
+| Main menu (`menu-multi.gs`) | 0.989 / 0.984 | **0.992 / 0.986 (40.1 dB)** | 0.986 | 0.986 | 0.985 |
+| Opening movie (`movie-multi.gs`) | 0.998 / 0.991 | **0.997 / 0.990 (40.5 dB)** | 0.990 | 0.990 | 0.996 |
+| Flyover (`level5-logo-multi.gs`) | 0.564 / 0.549 | 0.486 / 0.471 (20.6 dB) | 0.471 | 0.471 | 0.502 |
+
+- The field, menu, movie and settings frames that parallel-gs renders itself match PCSX2 at 0.992 to 0.997,
+  which is above the agreement between two PCSX2 captures of the same scene. The movie frames exercise the
+  host-to-local upload path at one full 512x448 32-bit frame per vsync (S7) and match at 0.997.
+- The flyover is a camera flight: consecutive frames of our own replay agree only at 0.50, so its 0.56 against
+  a reference taken a frame earlier says nothing about the renderer. The title background also moves (0.943
+  between our own consecutive frames), which is why title frames after frame 0 drift from the reference.
+- Title menu: the two text windows match at 0.950 and 0.979 while the map region scores 0.894 (the same map
+  scores 0.990 in the title screen), so the shortfall is the moving background and the capture moment, not
+  the windows, text or alpha blend; the zoomed crops (`work/parallel-gs/diff/titlemenu-*.png`) show the same
+  pixels. — evidence: region SSIMs in this session's log, `diff/`.
+- Super-sampling changes nothing in the sprite-only scenes (title, menu, movie: 1x and 4x frames are
+  bit-identical, SSIM 1.000) and lowers the field's SSIM against PCSX2 from 0.996 to 0.93 because it
+  anti-aliases the field's dense geometry: our own 1x and 4x field frames agree at 0.904, 2x and 4x at 0.985,
+  and the difference image (`diff/field43-f1-diff-1x-vs-4x.png`) is confined to polygon edges, grass lines and
+  foliage cut-outs. That is the enhancement working, not a systematic error.
+- Deinterlacing: no systematic difference. This game blends its own fields (both CRTC circuits on the same
+  buffer with a one-line offset and ALP 127, per S7), so force-progressive plus anti-blur in parallel-gs and
+  PCSX2's merged output are the same picture. `--conservative-crtc` (raw fields, overscan, CRTC offsets)
+  produces 570x240 fields with alternating phase and a 10.8 MHz pixel clock, one per vsync (26 per dump); they
+  look right (`frames/*/ssaa1-conservative/`) but cannot be scored, because PCSX2 keeps no raw field and
+  scaling a field against the merged frame gives 0.20 to 0.35 by construction.
+- AA1 is used by the settings screen and menu sprites (S7); both match at 0.992 to 0.998 at 1x, so no AA1
+  artefact is visible in 2D. AA1 on 3D geometry was not exercised by any captured scene.
+- The presentation filter is the only measurable systematic term: matching PCSX2's bilinear upscale raises
+  every SSIM by 0.005 to 0.01 (field 0.988 to 0.996).
+
+**Performance on the RTX 4060** (per rendered frame; the field's budget is 33.3 ms at 30 Hz, the menu's 16.7 ms
+at 60 Hz; `work/parallel-gs/s5b-replay-summary.txt`, `s5b-gpu-summary.txt`, `s5b-logs/`)
+
+| Scene | SSAA | CPU ms per frame (two runs) | GPU total ms | of which shading | textures and CLUT | copies | VRAM mirror | Device memory tracked |
+|---|---|---|---|---|---|---|---|---|
+| Field 4:3 | 1x | 11.2 / 9.3 | **4.95** | 2.89 | 0.53 | 0.39 | 0.92 | 640 MiB |
+| Field 4:3 | 2x | 14.1 / 11.1 | 6.22 | 4.15 | 0.56 | 0.40 | 0.85 | 640 MiB |
+| Field 4:3 | 4x | 15.1 / 12.0 | 7.66 | 5.59 | 0.57 | 0.39 | 0.85 | 640 MiB |
+| Field 4:3 | 8x | 17.8 / 15.2 | 11.58 | 9.34 | 0.57 | 0.45 | 0.95 | 656 MiB |
+| Field 4:3 | 16x | 24.4 / 21.7 | **18.48** | 16.20 | 0.57 | 0.43 | 0.99 | 720 MiB |
+| Field 16:9 | 1x | 7.9 / 8.5 | 5.06 | 2.79 | 0.53 | 0.39 | 1.13 | 640 MiB |
+| Field 16:9 | 4x | 11.4 / 12.3 | 7.57 | 5.53 | 0.57 | 0.40 | 0.80 | 640 MiB |
+| Main menu (60 Hz) | 1x | 2.0 / 1.5 | 1.41 | 0.52 | 0.07 | 0.49 | 0.30 | 576 MiB |
+| Main menu (60 Hz) | 4x | 2.9 / 2.5 | 2.46 | 1.54 | 0.07 | 0.52 | 0.30 | 640 MiB |
+| Main menu (60 Hz) | 16x | 6.5 | | | | | | 720 MiB |
+| Title | 1x | 1.3 / 1.4 | 0.80 | 0.28 | 0.03 | 0.15 | 0.29 | 576 MiB |
+| Title | 16x | 4.9 | | | | | | 720 MiB |
+| Opening movie | 1x | 2.9 / 2.0 | 0.69 | 0.10 | 0.01 | 0.26 | 0.27 | 576 MiB |
+| Settings, title menu, flyover | 1x to 16x | 0.9 to 4.3 | | | | | | 576 to 720 MiB |
+
+- The GPU renders a field frame in 5 ms at native resolution and 18.5 ms at 16x super-sampling, so even 16x
+  fits the 30 Hz budget on this GPU; shading dominates and scales with the sample count, everything else is
+  flat. "VRAM mirror" is parallel-gs's own VRAM-to-host synchronisation for its CPU-side texture heuristics on
+  discrete GPUs (it logs "Opting in for PCI-e copies to keep CPU/GPU in sync"), not a game readback: S7 found
+  none in any scene (inferred from the log line and `GSRenderer::flush_readback`).
+- The CPU column is the replayer's single thread: reading the dump plus `gif_transfer` decoding of about 21,400
+  GIF tags and 30,000 vertex kicks per field frame. 8 to 11 ms per frame means the GIF decode alone will keep a
+  GS thread about 25 to 30 % busy at 30 Hz in the field; architecture.md §12's separate GS thread is required,
+  not optional. All CPU figures are upper bounds: S1's compile ran at nice 19 and S3's Ghidra at low priority
+  during these runs.
+- Device memory tracked by Granite is 576 to 720 MiB in every scene and grows only with the sample count,
+  so fixed buffers dominate; the 2 GiB image slab is a reservation, not usage.
+- First-frame replay time (0.5 to 1.4 s) is pipeline compilation, as in S5a; it confirms that the wrapper
+  must persist the pipeline cache.
+
+**Resolution: how DQ8 gets a higher-resolution picture out of parallel-gs**
+
+- Super-sampling alone anti-aliases inside the 512x448 frame. `--high-res-scanout` at 4x produces a 1024x896
+  image that is bit-identical to the 4x frame upscaled with nearest-neighbour (SSIM 1.000): the game blits its
+  PSMCT32 render target at FBP `0x000` into the PSMCT24 display buffer at `0x070` with textured sprites every
+  frame (S7), the blit goes through the texture cache, and the cache resolves the samples. This is the case the
+  `VSyncInfo::high_resolution_scanout` comment warns about.
+- parallel-gs's `Hacks::backbuffer_promotion` exists for exactly this blit. A temporary diagnostic
+  (`work/parallel-gs/patches/0002-diag-backbuffer-promotion.patch`, not applied) shows the heuristic
+  **accepts** DQ8's blit (a render pass on FBP `0x070` of 32 sprites from one texture, source rectangle
+  0,0 to 512,448), but the promoted source only keeps its samples when `GSOptions::super_sampled_textures`
+  is on. With all three options (`--ssaa 4 --high-res-scanout --backbuffer-promotion --ssaa-textures`) the
+  1024x896 output carries real sub-pixel detail: SSIM 0.885 against the nearest-upscaled 4x frame, and the
+  crops (`diff/field43-f1-hires-vs-promo-sstex-crop.png`) show sharper edges and texture. Super-sampled
+  textures alone change the 512x448 frame only slightly (0.986 against plain 4x).
+- Cost in the field: GPU 7.4 ms at 2x, 9.8 ms at 4x (7.7 ms without super-sampled textures), 15.0 ms at 8x;
+  texture upload rises from 0.57 to 0.83 ms. The 2D scenes gain nothing (menu: still bit-identical to the
+  upscaled frame), as expected for 512x448 artwork.
+- So the "internal resolution" setting of architecture.md §6.3 maps, for this game, to the parallel-gs options
+  super-sampling rate, super-sampled textures, backbuffer promotion and high-resolution scanout together, and a
+  double-resolution picture costs about 10 ms of GPU per frame at 4x on an RTX 4060. Upstream labels the
+  promotion a hack that "is not accurate"; parity at 1x is unaffected because it is off there.
+
+**Not covered**
+
+- Battle (S7 did not reach it); the field is the heaviest scene captured (25,000 to 30,000 kicks per frame).
+- Scenes with local-to-host readbacks (S7 found none) and AA1 on 3D geometry.
+- Behaviour of the promotion heuristic over a whole session (menus drawn over the blit, movies, fades).
+
+**Decision impact**
+
+- D5 / ADR-0004: **accept paraLLEl-GS as the first GS backend.** Parity on this game's real frames is at the
+  noise floor of the capture method (0.992 to 0.997 for field, menu, movie and settings), a field frame costs
+  5 ms of GPU at native resolution and 18.5 ms at 16x super-sampling, both inside the 30 Hz budget on the
+  reference GPU, and a genuine double-resolution path exists through its own options. Conditions for the ADR:
+  the LGPL shared-library arrangement from S5a; upstream accepts no contributions, so our changes (the replayer
+  options; any later promotion fix) stay under `patches/parallel-gs/`; the GIF decode costs about 8 ms of CPU
+  per field frame on one thread, so the GS thread of architecture.md §12 is mandatory; persist the pipeline
+  cache to avoid the 1.4 s first-launch stall.
+- R3 (GS speed and accuracy): GPU-side risk is reduced for this game on desktop-class GPUs; the open part of
+  R3 is now CPU-side GIF decode cost and low-end GPUs, plus battle, which no dump covers.
+- Brief §7 "higher resolution": feasible without the native renderer, with the caveats above.
+
+**What changes in the docs (S5b additions)**
+
+- architecture.md §6.2 parallel-gs row: add "2x output resolution through backbuffer promotion, super-sampled
+  textures and high-resolution scanout, verified on this game (S5b)". §6.3: say what "internal resolution"
+  means for parallel-gs. §12: the GS thread is required (about 8 ms of GIF decode per field frame).
+- tech-stack.md §4.2: add the measured numbers (field 5 ms GPU at 1x, 18.5 ms at 16x on the RTX 4060).
+- project-brief.md §7: "Higher resolution" becomes available with the first backend; §12 R3 as above; §14 D5
+  marked accepted once ADR-0004 is written.
+
+**Local artifacts (git-ignored; frames and references are game images and never leave `work/`)**
+
+- `work/parallel-gs/ref/<scene>-rgba.png`: the screenshot embedded in each dump (`*-bgra.png` are the
+  wrong channel order, kept for the record; `*.raw` are the extracted pixels).
+- `work/parallel-gs/frames/<scene>/<variant>/frame_NNNNN.png` and `frames.csv`: replays at 1x, 2x, 4x, 4x with
+  high-resolution scanout, raw fields, and for the field and menu the promotion and super-sampled-texture
+  variants (323 MB).
+- `work/parallel-gs/diff/`: difference images and zoomed side-by-side crops used above.
+- `work/parallel-gs/s5b-logs/`, `s5b-replay-summary.txt`, `s5b-gpu-summary.txt`, `s5b-ssim.csv` (its two
+  numeric columns are SSIM then PSNR; the header is off by one), `s5b-ssim-filter.csv`.
+- `work/parallel-gs/scripts-s5b/`: the driver, the SSIM script and the screenshot extractor.
+- `work/parallel-gs/patches/0001-replayer-dump-png.patch` (274 lines, now with `--timestamps` and
+  `--backbuffer-promotion`) and `0002-diag-backbuffer-promotion.patch` (diagnostic only; the source was
+  restored after the run).
+
+**Open questions (S5b)**
+
+- Battle parity and cost → S7 follow-up (reach a battle), then rerun `scripts-s5b/replay_all.sh` on it.
+- Does the promotion heuristic hold up across a play session (menus over the blit, movie fades)? → M3, when the
+  backend runs live.
+- CPU cost of `gif_transfer` in our runtime versus the replayer (same code path, no file read) → M3 profiling.
