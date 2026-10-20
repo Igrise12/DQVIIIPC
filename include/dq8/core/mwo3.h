@@ -27,8 +27,8 @@ namespace dq8::core {
 
 inline constexpr std::size_t mwo3_header_size = 64;
 inline constexpr std::size_t mwo3_name_size = 32;
-inline constexpr std::uint32_t mwo3_magic = 0x336F574Du; // "MWo3" read as a little-endian u32
-inline constexpr std::uint32_t mwo3_max_overlay_id = 64; // sanity bound; the game uses 1..6
+inline constexpr std::uint32_t mwo3_magic_word = 0x336F574Du; // "MWo3" read as a little-endian u32
+inline constexpr std::uint32_t mwo3_max_overlay_id = 64;      // sanity bound; the game uses 1..6
 
 // The address range an overlay may occupy: [base, end).
 struct Mwo3Window {

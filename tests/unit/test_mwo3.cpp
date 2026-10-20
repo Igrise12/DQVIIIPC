@@ -50,7 +50,7 @@ TEST_CASE("a valid MWo3 container parses with its fields and derived addresses",
 
     const auto o = dq8::core::parse_mwo3(file, window);
     const auto& h = o.header;
-    CHECK(h.magic == dq8::core::mwo3_magic);
+    CHECK(h.magic == dq8::core::mwo3_magic_word);
     CHECK(h.overlay_id == 3);
     CHECK(h.load_address == 0x00200000);
     CHECK(h.text_size == 0x200);
@@ -68,7 +68,7 @@ TEST_CASE("a valid MWo3 container parses with its fields and derived addresses",
     CHECK(h.end_address() == 0x00200300);
     CHECK(h.table_entry_count() == 2);
 
-    CHECK(h.raw_words[0] == dq8::core::mwo3_magic);
+    CHECK(h.raw_words[0] == dq8::core::mwo3_magic_word);
     CHECK(h.raw_words[1] == 3);
     CHECK(h.raw_words[5] == 0x40);
     CHECK(h.raw_words[7] == h.table_end);

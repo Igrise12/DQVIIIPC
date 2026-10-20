@@ -60,7 +60,7 @@ TEST_CASE("the six real overlays parse as MWo3 containers that match the profile
         const auto bytes = image.read_all(image.require(o.path), window.end - window.base);
         const auto parsed = dq8::core::parse_mwo3(bytes, window);
         const dq8::core::Mwo3Header& h = parsed.header;
-        CHECK(h.magic == dq8::core::mwo3_magic);
+        CHECK(h.magic == dq8::core::mwo3_magic_word);
         CHECK(h.overlay_id == o.id);
         CHECK(h.load_address == window.base);
         CHECK(h.text_size == o.text_size);

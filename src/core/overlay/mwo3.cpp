@@ -23,7 +23,7 @@ std::string hex32(std::uint32_t v) {
 } // namespace
 
 bool looks_like_mwo3(std::span<const std::uint8_t> head) noexcept {
-    return head.size() >= 4 && le32(head.data()) == mwo3_magic;
+    return head.size() >= 4 && le32(head.data()) == mwo3_magic_word;
 }
 
 Mwo3Header parse_mwo3_header(std::span<const std::uint8_t> bytes, std::uint64_t file_size,
@@ -45,7 +45,7 @@ Mwo3Header parse_mwo3_header(std::span<const std::uint8_t> bytes, std::uint64_t 
     h.bss_size = h.raw_words[5];
     h.table_start = h.raw_words[6];
     h.table_end = h.raw_words[7];
-    if (h.magic != mwo3_magic) {
+    if (h.magic != mwo3_magic_word) {
         throw Error(ErrorCode::mwo3_magic, "not an MWo3 overlay container (magic " + hex32(h.magic) + ")");
     }
 
