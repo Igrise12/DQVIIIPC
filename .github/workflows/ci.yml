@@ -51,6 +51,35 @@ jobs:
       - run: cmake --build --preset asan --parallel
       - run: ctest --preset unit-asan
 
+  # ps2_recomp built from the pinned submodules (FetchContent disconnected), then hand-assembled MIPS fixtures
+  # through recompile -> game module -> dq8-game (tests/e2e/README.md). No game data.
+  recomp-e2e:
+    name: Linux GCC 13 recompile end-to-end
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with: { submodules: recursive }
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build gcc-13 g++-13
+      - run: echo "::add-matcher::.github/problem-matchers/gcc.json"
+      - name: Configure
+        run: >-
+          cmake --preset ci-gcc -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13
+          -DDQ8_BUILD_RECOMP=ON -DDQ8_BUILD_E2E=ON
+      - name: Build (host, ps2_recomp, fixture generator)
+        run: cmake --build --preset ci-gcc --parallel
+      - name: End-to-end tests
+        run: ctest --test-dir build/ci-gcc -L e2e --output-on-failure
+      - name: Keep the recompiler and e2e logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recomp-e2e-logs
+          path: |
+            build/ci-gcc/ps2recomp/log/
+            build/ci-gcc/tests/e2e/work/**/*.log
+            build/ci-gcc/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
   lint:
     name: Lint and policy
     runs-on: ubuntu-24.04

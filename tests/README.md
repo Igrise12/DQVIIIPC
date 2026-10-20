@@ -4,6 +4,7 @@
 |---|---|---|---|
 | `unit/` | `unit` | No | Yes |
 | `local/` | `local` | Yes: set `DQ8_TEST_ISO=/path/to/your.iso`; every test skips itself otherwise | No |
+| `e2e/` | `e2e` | No: hand-assembled MIPS fixtures; needs `-DDQ8_BUILD_RECOMP=ON -DDQ8_BUILD_E2E=ON` (Linux) | Yes, job `recomp-e2e` |
 | `oracle/` | `oracle` | Yes (differential tests against the reference interpreter; none yet) | No |
 | `fixtures/` | | Synthetic inputs only; nothing from a disc | |
 
