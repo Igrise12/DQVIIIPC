@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <optional>
 #include <toml.hpp>
 #include <vector>
 
@@ -23,6 +24,7 @@ struct ManifestRecord {
     std::uint64_t size = 0;
     std::string sha1;
     std::string crc32;
+    std::optional<Mwo3Header> mwo3; // for overlays: the header verify_image() read and checked
 };
 
 struct Manifest {
@@ -50,6 +52,18 @@ struct Manifest {
         files.push_back(std::move(record));
     }
 };
+
+// "0x1ADC0": the spelling the region profiles use for addresses and sizes.
+std::string hex_upper(std::uint32_t v) {
+    std::string s = to_hex(v);
+    for (char& c : s) {
+        if (c >= 'a' && c <= 'f') {
+            c = static_cast<char>(c - 'a' + 'A');
+        }
+    }
+    const std::size_t first = s.find_first_not_of('0');
+    return "0x" + (first == std::string::npos ? std::string("0") : s.substr(first));
+}
 
 std::string toml_quote(const std::string& s) {
     std::string out = "\"";
@@ -144,6 +158,23 @@ void write_manifest(const std::filesystem::path& file, const Manifest& m) {
         text += "size = " + std::to_string(r.size) + "\n";
         text += "sha1 = " + toml_quote(r.sha1) + "\n";
         text += "crc32 = " + toml_quote(r.crc32) + "\n";
+        if (r.mwo3.has_value()) {
+            const Mwo3Header& h = *r.mwo3;
+            text += "[files.mwo3]\n";
+            text += "overlay_id = " + std::to_string(h.overlay_id) + "\n";
+            text += "name = " + toml_quote(h.name) + "\n";
+            text += "load_address = " + hex_upper(h.load_address) + "\n";
+            text += "text_size = " + hex_upper(h.text_size) + "\n";
+            text += "data_size = " + hex_upper(h.data_size) + "\n";
+            text += "bss_size = " + hex_upper(h.bss_size) + "\n";
+            text += "table_start = " + hex_upper(h.table_start) + "\n";
+            text += "table_end = " + hex_upper(h.table_end) + "\n";
+            text += "table_entries = " + std::to_string(h.table_entry_count()) + "\n";
+            text += "code_start = " + hex_upper(h.code_start()) + "\n";
+            text += "data_start = " + hex_upper(h.data_start()) + "\n";
+            text += "bss_start = " + hex_upper(h.bss_start()) + "\n";
+            text += "end = " + hex_upper(h.end_address()) + "\n";
+        }
     }
     write_text_file(file, text);
 }
@@ -166,16 +197,20 @@ struct Target {
     std::string role;
     std::uint64_t expected_size = 0;
     std::string expected_sha1;
+    const Mwo3Header* header = nullptr; // overlays: the header verify_image() read
 };
 
-std::vector<Target> targets_of(const RegionProfile& p) {
+std::vector<Target> targets_of(const VerifiedImage& v) {
+    const RegionProfile& p = v.profile;
     std::vector<Target> targets;
-    targets.push_back({p.boot.path, "boot", p.boot.size, p.boot.sha1});
-    for (const ProfileOverlay& o : p.overlays) {
-        targets.push_back({o.path, "overlay", o.size, o.sha1});
+    targets.push_back({p.boot.path, "boot", p.boot.size, p.boot.sha1, nullptr});
+    for (std::size_t i = 0; i < p.overlays.size(); ++i) {
+        const ProfileOverlay& o = p.overlays[i];
+        const Mwo3Header* h = i < v.overlay_headers.size() ? &v.overlay_headers[i] : nullptr;
+        targets.push_back({o.path, "overlay", o.size, o.sha1, h});
     }
     for (const ProfileFile& f : p.files) {
-        targets.push_back({f.path, f.role, f.size, f.sha1});
+        targets.push_back({f.path, f.role, f.size, f.sha1, nullptr});
     }
     return targets;
 }
@@ -229,17 +264,6 @@ FileDigest copy_entry(const iso::Image& image, const iso::Entry& entry, const st
     return d;
 }
 
-std::string hex_upper(std::uint32_t v) {
-    std::string s = to_hex(v);
-    for (char& c : s) {
-        if (c >= 'a' && c <= 'f') {
-            c = static_cast<char>(c - 'a' + 'A');
-        }
-    }
-    const std::size_t first = s.find_first_not_of('0');
-    return "0x" + (first == std::string::npos ? std::string("0") : s.substr(first));
-}
-
 } // namespace
 
 std::size_t ExtractReport::count(FileStatus status) const noexcept {
@@ -278,7 +302,7 @@ ExtractReport extract(const VerifiedImage& verified, const std::filesystem::path
     manifest.image_size = verified.image_size;
     manifest.boot_sha1 = verified.boot.sha1;
 
-    for (const Target& t : targets_of(profile)) {
+    for (const Target& t : targets_of(verified)) {
         const iso::Entry& entry = image.require(t.disc_path);
         ExtractedFile f;
         f.disc_path = t.disc_path;
@@ -308,11 +332,21 @@ ExtractReport extract(const VerifiedImage& verified, const std::filesystem::path
             const bool mismatch =
                 options.verify_hashes && !t.expected_sha1.empty() && f.digest.sha1 != t.expected_sha1;
             f.status = mismatch ? FileStatus::hash_mismatch : FileStatus::extracted;
-            manifest.upsert({t.disc_path, t.role, f.digest.size, f.digest.sha1, f.digest.crc32});
+        }
+        // Every record is refreshed, reused files included, so the header fields are always current; the
+        // manifest is written after each extracted file (progress survives an interruption) and once at
+        // the end.
+        ManifestRecord record{t.disc_path, t.role, f.digest.size, f.digest.sha1, f.digest.crc32, {}};
+        if (t.header != nullptr) {
+            record.mwo3 = *t.header;
+        }
+        manifest.upsert(std::move(record));
+        if (!reuse) {
             write_manifest(report.manifest, manifest);
         }
         report.files.push_back(std::move(f));
     }
+    write_manifest(report.manifest, manifest);
     if (options.emit_profile) {
         report.profile_fragment = format_profile_fragment(verified, report);
     }
@@ -346,11 +380,21 @@ std::string format_profile_fragment(const VerifiedImage& verified, const Extract
     out += "entry = " + hex_upper(p.boot.entry) + "\n";
     out += "load_address = " + hex_upper(p.boot.load_address) + "\n";
     out += "main_memsz = " + hex_upper(p.boot.main_memsz) + "\n";
-    for (const ProfileOverlay& o : p.overlays) {
+    for (std::size_t i = 0; i < p.overlays.size(); ++i) {
+        const ProfileOverlay& o = p.overlays[i];
+        // The header values observed on the disc, when verify_image() read them; else the profile's.
+        const Mwo3Header* h = i < verified.overlay_headers.size() ? &verified.overlay_headers[i] : nullptr;
         out += "\n[[overlays]]\n";
         out += "name = " + toml_quote(o.name) + "\n";
-        out += "id = " + std::to_string(o.id) + "\n";
+        out += "id = " + std::to_string(h != nullptr ? h->overlay_id : o.id) + "\n";
+        out += "index = " + std::to_string(o.index) + "\n";
+        out += "segment_index = " + std::to_string(o.segment_index) + "\n";
         out += "path = " + toml_quote(o.path) + "\n";
+        out += "text_size = " + hex_upper(h != nullptr ? h->text_size : o.text_size) + "\n";
+        out += "data_size = " + hex_upper(h != nullptr ? h->data_size : o.data_size) + "\n";
+        out += "bss_size = " + hex_upper(h != nullptr ? h->bss_size : o.bss_size) + "\n";
+        out += "table_entries = " + std::to_string(h != nullptr ? h->table_entry_count() : o.table_entries) +
+               "\n";
         out += "segment_memsz = " + hex_upper(o.segment_memsz) + "\n";
         out += hashes(o.path);
     }

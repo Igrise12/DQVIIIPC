@@ -4,6 +4,7 @@
 
 #include "dq8/core/error.h"
 #include "dq8/core/hash.h"
+#include "dq8/core/mwo3.h"
 
 #include <algorithm>
 #include <fstream>
@@ -113,6 +114,25 @@ class Reader {
             fail(*v, "[" + label + "]." + key + " must be " + std::to_string(digits) + " hex digits");
         }
         return normalize_hex(s);
+    }
+
+    // An array of non-empty strings.
+    std::vector<std::string> strings(const toml::value& t, const char* key, const std::string& label) const {
+        const toml::value* v = optional(t, key);
+        if (v == nullptr) {
+            fail(t, "[" + label + "] is missing '" + key + "'");
+        }
+        if (!v->is_array()) {
+            fail(*v, "[" + label + "]." + key + " must be an array of strings");
+        }
+        std::vector<std::string> out;
+        for (const toml::value& item : v->as_array()) {
+            if (!item.is_string() || item.as_string().empty()) {
+                fail(item, "[" + label + "]." + key + " entries must be non-empty strings");
+            }
+            out.push_back(item.as_string());
+        }
+        return out;
     }
 
     // A disc path: relative, '/'-separated, no empty or '.'/'..' components, no version suffix.
@@ -241,12 +261,59 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
     p.boot.main_memsz = r.u32(boot, "main_memsz", "boot");
 
     const toml::value& window = r.table(root, "overlay_window", "overlay_window");
-    p.overlay_window.base = r.u32(window, "base", "overlay_window");
-    p.overlay_window.end = r.u32(window, "end", "overlay_window");
-    p.overlay_window.container = r.string(window, "container", "overlay_window");
-    p.overlay_window.header_size = r.u32(window, "header_size", "overlay_window");
-    if (p.overlay_window.end <= p.overlay_window.base) {
+    RegionProfile::OverlayWindow& w = p.overlay_window;
+    w.base = r.u32(window, "base", "overlay_window");
+    w.end = r.u32(window, "end", "overlay_window");
+    w.container = r.string(window, "container", "overlay_window");
+    w.header_size = r.u32(window, "header_size", "overlay_window");
+    w.code_offset = r.u32(window, "code_offset", "overlay_window");
+    if (w.end <= w.base) {
         r.fail(window, "[overlay_window].end must be greater than base");
+    }
+    if (w.container == "MWo3" && w.header_size != mwo3_header_size) {
+        r.fail(window.at("header_size"), "[overlay_window].header_size must be " +
+                                             std::to_string(mwo3_header_size) + " for an MWo3 container");
+    }
+    if (w.code_offset != w.header_size) {
+        r.fail(window.at("code_offset"), "[overlay_window].code_offset must equal header_size (the text "
+                                         "follows the resident header)");
+    }
+    if (w.header_size >= w.end - w.base) {
+        r.fail(window.at("header_size"), "[overlay_window].header_size does not fit the window");
+    }
+    // Loader facts (spike S3): code and data addresses inside the main program, 4-byte aligned.
+    const std::uint64_t main_begin = p.boot.load_address;
+    const std::uint64_t main_end = main_begin + p.boot.main_memsz;
+    auto main_address = [&](const char* key) {
+        const std::uint32_t a = r.u32(window, key, "overlay_window");
+        if (a % 4 != 0) {
+            r.fail(window.at(key), std::string("[overlay_window].") + key + " must be 4-byte aligned");
+        }
+        if (a < main_begin || a >= main_end) {
+            r.fail(window.at(key), std::string("[overlay_window].") + key +
+                                       " must lie inside the main program ([boot].load_address .. "
+                                       "load_address + main_memsz)");
+        }
+        return a;
+    };
+    w.window_pointer = main_address("window_pointer");
+    w.loader = main_address("loader");
+    w.loader_hook = main_address("loader_hook");
+    w.load_by_index = main_address("load_by_index");
+    w.name_table = main_address("name_table");
+    w.lsn_cache = main_address("lsn_cache");
+    w.ctor_walker = main_address("ctor_walker");
+    w.flush_cache_stub = main_address("flush_cache_stub");
+    w.mode_variable = main_address("mode_variable");
+    w.name_table_order = r.strings(window, "name_table_order", "overlay_window");
+    {
+        std::set<std::string> seen;
+        for (const std::string& n : w.name_table_order) {
+            if (!seen.insert(n).second) {
+                r.fail(window.at("name_table_order"),
+                       "[overlay_window].name_table_order lists '" + n + "' twice");
+            }
+        }
     }
 
     if (const toml::value* list = r.optional(root, "not_extracted")) {
@@ -282,6 +349,9 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
             r.fail(*overlays, "[[overlays]] must be an array of tables");
         }
         std::set<std::uint32_t> ids;
+        std::set<std::uint32_t> indexes;
+        std::set<std::uint32_t> segments;
+        std::set<std::string> names;
         for (const toml::value& t : overlays->as_array()) {
             if (!t.is_table()) {
                 r.fail(t, "[[overlays]] entries must be tables");
@@ -289,20 +359,59 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
             ProfileOverlay o;
             o.name = r.string(t, "name", "overlays");
             o.id = r.u32(t, "id", "overlays");
+            o.index = r.u32(t, "index", "overlays");
+            o.segment_index = r.u32(t, "segment_index", "overlays");
             o.path = r.disc_path(t, "path", "overlays");
             o.segment_memsz = r.u32(t, "segment_memsz", "overlays");
+            o.text_size = r.u32(t, "text_size", "overlays");
+            o.data_size = r.u32(t, "data_size", "overlays");
+            o.bss_size = r.u32(t, "bss_size", "overlays");
+            o.table_entries = r.u32(t, "table_entries", "overlays");
             o.size = r.u64(t, "size", "overlays");
             o.sha1 = r.hex(t, "sha1", "overlays", 40, false);
             o.crc32 = r.hex(t, "crc32", "overlays", 8, false);
-            if (o.id == 0 || !ids.insert(o.id).second) {
-                r.fail(t.at("id"), "[[overlays]].id must be unique and at least 1");
+            if (!names.insert(o.name).second) {
+                r.fail(t.at("name"), "[[overlays]].name '" + o.name + "' is used twice");
             }
-            if (o.segment_memsz > p.overlay_window.end - p.overlay_window.base) {
+            if (o.id == 0 || o.id > mwo3_max_overlay_id || !ids.insert(o.id).second) {
+                r.fail(t.at("id"), "[[overlays]].id must be unique and between 1 and " +
+                                       std::to_string(mwo3_max_overlay_id));
+            }
+            if (o.index >= w.name_table_order.size() || w.name_table_order[o.index] != o.name) {
+                r.fail(t.at("index"), "[[overlays]].index " + std::to_string(o.index) +
+                                          " is not the position of '" + o.name +
+                                          "' in [overlay_window].name_table_order");
+            }
+            if (!indexes.insert(o.index).second) {
+                r.fail(t.at("index"), "[[overlays]].index must be unique");
+            }
+            if (o.segment_index == 0 || !segments.insert(o.segment_index).second) {
+                r.fail(t.at("segment_index"),
+                       "[[overlays]].segment_index must be unique and at least 1 (0 is the main image)");
+            }
+            if (o.segment_memsz > w.end - w.base) {
                 r.fail(t.at("segment_memsz"), "[[overlays]].segment_memsz does not fit the overlay window");
+            }
+            const std::uint64_t file_size =
+                static_cast<std::uint64_t>(w.header_size) + o.text_size + o.data_size;
+            if (file_size + o.bss_size != o.segment_memsz) {
+                r.fail(t.at("segment_memsz"), "[[overlays]] header_size + text_size + data_size + bss_size "
+                                              "must equal segment_memsz");
+            }
+            if (o.size != 0 && file_size != o.size) {
+                r.fail(t.at("size"), "[[overlays]].size must equal header_size + text_size + data_size");
+            }
+            if (static_cast<std::uint64_t>(o.table_entries) * 4 > o.data_size) {
+                r.fail(t.at("table_entries"), "[[overlays]].table_entries do not fit in data_size");
             }
             note_path(t, o.path, "overlays");
             p.overlays.push_back(std::move(o));
         }
+    }
+    if (p.overlays.size() != w.name_table_order.size()) {
+        r.fail(window.at("name_table_order"),
+               "[overlay_window].name_table_order has " + std::to_string(w.name_table_order.size()) +
+                   " entries but there are " + std::to_string(p.overlays.size()) + " [[overlays]]");
     }
 
     if (const toml::value* files = r.optional(root, "files")) {

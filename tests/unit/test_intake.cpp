@@ -4,6 +4,7 @@
 #include "dq8/core/hash.h"
 #include "dq8/core/intake.h"
 #include "support/iso_builder.h"
+#include "support/mwo3_builder.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -28,19 +29,51 @@ std::vector<std::uint8_t> text_bytes(const std::string& s) {
     return std::vector<std::uint8_t>(s.begin(), s.end());
 }
 
-// A synthetic disc whose boot file is a fake ELF of seeded random bytes, plus two "overlays" and a module.
+// Two synthetic overlays whose headers add up to the fake ELF's overlay segments: A is 64 + 0x200 + 0x80
+// bytes with 0x40 of bss (memsz 0x300), B is 64 + 0x20 + 0x10 with 0x10 (memsz 0x80).
+dq8::test::Mwo3Spec spec_a() {
+    dq8::test::Mwo3Spec s;
+    s.overlay_id = 1;
+    s.load_address = window_base;
+    s.text_size = 0x200;
+    s.data_size = 0x80;
+    s.bss_size = 0x40;
+    s.table_offset = 0x10;
+    s.table_entries = 2;
+    s.name = "a";
+    s.seed = 21;
+    return s;
+}
+dq8::test::Mwo3Spec spec_b() {
+    dq8::test::Mwo3Spec s;
+    s.overlay_id = 2;
+    s.load_address = window_base;
+    s.text_size = 0x20;
+    s.data_size = 0x10;
+    s.bss_size = 0x10;
+    s.table_offset = 0;
+    s.table_entries = 2;
+    s.name = "b";
+    s.seed = 22;
+    return s;
+}
+
+// A synthetic disc whose boot file is a fake ELF of seeded random bytes, plus two overlays and a module.
 struct Fixture {
     dq8::test::TempDir tmp;
     std::filesystem::path iso;
     std::filesystem::path regions;
     std::vector<std::uint8_t> boot;
-    std::vector<std::uint8_t> ov_a = seeded_bytes(21, 3000);
-    std::vector<std::uint8_t> ov_b = seeded_bytes(22, 700);
+    std::vector<std::uint8_t> ov_a = dq8::test::build_mwo3(spec_a());
+    std::vector<std::uint8_t> ov_b = dq8::test::build_mwo3(spec_b());
     std::vector<std::uint8_t> mod = seeded_bytes(23, 4097);
 
-    explicit Fixture(std::uint32_t seed = 77, bool with_hashes = true) {
+    explicit Fixture(std::uint32_t seed = 77, bool with_hashes = true, bool corrupt_overlay = false) {
         boot = dq8::test::fake_boot_elf(entry_point, load_address, main_memsz, window_base, overlay_memsz,
                                         9000, seed);
+        if (corrupt_overlay) {
+            dq8::test::put_le32(ov_a, 0, 0); // magic gone: the disc no longer carries a valid container
+        }
         dq8::test::IsoBuilder b;
         b.set_system_identifier("PLAYSTATION");
         b.add_file("/SYSTEM.CNF",
@@ -78,9 +111,16 @@ struct Fixture {
             hashes_of(boot, true) +
             "entry = 0x00100008\nload_address = 0x00100000\nmain_memsz = 0x4000\n"
             "[overlay_window]\nbase = 0x00200000\nend = 0x00210000\ncontainer = \"MWo3\"\nheader_size = 64\n"
-            "[[overlays]]\nname = \"A\"\nid = 1\npath = \"BIN/A.BIN\"\nsegment_memsz = 0x300\n" +
+            "code_offset = 64\nwindow_pointer = 0x00100100\nloader = 0x00100200\nloader_hook = 0x00100210\n"
+            "load_by_index = 0x00100300\nname_table = 0x00100400\nname_table_order = [\"B\", \"A\"]\n"
+            "lsn_cache = 0x00100500\nctor_walker = 0x00100600\nflush_cache_stub = 0x00100700\n"
+            "mode_variable = 0x00100800\n"
+            "[[overlays]]\nname = \"A\"\nid = 1\nindex = 1\nsegment_index = 1\npath = \"BIN/A.BIN\"\n"
+            "text_size = 0x200\ndata_size = 0x80\nbss_size = 0x40\ntable_entries = 2\nsegment_memsz = "
+            "0x300\n" +
             hashes_of(ov_a, with_hashes) +
-            "[[overlays]]\nname = \"B\"\nid = 2\npath = \"BIN/B.BIN\"\nsegment_memsz = 0x80\n" +
+            "[[overlays]]\nname = \"B\"\nid = 2\nindex = 0\nsegment_index = 2\npath = \"BIN/B.BIN\"\n"
+            "text_size = 0x20\ndata_size = 0x10\nbss_size = 0x10\ntable_entries = 2\nsegment_memsz = 0x80\n" +
             hashes_of(ov_b, with_hashes) + "[[files]]\npath = \"MODULES/X.IRX\"\nrole = \"iop_module\"\n" +
             hashes_of(mod, with_hashes) + "[not_extracted]\npaths = [\"DATA.DAT\", \"MOVIE/\"]\n";
         std::ofstream(regions / "TEST_00001.toml", std::ios::binary) << text;
@@ -115,6 +155,13 @@ TEST_CASE("verify identifies a synthetic disc and cross-checks the ELF", "[core]
     CHECK(v.elf.load_segments().size() == 3);
     CHECK(v.system_cnf.vmode == "NTSC");
     CHECK(v.warnings.empty());
+    REQUIRE(v.overlay_headers.size() == 2);
+    CHECK(v.overlay_headers[0].overlay_id == 1);
+    CHECK(v.overlay_headers[0].name == "a");
+    CHECK(v.overlay_headers[0].memsz() == 0x300);
+    CHECK(v.overlay_headers[0].table_entry_count() == 2);
+    CHECK(v.overlay_headers[1].overlay_id == 2);
+    CHECK(v.overlay_headers[1].bss_start() == window_base + 64 + 0x20 + 0x10);
 }
 
 TEST_CASE("verify reports an unknown boot file with its hash and size", "[core][intake]") {
@@ -185,9 +232,32 @@ TEST_CASE("verify detects a profile whose ELF facts disagree with the disc", "[c
     };
     expect_mismatch("entry = 0x00100008", "entry = 0x00100010", "entry point");
     expect_mismatch("main_memsz = 0x4000", "main_memsz = 0x4080", "main segment memsz");
-    expect_mismatch("segment_memsz = 0x80", "segment_memsz = 0x90", "overlay segment 1");
+    // The schema keeps header sizes and segment_memsz consistent, so both move together here.
+    expect_mismatch("bss_size = 0x10\ntable_entries = 2\nsegment_memsz = 0x80",
+                    "bss_size = 0x20\ntable_entries = 2\nsegment_memsz = 0x90", "load segment 2");
+    expect_mismatch("segment_index = 2", "segment_index = 3", "load segment 3");
     expect_mismatch("path = \"MODULES/X.IRX\"", "path = \"MODULES/Y.IRX\"", "does not contain it");
     expect_mismatch("size = 4097", "size = 4096", "4097 bytes on the disc");
+    // Container headers: the row disagrees with what the disc's header declares.
+    expect_mismatch("text_size = 0x200\ndata_size = 0x80", "text_size = 0x1FC\ndata_size = 0x84",
+                    "text_size");
+    expect_mismatch("id = 1\nindex = 1", "id = 3\nindex = 1", "overlay_id");
+    expect_mismatch("table_entries = 2\nsegment_memsz = 0x300", "table_entries = 3\nsegment_memsz = 0x300",
+                    "constructor table");
+    expect_mismatch("container = \"MWo3\"", "container = \"XYZ1\"", "cannot parse");
+}
+
+TEST_CASE("verify refuses a disc whose overlay is not a valid container", "[core][intake]") {
+    const Fixture fx(77, true, true);
+    const auto profiles = dq8::core::load_region_profiles(fx.regions);
+    try {
+        (void)dq8::core::verify_image(fx.iso, profiles);
+        FAIL("expected image_mismatch");
+    } catch (const Error& e) {
+        CHECK(e.code() == ErrorCode::image_mismatch);
+        CHECK_THAT(e.what(), ContainsSubstring("BIN/A.BIN"));
+        CHECK_THAT(e.what(), ContainsSubstring("not an MWo3"));
+    }
 }
 
 TEST_CASE("extract writes, hashes, records and is idempotent", "[core][intake]") {
@@ -222,6 +292,15 @@ TEST_CASE("extract writes, hashes, records and is idempotent", "[core][intake]")
         CHECK(content == "*\n");
     }
     CHECK(std::filesystem::is_regular_file(first.manifest));
+    {
+        std::ifstream mf(first.manifest);
+        std::string content((std::istreambuf_iterator<char>(mf)), std::istreambuf_iterator<char>());
+        CHECK_THAT(content, ContainsSubstring("[files.mwo3]"));
+        CHECK_THAT(content, ContainsSubstring("overlay_id = 2"));
+        CHECK_THAT(content, ContainsSubstring("table_entries = 2"));
+        CHECK_THAT(content, ContainsSubstring("name = \"a\""));
+        CHECK_THAT(content, ContainsSubstring("bss_start = 0x200"));
+    }
 
     // Second run: everything is up to date, nothing rewritten.
     const auto before = std::filesystem::last_write_time(out / "TEST_00001" / "BOOT.ELF");
@@ -262,6 +341,10 @@ TEST_CASE("extract reports hash mismatches against the profile and --emit-profil
     CHECK_THAT(report.profile_fragment,
                ContainsSubstring("crc32 = \"" + dq8::core::to_hex(dq8::core::Crc32::of(fx.mod)) + "\""));
     CHECK_THAT(report.profile_fragment, ContainsSubstring("segment_memsz = 0x300"));
+    CHECK_THAT(report.profile_fragment, ContainsSubstring("index = 1\nsegment_index = 1\n"));
+    CHECK_THAT(report.profile_fragment,
+               ContainsSubstring("text_size = 0x20\ndata_size = 0x10\nbss_size = 0x10\n"
+                                 "table_entries = 2\nsegment_memsz = 0x80\n"));
     CHECK_THAT(report.profile_fragment, ContainsSubstring("role = \"iop_module\""));
 
     // Now a profile that records a wrong hash for one overlay: extraction still completes, but reports it.

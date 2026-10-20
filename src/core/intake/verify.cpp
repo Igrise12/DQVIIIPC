@@ -3,6 +3,7 @@
 #include "dq8/core/error.h"
 #include "dq8/core/hash.h"
 #include "dq8/core/intake.h"
+#include "dq8/core/mwo3.h"
 
 #include <algorithm>
 #include <fstream>
@@ -201,16 +202,71 @@ void cross_check_elf(const ElfHeaders& elf, const RegionProfile& p) {
                  hex32(p.overlay_window.base) + " but the profile lists " +
                  std::to_string(p.overlays.size()));
     }
-    for (std::size_t i = 0; i < window.size(); ++i) {
-        if (window[i]->memsz != p.overlays[i].segment_memsz) {
-            mismatch("overlay segment " + std::to_string(i) + " (" + p.overlays[i].name + ") has memsz " +
-                     hex32(window[i]->memsz) + " but the profile records " +
-                     hex32(p.overlays[i].segment_memsz));
+    for (const ProfileOverlay& o : p.overlays) {
+        const std::string which = "load segment " + std::to_string(o.segment_index);
+        if (o.segment_index >= loads.size()) {
+            mismatch("overlay " + o.name + " expects " + which + " but the boot ELF has only " +
+                     std::to_string(loads.size()) + " load segments");
         }
-        if (window[i]->memsz > p.overlay_window.end - p.overlay_window.base) {
-            mismatch("overlay segment " + std::to_string(i) + " does not fit the overlay window");
+        const ElfSegment* s = loads[o.segment_index];
+        if (s->filesz != 0 || s->vaddr != p.overlay_window.base) {
+            mismatch("overlay " + o.name + " expects " + which +
+                     " to be a zero-filesize segment at the overlay window base, but it is at " +
+                     hex32(s->vaddr) + " with filesz " + hex32(s->filesz));
+        }
+        if (s->memsz != o.segment_memsz) {
+            mismatch("overlay " + o.name + ": " + which + " has memsz " + hex32(s->memsz) +
+                     " but the profile records " + hex32(o.segment_memsz));
+        }
+        if (s->memsz > p.overlay_window.end - p.overlay_window.base) {
+            mismatch("overlay " + o.name + ": " + which + " does not fit the overlay window");
         }
     }
+}
+
+// Reads one overlay container from the image and checks its header against the profile row and the
+// segment the row names. Everything the row records about the header must hold.
+Mwo3Header cross_check_overlay_header(const iso::Image& image, const RegionProfile& p,
+                                      const ProfileOverlay& o) {
+    const iso::Entry& e = image.require(o.path);
+    const std::uint32_t window_bytes = p.overlay_window.end - p.overlay_window.base;
+    if (e.size > window_bytes) {
+        mismatch("overlay '" + o.path + "' is " + std::to_string(e.size) +
+                 " bytes, larger than the overlay window");
+    }
+    const std::vector<std::uint8_t> bytes = image.read_all(e, window_bytes);
+    Mwo3Header h;
+    try {
+        h = parse_mwo3_header(bytes, bytes.size(), Mwo3Window{p.overlay_window.base, p.overlay_window.end});
+    } catch (const Error& err) {
+        mismatch("overlay '" + o.path + "' is not a valid " + p.overlay_window.container +
+                 " container: " + err.what() + " [" + std::string(to_string(err.code())) + "]");
+    }
+    const std::string prefix = "overlay '" + o.path + "' (" + o.name + "): the container header declares ";
+    if (h.overlay_id != o.id) {
+        mismatch(prefix + "overlay_id " + std::to_string(h.overlay_id) + " but the profile records id " +
+                 std::to_string(o.id));
+    }
+    if (h.text_size != o.text_size) {
+        mismatch(prefix + "text_size " + hex32(h.text_size) + " but the profile records " +
+                 hex32(o.text_size));
+    }
+    if (h.data_size != o.data_size) {
+        mismatch(prefix + "data_size " + hex32(h.data_size) + " but the profile records " +
+                 hex32(o.data_size));
+    }
+    if (h.bss_size != o.bss_size) {
+        mismatch(prefix + "bss_size " + hex32(h.bss_size) + " but the profile records " + hex32(o.bss_size));
+    }
+    if (h.table_entry_count() != o.table_entries) {
+        mismatch(prefix + "a constructor table of " + std::to_string(h.table_entry_count()) +
+                 " entries but the profile records " + std::to_string(o.table_entries));
+    }
+    if (h.memsz() != o.segment_memsz) {
+        mismatch(prefix + "header + text + data + bss = " + hex32(h.memsz()) + " but load segment " +
+                 std::to_string(o.segment_index) + " has memsz " + hex32(o.segment_memsz));
+    }
+    return h;
 }
 
 void cross_check_listed_file(const iso::Image& image, const std::string& path, std::uint64_t expected_size,
@@ -295,6 +351,13 @@ VerifiedImage verify_image(const std::filesystem::path& image_path, std::span<co
     }
     for (const ProfileFile& f : profile->files) {
         cross_check_listed_file(image, f.path, f.size, "file");
+    }
+    if (profile->overlay_window.container != "MWo3" && !profile->overlays.empty()) {
+        mismatch("the profile names overlay container '" + profile->overlay_window.container +
+                 "', which this build cannot parse (only MWo3)");
+    }
+    for (const ProfileOverlay& o : profile->overlays) {
+        v.overlay_headers.push_back(cross_check_overlay_header(image, *profile, o));
     }
 
     if (v.image_size != profile->image_size) {

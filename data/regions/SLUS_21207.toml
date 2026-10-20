@@ -23,17 +23,43 @@ entry = 0x00100008
 load_address = 0x00100000
 main_memsz = 0x361C80
 
-# The six zero-filesize PT_LOAD segments of the boot ELF, one per overlay, in segment order (== id order).
+# The window the six overlays share, and the loader facts spike S3 established (Docs/spikes/S3-overlay-loader.md):
+# the loader reads a whole BIN file, header included, to the address held at window_pointer, calls the empty
+# loader_hook, flushes the caches through flush_cache_stub, zeroes bss and runs the header's constructor table
+# through ctor_walker. load_by_index loads by position in name_table (order below); lsn_cache holds the start
+# sectors; mode_variable is what the main loop switches on. The heap begins at `end`.
 [overlay_window]
 base = 0x00461C80
 end = 0x00489A80
 container = "MWo3"
 header_size = 64
+code_offset = 0x40
+window_pointer = 0x003D1704
+loader = 0x00100330
+loader_hook = 0x00100320
+load_by_index = 0x00169860
+name_table = 0x003950F0
+name_table_order = ["TITLE", "CASINO", "VIEWER", "BATTLE", "MENU", "SHOP"]
+lsn_cache = 0x003F8850
+ctor_walker = 0x00100DE0
+flush_cache_stub = 0x00116AA0
+mode_variable = 0x003D2740
+
+# One row per overlay. `id` is the header's overlay_id, `index` its position in name_table_order (the loader's
+# argument), `segment_index` the matching zero-filesize PT_LOAD of the boot ELF counting load segments from 0
+# (the main image). text_size, data_size, bss_size and table_entries are what the header must declare;
+# header_size + text_size + data_size + bss_size == segment_memsz and header_size + text_size + data_size == size.
 
 [[overlays]]
 name = "CASINO"
 id = 1
+index = 1
+segment_index = 1
 path = "BIN/CASINO.BIN"
+text_size = 0x1ADC0
+data_size = 0x4D80
+bss_size = 0x1380
+table_entries = 5
 segment_memsz = 0x20F00
 size = 129920
 sha1 = "257f13da3f92147237cc3526e1d1c890dbe018b6"
@@ -42,7 +68,13 @@ crc32 = "b44104dd"
 [[overlays]]
 name = "VIEWER"
 id = 2
+index = 2
+segment_index = 2
 path = "BIN/VIEWER.BIN"
+text_size = 0x240
+data_size = 0x200
+bss_size = 0x80
+table_entries = 4
 segment_memsz = 0x500
 size = 1152
 sha1 = "925da307a9f81589d7dde4eb0b7796689fd3ac58"
@@ -51,7 +83,13 @@ crc32 = "440e90fc"
 [[overlays]]
 name = "SHOP"
 id = 3
+index = 5
+segment_index = 3
 path = "BIN/SHOP.BIN"
+text_size = 0xF040
+data_size = 0x5F80
+bss_size = 0x2B00
+table_entries = 3
 segment_memsz = 0x17B00
 size = 86016
 sha1 = "94fd3718c517716cede6586cb4193199ad330ff6"
@@ -60,7 +98,13 @@ crc32 = "1af444ed"
 [[overlays]]
 name = "MENU"
 id = 4
+index = 4
+segment_index = 4
 path = "BIN/MENU.BIN"
+text_size = 0x195C0
+data_size = 0x1500
+bss_size = 0x2200
+table_entries = 4
 segment_memsz = 0x1CD00
 size = 109312
 sha1 = "5bdab4c2fb325af0690840c600e01df39855de1a"
@@ -69,7 +113,13 @@ crc32 = "3fec5c99"
 [[overlays]]
 name = "BATTLE"
 id = 5
+index = 3
+segment_index = 5
 path = "BIN/BATTLE.BIN"
+text_size = 0x23AC0
+data_size = 0x2680
+bss_size = 0x1C80
+table_entries = 5
 segment_memsz = 0x27E00
 size = 156032
 sha1 = "913cb0e1bfa574598589932241c67680e8a5125c"
@@ -78,7 +128,13 @@ crc32 = "8ab94616"
 [[overlays]]
 name = "TITLE"
 id = 6
+index = 0
+segment_index = 6
 path = "BIN/TITLE.BIN"
+text_size = 0x4AC0
+data_size = 0x680
+bss_size = 0x600
+table_entries = 6
 segment_memsz = 0x5780
 size = 20864
 sha1 = "86425d2f352fb23bac0b03c0894058f9059a907c"

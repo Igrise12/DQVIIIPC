@@ -4,6 +4,7 @@
 
 #include "dq8/core/elf_headers.h"
 #include "dq8/core/iso9660.h"
+#include "dq8/core/mwo3.h"
 #include "dq8/core/region_profile.h"
 
 #include <cstdint>
@@ -53,12 +54,15 @@ struct VerifiedImage {
     std::string boot_path; // as found on the disc, e.g. "/SLUS_212.07"
     FileDigest boot;
     ElfHeaders elf;
+    std::vector<Mwo3Header> overlay_headers; // one per profile.overlays, in that order, read from the disc
     std::vector<std::string> warnings; // facts that differ from the profile without disqualifying the disc
 };
 
 // Opens the image, reads SYSTEM.CNF, hashes the boot file and matches it against `profiles`, then
-// cross-checks the ELF headers and the listed file sizes. Throws Error with code system_cnf,
-// boot_file_missing, unknown_image (message carries the observed hash and size) or image_mismatch.
+// cross-checks the ELF headers and the listed file sizes, and parses every overlay's container header
+// from the image, checking it against its profile row and its ELF segment. Throws Error with code
+// system_cnf, boot_file_missing, unknown_image (message carries the observed hash and size) or
+// image_mismatch (also for an overlay that is not a valid container).
 VerifiedImage verify_image(const std::filesystem::path& image_path, std::span<const RegionProfile> profiles,
                            const ProgressFn& progress = {});
 

@@ -26,10 +26,20 @@ struct ProfileFile {
 };
 
 struct ProfileOverlay {
-    std::string name;                // our label, e.g. "CASINO"
-    std::uint32_t id = 0;            // the id the container header carries (1-based)
+    std::string name;                // our label, e.g. "CASINO"; also its entry in name_table_order
+    std::uint32_t id = 0;            // the overlay_id the container header carries (1-based)
+    std::uint32_t index = 0;         // the loader's index: position of `name` in name_table_order
+    std::uint32_t segment_index = 0; // position of the matching PT_LOAD among the boot ELF's load segments
+                                     // in program-header order (0 is the main image, so this is >= 1)
     std::string path;                // disc path, e.g. "BIN/CASINO.BIN"
-    std::uint32_t segment_memsz = 0; // memsz of the matching zero-filesize PT_LOAD segment in the boot ELF
+    std::uint32_t segment_memsz = 0; // memsz of that zero-filesize PT_LOAD segment
+    // Header integrity values: what the container's header must declare. The loader checks that
+    // header_size + text_size + data_size + bss_size == segment_memsz and, when `size` is recorded, that
+    // header_size + text_size + data_size == size.
+    std::uint32_t text_size = 0;
+    std::uint32_t data_size = 0;
+    std::uint32_t bss_size = 0;
+    std::uint32_t table_entries = 0; // pointers in [table_start, table_end)
     std::uint64_t size = 0;
     std::string sha1;
     std::string crc32;
@@ -55,14 +65,28 @@ struct RegionProfile {
         std::uint32_t main_memsz = 0;
     } boot;
 
+    // The overlay window and the loader facts from spike S3. Addresses other than base/end lie in the
+    // main program (code or bss) and are what the runtime overrides or watches; nothing in src/runtime
+    // may hardcode them (architecture.md §4.3).
     struct OverlayWindow {
         std::uint32_t base = 0;
         std::uint32_t end = 0;
-        std::string container; // "MWo3"
-        std::uint32_t header_size = 0;
+        std::string container;              // "MWo3"
+        std::uint32_t header_size = 0;      // bytes of header resident at base (64 for MWo3)
+        std::uint32_t code_offset = 0;      // where the text begins, relative to base (== header_size)
+        std::uint32_t window_pointer = 0;   // data word holding `base`; the loader's destination
+        std::uint32_t loader = 0;           // int load(const char* path, void* dest)
+        std::uint32_t loader_hook = 0;      // the empty function the loader calls after the read
+        std::uint32_t load_by_index = 0;    // int load_overlay(int index)
+        std::uint32_t name_table = 0;       // the pointer table of disc paths load_by_index indexes
+        std::uint32_t lsn_cache = 0;        // the start-sector cache filled at init, one word per index
+        std::uint32_t ctor_walker = 0;      // walks [table_start, table_end) calling each pointer
+        std::uint32_t flush_cache_stub = 0; // the FlushCache kernel-call stub
+        std::uint32_t mode_variable = 0;    // the game-mode variable the main loop switches on
+        std::vector<std::string> name_table_order; // overlay names in name_table order (index order)
     } overlay_window;
 
-    std::vector<ProfileOverlay> overlays; // in segment order (by id)
+    std::vector<ProfileOverlay> overlays; // in the file's order; every overlay has a unique id and index
     std::vector<ProfileFile> files;
     std::vector<std::string> not_extracted; // disc paths; a trailing '/' marks a directory
     std::filesystem::path source;           // the file this profile was loaded from
