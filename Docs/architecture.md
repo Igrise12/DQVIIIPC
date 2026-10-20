@@ -131,9 +131,12 @@ flowchart LR
 - **No network access** unless the user has explicitly enabled something that needs it.
 - **Developer mode.** Developers can run one stage in isolation, override the function map, and keep intermediates.
 
-**Time and disk.** A published PS2 recompilation of another game reports 20 to 40 minutes for a clean build and
-about 20 GB of disk. We budget the same order of magnitude until measured (spike S1) and mitigate with chunked
-generation, `-O1` for cold code, a compiler cache, and an option for a prebuilt toolchain bundle.
+**Time and disk.** Spike S1 measured the boot ELF on a 6-core machine: recompiling takes 2 s and produces 8,335 units
+(201 MB of C++) under the heuristic map; compiling them costs about 15,000–16,000 CPU-s (30–40 minutes at 12 jobs),
+about 6,000 CPU-s (≈15 minutes) with a precompiled header of the runtime headers; peak RAM 5–7 GiB at 12 jobs
+(0.35 GiB per typical job, 2–3 GiB for the two largest units); about 0.5 GB of disk. Mitigations, each backed by a
+number: the PCH (0.37× per unit), `-O2` for function units and `-O0/-O1` for the dispatch table, splitting the few
+multi-megabyte units, a job count chosen from free RAM, and a compiler cache keyed on the deterministic output.
 
 ---
 
@@ -162,7 +165,7 @@ The six `BIN/*.BIN` overlays (battle, casino, menu, shop, title, viewer) all loa
 `0x00461C80`, one at a time. This is the main structural difference from the flat programs that existing
 recompilers assume, so it is designed in from the start.
 
-**Compile time.** Each overlay is a separate **code unit** with its own function map, its own generated sources and its own namespace. Calls inside a unit are direct. Calls between the main program and an overlay, and between overlays, always go through dispatch.
+**Compile time.** Each overlay is a separate **code unit** with its own function map, its own generated sources and its own namespace. Calls inside a unit are direct. Calls between the main program and an overlay, and between overlays, always go through dispatch. Spike S1 confirmed the mechanics: the recompiler silently ignores the six zero-filesize segments (a map entry inside the window is dropped as "outside executable sections"), so each overlay must reach it as its own synthetic ELF whose section covers the window with real bytes, and each run emits its own flat dispatch table (`register_functions.cpp`, one slot per 4 bytes) under the same symbol names, which must be prefixed per unit before six units can link into one image.
 
 **Run time.** An `OverlayManager` owns the answer to "which overlay is resident?".
 
@@ -270,7 +273,7 @@ cannot all be found by reading the ELF.
 
 The launcher can offer an "Optimize" action that rebuilds the compiled VU1 set from the census gathered from the user's own play. Correctness never depends on it.
 
-VU0 macro mode is handled inside the EE code path (§4.4) and is used heavily (spike S2: 1,234 COP2 macro ops plus 954 `lqc2`/`sqc2`). VU0 micro mode is used at exactly two `vcallms` sites, so the VU0 microprogram path cannot be skipped but may stay an interpreter.
+VU0 macro mode is handled inside the EE code path (§4.4) and is used heavily (spike S2: 1,234 COP2 macro ops plus 954 `lqc2`/`sqc2`). VU0 micro mode is used at exactly two `vcallms` sites, so the VU0 microprogram path cannot be skipped but may stay an interpreter. S7's save states show VU0 microcode loaded by the title screen with VU0 data memory still zero, so those programs run later (battle is the likely place).
 
 ### 5.5 Timers and interrupts
 
@@ -297,7 +300,7 @@ The GS is the largest and riskiest component, so it sits behind one interface (`
 
 | Backend | Technology | Provides | Limits | Plan |
 |---|---|---|---|---|
-| **parallel-gs** | paraLLEl-GS, Vulkan compute, LGPL-3.0-or-later, linked as a shared library | The most accurate GS emulation available to us. 2x to 16x supersampling. Works from the GS register stream. | Needs specific Vulkan features (descriptor indexing, timeline semaphores, 8 and 16-bit storage, scalar block layout, subgroup size control). Also needs `bufferDeviceAddress` and 32 KiB of compute shared memory (S5a). It models GS memory, so scene-level features (widescreen, interpolation, texture identity) are limited. Small embedding API (`GSInterface`, about 25 methods), proven headless in spike S5a; all calls must come from one thread, the renderer owns one helper thread, and host readbacks block the caller. Wrapper estimated at 1,000–1,500 lines. Reads PCSX2 dumps of state version 8–9, uncompressed only. | **First backend**, targeted at M3 |
+| **parallel-gs** | paraLLEl-GS, Vulkan compute, LGPL-3.0-or-later, linked as a shared library | The most accurate GS emulation available to us. 2x to 16x supersampling. Works from the GS register stream. | Needs specific Vulkan features (descriptor indexing, timeline semaphores, 8 and 16-bit storage, scalar block layout, subgroup size control). Also needs `bufferDeviceAddress` and 32 KiB of compute shared memory (S5a). It models GS memory, so scene-level features (widescreen, interpolation, texture identity) are limited. Small embedding API (`GSInterface`, about 25 methods), proven headless in spike S5a; all calls must come from one thread, the renderer owns one helper thread, and host readbacks block the caller. Wrapper estimated at 1,000–1,500 lines. Reads PCSX2 dumps of state version 8–9, uncompressed only. **Verified on this game (S5b):** SSIM 0.992–0.997 against PCSX2's software renderer on field, menu, movie and settings frames; 5 ms of GPU per field frame at 1x and 18.5 ms at 16x on the RTX 4060; a real 2x picture through backbuffer promotion, super-sampled textures and high-resolution scanout; about 8 ms of CPU per field frame for GIF decode on one thread. | **First backend**, targeted at M3 |
 | **trace** | None: records packets to a dump file | Headless operation, replay input for tests and golden frames | Draws nothing | Early, for CI and tests |
 | **native** | Our own renderer over Vulkan (with OpenGL later if needed) | Render at any resolution, true widescreen, texture replacement, draw-list capture for interpolation, lighter GPU requirements | Must model GS framebuffer, texture and blending semantics. Large effort. Clean-room under our license, with no code copied from paraLLEl-GS. | Long-term, after M6. Research can start earlier. |
 
@@ -317,6 +320,7 @@ GS output frame or field
 
 - **Two different scales.** *Internal resolution* is how big the backend renders (supersampling for parallel-gs, true resolution for native). *Output scaling* is how that image is stretched to the window. Both are settings.
 - **Presentation runs at the host refresh rate** and is decoupled from the game's update rate (§12). Dropping presented frames never drops game vblanks.
+- **What the output stage must reproduce (S7):** the game runs the CRTC field-interlaced with two circuits merged through PMODE (50/50 blend, one-line offset) over a 24-bit display buffer blitted from a 32-bit target; parallel-gs does this already, and the native renderer must from day one, together with framebuffer-as-texture, 16-bit targets with channel masks and texture/depth memory aliasing. Mipmaps, dithering and readbacks can wait.
 
 ### 6.4 Widescreen and texture replacement
 
@@ -539,7 +543,7 @@ sequenceDiagram
 | Thread | Role |
 |---|---|
 | **Machine thread** | Runs EE guest code, the IOP, the DMA model and the virtual clock on **one host thread**, in virtual-time slices. Determinism (P5) comes first. |
-| **Render thread** | Consumes the command queue from the GIF and drives the GS backend. The parallel-gs backend requires all its calls from one thread and blocks that thread on host readbacks (S5a), so this is the only thread that touches `IGsBackend`. |
+| **Render thread** | Consumes the command queue from the GIF and drives the GS backend. The parallel-gs backend requires all its calls from one thread and blocks that thread on host readbacks (S5a), so this is the only thread that touches `IGsBackend`. GIF decode alone costs about 8 ms of CPU per field frame in parallel-gs (S5b), so this thread is mandatory, not an optimisation. |
 | **Main thread** | Window events, input polling, presentation. |
 | **Audio thread** | Pulls from the mixer through the host audio stream. |
 | **I/O thread** | Disc reads and save writes. |
@@ -555,7 +559,7 @@ Further parallelism (IOP on its own thread, parallel VU work) can be added later
 
 ### 12.4 Clocks and pacing
 
-- A **virtual clock** drives vblank, timers, audio mixing and disc completion. Wall-clock never reaches the guest.
+- A **virtual clock** drives vblank, timers, audio mixing and disc completion. Wall-clock never reaches the guest. The game updates at 30 Hz (60 Hz in the main menu) over a 59.94 Hz field-interlaced signal (S7).
 - A **limiter** ties virtual time to real time at a chosen speed (1.00x by default, fast-forward uncapped, slow motion below 1x).
 - If the host cannot keep up, the policy is to **skip presenting frames**, never to skip vblanks or timer interrupts.
 
@@ -733,12 +737,12 @@ Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are acc
 |---|---|---|---|
 | 0001 | Native port by static recompilation, not emulation, not matching decompilation | Proposed | Delivers a native game with feasible effort. Decompilation stays possible through overrides. |
 | 0002 | Split into redistributable host and locally built game module over a versioned C ABI | Proposed | Keeps the legal boundary clean and avoids rebuilding the game on every host update. |
-| 0003 | PS2Recomp as a pinned dependency with a patch queue, own runtime | Proposed | Experimental upstream, no overlay support, we need control of the runtime. |
-| 0004 | GS behind an interface, parallel-gs first, native renderer later, trace backend early | Proposed | Accuracy and resolution scaling now, flexibility later, testability throughout. |
+| 0003 | PS2Recomp as a pinned dependency with a patch queue, own runtime | Proposed, evidence complete (S1, S2); draft in `Docs/adr/` | Experimental upstream, no overlay support, we need control of the runtime. |
+| 0004 | GS behind an interface, parallel-gs first, native renderer later, trace backend early | Proposed, evidence complete (S5a, S5b, S7); draft in `Docs/adr/` | Accuracy and resolution scaling now, flexibility later, testability throughout. |
 | 0005 | SDL3 for window, input and audio | Proposed | Cross-platform, gamepad API, already used by sibling projects. |
 | 0006 | Schema-driven settings and launcher | Proposed | New features add settings without UI code. |
 | 0007 | One deterministic machine thread with fibers, separate render, audio and I/O threads | Proposed | Determinism and testability before parallelism. |
-| 0008 | Local setup build from the user's disc | Proposed | Only approach consistent with the legal stance. |
+| 0008 | Local setup build from the user's disc | Proposed, evidence complete (S1); draft in `Docs/adr/` | Only approach consistent with the legal stance. |
 | 0009 | GPL-3.0-or-later | **Accepted** (2026-10-19) | Follows from using PS2Recomp. |
 | 0010 | Launcher is a thin front end over `libdq8core`, Dear ImGui first | Proposed | One toolkit with the in-game overlay, replaceable later. |
 

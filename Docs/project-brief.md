@@ -76,7 +76,7 @@ The "inferred" rows are working hypotheses that the first milestones must confir
 | Title / region | *Dragon Quest VIII: Journey of the Cursed King* (USA). Developed by Level-5, published by Square Enix. |
 | Medium | DVD image, ISO 9660, 4,180,148,224 bytes (3,987 MiB), 68 files in 5 folders |
 | Boot file | `SLUS_212.07` (`SYSTEM.CNF`: `BOOT2 = cdrom0:\SLUS_212.07;1`, `VMODE = NTSC`) |
-| Boot ELF | 2,960,032 bytes. ELF32 executable, MIPS (R5900 code). **Stripped: 0 symbols.** Entry point `0x00100008`. |
+| Boot ELF | 2,960,032 bytes. ELF32 executable, MIPS (R5900 code). **Stripped: 0 symbols** (`.symtab`/`.strtab` present but empty). 14 section headers: one non-empty `PROGBITS` (`WAX`, `0x00100000`, `0x2D2680` bytes, code and data together), seven empty ones; BSS `0x003D2680`–`0x00461C80` is expressed only through the first segment's `memsz` (S1). Entry point `0x00100008`. |
 | Main image in memory | Loaded at `0x00100000`, memory size `0x361C80`, so it ends at `0x00461C80` |
 | Boot ELF SHA-1 | `f24bfd21c21f6454c05934224ab52cde837bc90b` |
 | Boot ELF CRC-32 | `a66a08b0` |
@@ -86,6 +86,8 @@ The "inferred" rows are working hypotheses that the first milestones must confir
 | Game data | `DATA.DAT` (1,804,218,368 bytes) and `DATA2.DAT` (752,971,776 bytes), each with an index file beside it: `DATA.HD6` (188,732 bytes, magic `HD6\0`) and `DATA2.HD6` (87,092 bytes). The ELF references `.HD6` once and `DATA.DAT` never, so lookups go through the index. **Index decoded (spike S4, `Docs/formats/hd6.md`):** a 52-byte header, a frequency-sorted path-fragment dictionary, variable-length-coded path records and 8-byte entries (18-bit record offset, 22-bit sector, 24-bit size in 16-byte units); 9,954 members in `DATA.DAT` (`.chr` 4,454, `.snd` 1,145, `.pak` 696, …) and 4,139 `RIFF`/`WAVE` voice streams in `DATA2.DAT`. The game finds each `.DAT` with `sceCdSearchFile` once, then reads members with `sceCdRead` at `LSN + sector`; nothing on that path transforms the data. `DMYDATA` (51,166,209 bytes) is text filler to the end of the DVD. |
 | Movies | 38 `MOVIE/**/*.MVI` files in 19 pairs `X.MVI` / `X_W.MVI`; 91,322 frames (50.7 minutes) in all. **Format identified (spike S6a):** MPEG-2 program stream in 16 KiB packs, XORed with a 2,048-byte table that the game generates at run time; MPEG-2 Main profile video 512 × 448 progressive 30 fps; 16-bit PCM stereo audio as a Sony ADS stream in private stream 1 (no ADPCM); `_W` files are anamorphic 16:9 renders of the same movie. The table is generated and applied by the game's own read routine from data in the ELF (spike S6b), so the recompiled game decrypts movies itself; the `_W` variant is chosen by the game's screen-size setting. Details in `Docs/formats/mvi.md`. |
 | Code discovery (Ghidra, S2) | Headless Ghidra 12.1.4 with the Emotion Engine extension finds **9,598 functions** in the main image (85.7 % of image bytes in function bodies, 1.0 % loose instructions, 98.6 % auto-named); 121 of 152 computed jumps have a resolved switch table; 993 of 1,124 indirect calls have no static target. The ELF loader maps none of the zero-file-size segments, so `tools/ghidra/MapElfSegmentTails.java` adds the `bss` and overlay-window blocks (120 function entries and 374 references land in the window). Import and analysis take 2–3 minutes. |
+| Output and update rate (S7) | NTSC 640×448 CRTC, 59.94 Hz **field-interlaced (FIELD mode)** throughout; the game renders 512×448 into a PSMCT24 display buffer blitted from a PSMCT32 target, with a 50/50 field blend through PMODE (ALP = 127). **Game update rate 30 Hz**, 60 Hz in the main menu. First-run settings offer *Screen Size: Normal 4:3 / Wide Screen 16:9*, a native anamorphic mode on the same buffer and CRTC. Pad: DualShock 2 with analog locked on, vibration on, no pressure. PCSX2's own game CRC is `F4715852` (not the zlib CRC-32 above). |
+| Boot timeline (S7, PCSX2 at 100 %) | IOP modules load in the order SIO2MAN, PADMAN, MCMAN, MCSERV, LIBSD, SDRDRV, MODHSYN, MODMIDI, MODMSIN, CDVDSTM, SKSOUND, SKHSYNTH, SKMIDI, SKMSIN, PCMPLAY (`MSIFRPC.IRX` is never loaded). Memory-card check at ≈12 s, first-run settings at ≈16 s, then two logo movies and an in-engine flyover; **title screen 64.6 s after launch** (about 16 s after the settings when the logos are skipped). `TITLE.BIN` is resident at the settings screen. VU0 microcode is loaded by the title but VU0 data memory is still zero there. |
 | Instruction census (S2) | 640,430 instructions. 78 `syscall` sites with 65 distinct numbers (54 positive, 11 negative interrupt-context variants). VU0 micro mode is used at **2** `vcallms` sites; VU0 macro mode heavily (1,234 COP2 ops plus 600 `lqc2` / 354 `sqc2`); MMI 565 ops; 128-bit `lq`/`sq` 38,148 (6 % of all instructions). Also 3 `eret` and 2 `tlbwi` in a user-mode ELF (to be examined in M2). |
 | IOP modules | 16 `.IRX` files plus `IOPRP300.IMG` under `MODULES/`. Standard Sony modules (`LIBSD`, `SDRDRV`, `MCMAN`, `MCSERV`, `PADMAN`, `SIO2MAN`, `CDVDSTM`, `MODHSYN`, `MODMIDI`, `MODMSIN`, `MSIFRPC`) plus game-specific ones (`SKSOUND`, `SKMIDI`, `SKHSYNTH`, `SKMSIN`, `PCMPLAY`). The `SK*` and `PCMPLAY` modules appear to form the game's own sound driver stack. *Inferred from names.* |
 
@@ -124,14 +126,14 @@ evaluate. Feasibility notes are honest: several items depend on research that ha
 
 | Feature | Priority | Notes |
 |---|---|---|
-| Internal resolution scaling (1x up to the maximum the backend supports) | P0 | Backend-dependent; see architecture.md §6 |
+| Internal resolution scaling (1x up to the maximum the backend supports) | P0 | With paraLLEl-GS: 2x–16x super-sampling plus a real double-resolution picture through backbuffer promotion and super-sampled textures, verified on this game's frames (S5b); see architecture.md §6 |
 | Windowed, borderless, exclusive fullscreen, VSync, frame cap | P0 | |
 | Aspect handling: original 4:3, stretch, pillarbox, integer scaling | P0 | |
 | Final-image scaling and sharpening (for example FSR 1 with RCAS) | P1 | |
 | Anti-aliasing options, de-interlacing choice | P1 | |
 | CRT and scanline filters | P2 | |
 | True widescreen (16:9 and ultrawide) | P1 | **Largely native.** The game has a *Screen Size: Normal 4:3 / Wide Screen 16:9* setting (S7); the same byte selects the anamorphic `_W` movies and is passed to the 3D projection set-up (S6b), so 16:9 is a native mode to expose rather than a patch to write. Remaining research: HUD behaviour in that mode, and ultrawide beyond it |
-| Frame interpolation beyond the game's native frame rate | P2 | **Research needed.** Needs scene state, not just GS packets; likely requires the native renderer path |
+| Frame interpolation beyond the game's native frame rate | P2 | **Research needed.** The game updates at 30 Hz (menu 60 Hz; S7), so 60 Hz is the target. Needs scene state, not just GS packets; likely requires the native renderer path |
 | Texture dump and replacement, PCSX2-style pack compatibility | P1 | A community HD texture and UI pack for PCSX2 has been reported, so compatibility is attractive |
 
 ### Input
@@ -141,7 +143,7 @@ evaluate. Feasibility notes are honest: several items depend on research that ha
 | Gamepad and keyboard, DualShock 2 layout mapping | P0 | |
 | Per-device profiles, hot-plug, rebinding, dead zones | P0 | |
 | Rumble | P1 | |
-| Pressure-sensitive button emulation | P2 | Only if the game reads it |
+| Pressure-sensitive button emulation | — | Dropped: the game configures the DualShock 2 with analog locked and no pressure mode (S7) |
 
 ### Audio and video
 
@@ -209,10 +211,11 @@ unofficial. The working title may change (§14).
 ## 10. Constraints and assumptions
 
 - A legally obtained NTSC-U disc image is required. It must match the pinned hashes.
-- Setup builds the game module locally, which needs a C++ toolchain, tens of gigabytes of free disk space and
-  a lengthy first build. A published PS2 recompilation of another game reports 20 to 40 minutes and about 20 GB
-  of disk for a clean build. Incremental setup and bundling a compiler toolchain in the launcher are design goals
-  (architecture.md §3, tech-stack.md §6).
+- Setup builds the game module locally, which needs a C++20 toolchain, CMake and Ninja. Spike S1 measured the boot
+  ELF on a 6-core machine: recompiling takes 2 s; compiling the 8,335 generated units costs about 15,000–16,000 CPU-s
+  (30–40 minutes), about 6,000 CPU-s (≈15 minutes) with a precompiled header; 5–7 GiB of RAM at 12 jobs; about
+  0.5 GB of disk. Incremental setup, the PCH, a compiler cache and a job count chosen from free RAM are design
+  requirements (architecture.md §3, tech-stack.md §6); a bundled toolchain remains the Windows plan.
 - PS2Recomp is experimental, and its runtime has partial hardware coverage and poor VU and GS performance. We
   will build or replace large parts of the runtime ourselves.
 - No one has published a recompilation, decompilation or format documentation for this game that we could find. We
@@ -239,13 +242,13 @@ Each milestone ends with a demonstrable result. A milestone is done only when it
 
 | Spike | Question |
 |---|---|
-| S1 | Does PS2Recomp build with the Linux toolchain on the development machine (GCC and Clang), and how long does it take? |
+| S1 | Does PS2Recomp build with the Linux toolchain on the development machine (GCC and Clang), and how long does it take? **Done:** builds unpatched with both (445/445 tests); recompile 2 s; compile cost measured (§10); the recompiler ignores the overlay segments, so overlays need per-unit synthetic ELFs. |
 | S2 | Can Ghidra with an Emotion Engine plugin load `SLUS_212.07` and export a usable function list? Does the exporter handle a stripped ELF of this size? **Done:** yes, headless, in 2–3 minutes; 9,598 functions; the exporter runs unmodified with a `.properties` answer file. |
 | S3 | How does the overlay loader work? Find the function that reads `BIN/*.BIN` and the instruction sequence that makes new code live (cache flush). |
 | S4 | What is the `DATA.HD6` index layout, and how does the game read `DATA.DAT` through it? **Done:** layout, reader and read path in `Docs/formats/hd6.md`. |
 | S5 | Can paraLLEl-GS be built standalone and fed a GS dump captured from PCSX2, with the output matching? **S5a done:** builds unpatched with GCC and Clang, the RTX 4060 meets every requirement, the embedding API is the `GSInterface` class. S5b (replay of real dumps) waits for S7. |
 | S6 | What are the `MVI` movies (MPEG-2 through the IPU, or a custom codec)? **S6a and S6b done:** XOR-obfuscated MPEG-2 program streams with PCM audio; the game's read routine generates the table and applies the XOR, and the player is mapped down to its `sceMpeg` library calls (`Docs/formats/mvi.md`). |
-| S7 | What frame rate and resolution does the game run at in PCSX2, and which GS features does it use heavily? |
+| S7 | What frame rate and resolution does the game run at in PCSX2, and which GS features does it use heavily? **Done** (battle scene still missing): 30 Hz update (menu 60) at 512×448 field-interlaced; native 16:9 option; GS histograms, raw dumps and save states captured with the first-party headless harness. |
 
 ## 12. Risks and mitigations
 
@@ -253,15 +256,15 @@ Each milestone ends with a demonstrable result. A milestone is done only when it
 |---|---|---|---|---|
 | R1 | **Overlays break the flat-program assumption** of the recompiler and runtime | Certain | High | Overlay-aware dispatch designed in from day one; each overlay recompiled as a separate unit with its own function map (architecture.md §4.3); spike S3 |
 | R2 | **Stripped ELF**: incomplete or wrong function discovery causes crashes at run time | Medium (was High; S2 found 9,598 functions covering 85.7 % of the image) | High | Ghidra analysis, run-time fallback that logs unresolved addresses (the residual risk is 31 unresolved switch tables and 993 indirect calls), iterative triage loop, overrides for hard cases |
-| R3 | **GS rendering speed and accuracy**: PS2Recomp's GS path is reported as very slow; an accurate renderer may need strong GPU features | High | High | Renderer behind an interface; start with paraLLEl-GS (accurate, supports supersampling) and keep a native HLE renderer as the long-term path (architecture.md §6) |
+| R3 | **GS rendering speed and accuracy** | Medium (was High: S5b replayed this game's frames in paraLLEl-GS at SSIM 0.992–0.997 against PCSX2, 5 ms of GPU per field frame at 1x and 18.5 ms at 16x on the RTX 4060) | High | Renderer behind an interface; paraLLEl-GS first, native renderer later (architecture.md §6). Residual: about 8 ms of CPU GIF decode per field frame (the GS thread is mandatory), low-end GPUs, and the battle scene, which no dump covers yet |
 | R4 | **VU1 microprogram performance** | Medium | High | Interpreter first for correctness, then ahead-of-time compilation of programs found at run time (architecture.md §5.4) |
 | R5 | **Custom IOP sound stack** (`SK*`, `PCMPLAY`) | High | Medium | Bootstrap by executing the original IOP modules, replace with HLE once behavior is understood (architecture.md §7) |
 | R6 | **Unknown archive and movie formats** | Low (solved by S4, S6a and S6b) | Medium | Format docs under `Docs/formats/`, patterns under `tools/extract/`. Residual: member formats inside `DATA.DAT` (`.chr`, `.pak`, `.snd`, …), which the port does not need to parse to run the game |
 | R7 | **Timing, threads and interrupts**: recompiled code cannot be pre-empted at arbitrary instructions | Medium | High | Explicit yield points and a deterministic scheduler (architecture.md §12); tracing support |
 | R8 | **FPU semantics**: the R5900 FPU is not IEEE-754 (round-toward-zero, no NaN or infinity) and small differences can desynchronize or hang the game | Medium | High | Dedicated arithmetic helpers, controlled host rounding mode, differential tests (architecture.md §15) |
-| R9 | **Build time and disk usage** for users | High | Medium | Chunked generation, parallel builds, compiler cache, incremental setup, bundled toolchain option |
+| R9 | **Build time** for users (disk is not a concern: about 0.5 GB) | Medium (measured by S1: 30–40 min on six cores, ≈15 min with a precompiled header, 5–7 GiB RAM) | Medium | Precompiled runtime headers (0.37× per unit), `-O2` for function units and `-O0/-O1` for the dispatch table, splitting the few multi-megabyte units, job count from free RAM, compiler cache keyed on the deterministic output, incremental setup |
 | R10 | **Legal exposure** from accidental inclusion of game data | Low | Very high | BYO-disc design, pre-commit and CI checks, contribution rules (§9) |
-| R11 | **Upstream instability**: PS2Recomp is experimental and moves quickly | Medium | Medium | Pin to a commit, keep a small documented patch queue, contribute fixes upstream |
+| R11 | **Upstream churn**: PS2Recomp moves quickly (16 commits in the last 90 days from 7 authors) but builds and tests cleanly (S1: zero patches needed) | Medium | Low | Pin to `eb8688b`, keep a small documented patch queue (empty today), contribute fixes upstream |
 | R12 | **Scope**: enhancements distract from getting the game to boot | Medium | Medium | Strict milestone order; feature work starts only after M4 |
 | R13 | **Single-contributor bus factor** | Medium | Medium | Written architecture, ADR log, tests, no private knowledge |
 
@@ -287,9 +290,9 @@ Decisions that need an answer from the project owner. Defaults are proposed so w
 |---|---|---|---|
 | D1 | **Project name** | **Decided:** keep the working name **DQ8-Native**. It can still change before the first public announcement. | Trademark and discoverability |
 | D2 | **License** | **Decided:** GPL-3.0-or-later (ADR-0009). `LICENSE` added. | PS2Recomp is GPL-3.0; changes what can be linked |
-| D3 | **How the game module is produced** | Local build on the user's machine from their disc (first-run setup). Launcher drives it and can bundle a compiler. | Legally safest; costs first-run time. The alternative of shipping pre-built recompiled code is not acceptable under §9. |
-| D4 | **Relationship to PS2Recomp** | Use as a pinned dependency plus a small patch queue, and write our own runtime on top | A fork diverges quickly; a pure dependency may not reach our needs (overlays) |
-| D5 | **First GS backend** | paraLLEl-GS (Vulkan), with a native HLE renderer later | Determines resolution scaling story and GPU requirements |
+| D3 | **How the game module is produced** | Local build on the user's machine from their disc (first-run setup); system compiler on Linux, bundled toolchain planned for Windows. **Evidence complete (S1); ADR-0008 drafted, awaiting acceptance.** | Legally safest; costs 15–40 minutes of first-run compile. The alternative of shipping pre-built recompiled code is not acceptable under §9. |
+| D4 | **Relationship to PS2Recomp** | Pin `eb8688b` plus a patch queue (empty today), write our own runtime on top. **Evidence complete (S1, S2); ADR-0003 drafted, awaiting acceptance.** | A fork diverges quickly; the per-code-unit changes we need are small and local to `ps2xRecomp` |
+| D5 | **First GS backend** | paraLLEl-GS (Vulkan), with a native HLE renderer later. **Evidence complete (S5a, S5b, S7); ADR-0004 drafted, awaiting acceptance.** | Determines the resolution-scaling story and GPU requirements |
 | D6 | **Launcher toolkit** | Dear ImGui over SDL3 in phase 1, behind a front-end abstraction | One toolkit shared with the in-game overlay; can be replaced later |
 | D7 | **Which region profile ships first** | NTSC-U only | Test coverage and hash pinning |
 | D8 | **Hosting and community** | Public Git repository with issue tracker. Chat server later. | Needed before M7 |
