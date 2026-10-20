@@ -1,0 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+# A synthetic unit kept in the recompiler's own layout and include order (see README.md one level up).
+*
