@@ -12,12 +12,24 @@ add_executable(dq8_unit_tests
     test_mwo3.cpp
     test_region_profile.cpp
     test_intake.cpp
+    test_elf_writer.cpp
+    test_mips_asm.cpp
+    test_process.cpp
+    test_function_map.cpp
+    test_recomp_config.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(dq8_unit_tests PRIVATE DQ8_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
-target_link_libraries(dq8_unit_tests PRIVATE dq8::core Catch2::Catch2WithMain)
+target_link_libraries(dq8_unit_tests PRIVATE dq8::core toml11::toml11 Catch2::Catch2WithMain)
 dq8_set_warnings(dq8_unit_tests)
 dq8_enable_sanitizers(dq8_unit_tests)
+
+# A portable stand-in program for test_process.cpp: no shell or platform tools needed.
+add_executable(dq8_test_child support/process_child.cpp)
+dq8_set_warnings(dq8_test_child)
+dq8_enable_sanitizers(dq8_test_child)
+add_dependencies(dq8_unit_tests dq8_test_child)
+target_compile_definitions(dq8_unit_tests PRIVATE DQ8_TEST_CHILD="$<TARGET_FILE:dq8_test_child>")
 
 include(Catch)
 catch_discover_tests(dq8_unit_tests PROPERTIES LABELS unit)

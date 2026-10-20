@@ -62,6 +62,28 @@ std::string_view to_string(ErrorCode code) noexcept {
         return "mwo3-table";
     case ErrorCode::mwo3_name:
         return "mwo3-name";
+    case ErrorCode::elf_layout:
+        return "elf-layout";
+    case ErrorCode::process_spawn:
+        return "process-spawn";
+    case ErrorCode::process_timeout:
+        return "process-timeout";
+    case ErrorCode::process_cancelled:
+        return "process-cancelled";
+    case ErrorCode::map_parse:
+        return "map-parse";
+    case ErrorCode::map_invalid:
+        return "map-invalid";
+    case ErrorCode::recomp_failed:
+        return "recomp-failed";
+    case ErrorCode::module_build_failed:
+        return "module-build-failed";
+    case ErrorCode::tool_missing:
+        return "tool-missing";
+    case ErrorCode::work_stale:
+        return "work-stale";
+    case ErrorCode::invalid_argument:
+        return "invalid-argument";
     }
     return "unknown";
 }

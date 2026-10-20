@@ -39,6 +39,17 @@ enum class ErrorCode {
     mwo3_range,            // load_address is not the window base, or the overlay does not fit the window
     mwo3_table,            // the constructor table is misaligned, inverted or outside the data range
     mwo3_name,             // the name is not NUL-terminated, NUL-padded, non-empty printable ASCII
+    elf_layout,            // ElfWriter input is inconsistent: overlapping, misaligned or unnamed sections
+    process_spawn,         // a child program could not be started (not found, not executable)
+    process_timeout,       // a child program ran past its time limit and was stopped
+    process_cancelled,     // a child program was stopped because the caller cancelled
+    map_parse,             // a function map, jump-table fragment or stats file is malformed (file:line)
+    map_invalid,           // a function map is well-formed but inconsistent (overlap, outside its unit, ...)
+    recomp_failed,         // the recompiler exited with an error status or printed no report
+    module_build_failed,   // configuring or building a game module failed
+    tool_missing,          // a required program or template (ps2_recomp, cmake, cmake/module) was not found
+    work_stale,            // the work directory lacks a stage's inputs or was prepared for another disc
+    invalid_argument,      // a caller-supplied option names something that does not exist (a unit, ...)
 };
 
 // Stable kebab-case spelling of a code, e.g. "unknown-image". Used in --json output.
