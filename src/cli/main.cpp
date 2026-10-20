@@ -10,6 +10,7 @@
 #include "dq8/core/hash.h"
 #include "dq8/core/intake.h"
 #include "dq8/core/iso9660.h"
+#include "dq8/core/mwo3.h"
 #include "dq8/core/region_profile.h"
 #include "dq8/core/version.h"
 
@@ -18,6 +19,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -44,8 +46,9 @@ int usage(std::FILE* out) {
         "  extract <iso> [--out DIR] [--regions DIR] [--force] [--emit-profile] [--no-verify-hashes] "
         "[--json]\n"
         "      copy the boot file, overlays and IOP modules into DIR/<profile id>/ (default: baserom/)\n"
-        "  info <iso | boot elf> [--json]\n"
-        "      describe a disc image (volume, SYSTEM.CNF, listing) or an ELF's headers and segments\n"
+        "  info <iso | boot elf | overlay .BIN> [--regions DIR] [--json]\n"
+        "      describe a disc image (volume, SYSTEM.CNF, listing), an ELF's headers and segments, or an\n"
+        "      MWo3 overlay container's header (checked against the region profile that owns its window)\n"
         "  --version | --help\n"
         "\n"
         "--regions defaults to data/regions next to the current directory or the executable's tree.\n"
@@ -96,6 +99,10 @@ class Json {
     void value(bool b) {
         separate();
         out_ += b ? "true" : "false";
+    }
+    void null() {
+        separate();
+        out_ += "null";
     }
     template <typename T> void member(std::string_view k, const T& v) {
         key(k);
@@ -245,6 +252,38 @@ void print_warnings(const std::vector<std::string>& warnings, std::FILE* out) {
     }
 }
 
+void json_mwo3_header(Json& j, const dq8::core::Mwo3Header& h) {
+    j.key("header");
+    j.begin_object();
+    j.member("magic", hex32(h.magic));
+    j.member("overlay_id", h.overlay_id);
+    j.member("name", h.name);
+    j.member("load_address", hex32(h.load_address));
+    j.member("text_size", hex32(h.text_size));
+    j.member("data_size", hex32(h.data_size));
+    j.member("bss_size", hex32(h.bss_size));
+    j.member("table_start", hex32(h.table_start));
+    j.member("table_end", hex32(h.table_end));
+    j.member("table_entries", h.table_entry_count());
+    j.end_object();
+    j.key("derived");
+    j.begin_object();
+    j.member("file_size", h.file_size());
+    j.member("memsz", hex32(h.memsz()));
+    j.member("code_start", hex32(h.code_start()));
+    j.member("data_start", hex32(h.data_start()));
+    j.member("bss_start", hex32(h.bss_start()));
+    j.member("end", hex32(h.end_address()));
+    j.end_object();
+}
+
+// The one-line summary of a header used by `verify` and `info`.
+void print_mwo3_summary(const dq8::core::Mwo3Header& h, std::FILE* out) {
+    std::fprintf(out, "id %u  text %s  data %s  bss %s  table %u entries  memsz %s", h.overlay_id,
+                 hex32(h.text_size).c_str(), hex32(h.data_size).c_str(), hex32(h.bss_size).c_str(),
+                 h.table_entry_count(), hex32(h.memsz()).c_str());
+}
+
 void json_verified(Json& j, const dq8::core::VerifiedImage& v) {
     j.key("image");
     j.begin_object();
@@ -290,6 +329,20 @@ void json_verified(Json& j, const dq8::core::VerifiedImage& v) {
     }
     j.end_array();
     j.end_object();
+    j.key("overlays");
+    j.begin_array();
+    for (std::size_t i = 0; i < v.profile.overlays.size() && i < v.overlay_headers.size(); ++i) {
+        const dq8::core::ProfileOverlay& o = v.profile.overlays[i];
+        j.begin_object();
+        j.member("name", o.name);
+        j.member("path", o.path);
+        j.member("index", o.index);
+        j.member("segment_index", o.segment_index);
+        j.member("segment_memsz", hex32(o.segment_memsz));
+        json_mwo3_header(j, v.overlay_headers[i]);
+        j.end_object();
+    }
+    j.end_array();
     j.key("warnings");
     j.begin_array();
     for (const std::string& w : v.warnings) {
@@ -312,6 +365,12 @@ void print_verified(const dq8::core::VerifiedImage& v, std::FILE* out) {
     std::fprintf(out, "SYSTEM.CNF: %s\n", cnf.c_str());
     const auto loads = v.elf.load_segments();
     std::fprintf(out, "ELF:      entry %s, %zu load segments\n", hex32(v.elf.entry).c_str(), loads.size());
+    for (std::size_t i = 0; i < v.profile.overlays.size() && i < v.overlay_headers.size(); ++i) {
+        const dq8::core::ProfileOverlay& o = v.profile.overlays[i];
+        std::fprintf(out, "overlay:  %-8s %-16s ", o.name.c_str(), o.path.c_str());
+        print_mwo3_summary(v.overlay_headers[i], out);
+        std::fprintf(out, "  (index %u, load segment %u)\n", o.index, o.segment_index);
+    }
     print_warnings(v.warnings, out);
 }
 
@@ -332,7 +391,8 @@ int run_verify(const Args& args, const char* argv0) {
         std::printf("%s\n", j.str().c_str());
     } else {
         print_verified(v, stdout);
-        std::printf("OK: the image matches region profile %s\n", v.profile.id.c_str());
+        std::printf("OK: the image matches region profile %s (%zu overlay headers checked)\n",
+                    v.profile.id.c_str(), v.overlay_headers.size());
     }
     return exit_ok;
 }
@@ -427,14 +487,25 @@ int run_extract(const Args& args, const char* argv0) {
     return report.has_mismatch() ? exit_mismatch : exit_ok;
 }
 
-bool looks_like_elf(const fs::path& path) {
+enum class FileKind { iso, elf, mwo3 };
+
+FileKind file_kind(const fs::path& path) {
     std::ifstream in(path, std::ios::binary);
-    char magic[4] = {};
-    in.read(magic, 4);
-    return in.gcount() == 4 && std::memcmp(magic,
-                                           "\x7f"
-                                           "ELF",
-                                           4) == 0;
+    std::uint8_t magic[4] = {};
+    in.read(reinterpret_cast<char*>(magic), 4);
+    if (in.gcount() != 4) {
+        return FileKind::iso;
+    }
+    if (std::memcmp(magic,
+                    "\x7f"
+                    "ELF",
+                    4) == 0) {
+        return FileKind::elf;
+    }
+    if (dq8::core::looks_like_mwo3(magic)) {
+        return FileKind::mwo3;
+    }
+    return FileKind::iso;
 }
 
 dq8::core::ElfHeaders read_elf_file_headers(const fs::path& path) {
@@ -505,6 +576,151 @@ int info_elf(const fs::path& path, bool json) {
                     hex32(s.filesz).c_str(), hex32(s.memsz).c_str(),
                     (s.flags & dq8::core::elf_pf_r) ? 'r' : '-', (s.flags & dq8::core::elf_pf_w) ? 'w' : '-',
                     (s.flags & dq8::core::elf_pf_x) ? 'x' : '-', hex32(s.align).c_str());
+    }
+    return exit_ok;
+}
+
+// Describes an overlay container. The window it is checked against comes from the region profile whose
+// overlay window starts at the header's load_address, when the profiles can be found; the matching
+// profile row (by overlay_id) is compared field by field and the result reported, not enforced: `info`
+// describes, `verify` judges.
+int info_mwo3(const fs::path& path, bool json, const Args& args, const char* argv0) {
+    constexpr std::uint64_t max_size = 16u << 20;
+    const std::uint64_t size = fs::file_size(path);
+    if (size > max_size) {
+        throw Error(ErrorCode::mwo3_size, "'" + path.string() + "' is " + std::to_string(size) +
+                                              " bytes, far too large for an overlay container");
+    }
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        throw Error(ErrorCode::io_open, "cannot open '" + path.string() + "'");
+    }
+    std::vector<std::uint8_t> file(static_cast<std::size_t>(size));
+    in.read(reinterpret_cast<char*>(file.data()), static_cast<std::streamsize>(file.size()));
+    if (static_cast<std::uint64_t>(in.gcount()) != size) {
+        throw Error(ErrorCode::io_read, "short read on '" + path.string() + "'");
+    }
+
+    // A self-consistent parse first (it yields load_address), then the profile whose window starts there.
+    const dq8::core::Mwo3Header self = dq8::core::parse_mwo3_header(file, size);
+    std::vector<dq8::core::RegionProfile> profiles;
+    try {
+        profiles = dq8::core::load_region_profiles(regions_dir(args, argv0));
+    } catch (const Error&) {
+        // No profiles reachable: report the header on its own terms.
+    }
+    const dq8::core::RegionProfile* profile = nullptr;
+    const dq8::core::ProfileOverlay* row = nullptr;
+    for (const dq8::core::RegionProfile& p : profiles) {
+        if (p.overlay_window.base == self.load_address) {
+            profile = &p;
+            for (const dq8::core::ProfileOverlay& o : p.overlays) {
+                if (o.id == self.overlay_id) {
+                    row = &o;
+                }
+            }
+            break;
+        }
+    }
+    std::optional<dq8::core::Mwo3Window> window;
+    if (profile != nullptr) {
+        window = dq8::core::Mwo3Window{profile->overlay_window.base, profile->overlay_window.end};
+    }
+    const dq8::core::Mwo3Header h = dq8::core::parse_mwo3_header(file, size, window);
+    std::vector<std::string> differences;
+    if (row != nullptr) {
+        auto differs = [&](const char* what, std::uint32_t seen, std::uint32_t recorded) {
+            if (seen != recorded) {
+                differences.push_back(std::string(what) + " " + hex32(seen) + " (profile records " +
+                                      hex32(recorded) + ")");
+            }
+        };
+        differs("text_size", h.text_size, row->text_size);
+        differs("data_size", h.data_size, row->data_size);
+        differs("bss_size", h.bss_size, row->bss_size);
+        differs("table_entries", h.table_entry_count(), row->table_entries);
+        differs("memsz", h.memsz(), row->segment_memsz);
+    }
+
+    if (json) {
+        Json j;
+        j.begin_object();
+        j.member("ok", true);
+        j.member("kind", "mwo3");
+        j.member("path", path.string());
+        j.member("size", size);
+        json_mwo3_header(j, h);
+        j.key("raw_words");
+        j.begin_array();
+        for (const std::uint32_t w : h.raw_words) {
+            j.value(hex32(w));
+        }
+        j.end_array();
+        j.key("profile");
+        if (profile == nullptr) {
+            j.null();
+        } else {
+            j.begin_object();
+            j.member("id", profile->id);
+            j.member("window_base", hex32(profile->overlay_window.base));
+            j.member("window_end", hex32(profile->overlay_window.end));
+            j.key("overlay");
+            if (row == nullptr) {
+                j.null();
+            } else {
+                j.begin_object();
+                j.member("name", row->name);
+                j.member("path", row->path);
+                j.member("index", row->index);
+                j.member("segment_index", row->segment_index);
+                j.member("matches", differences.empty());
+                j.key("differences");
+                j.begin_array();
+                for (const std::string& d : differences) {
+                    j.value(d);
+                }
+                j.end_array();
+                j.end_object();
+            }
+            j.end_object();
+        }
+        j.end_object();
+        std::printf("%s\n", j.str().c_str());
+        return exit_ok;
+    }
+    std::printf("file:     %s (%llu bytes)\n", path.string().c_str(), static_cast<unsigned long long>(size));
+    std::printf("MWo3 overlay container: id %u, name \"%s\"\n", h.overlay_id, h.name.c_str());
+    std::printf("header:   load_address %s  text %s  data %s  bss %s  (memsz %s)\n",
+                hex32(h.load_address).c_str(), hex32(h.text_size).c_str(), hex32(h.data_size).c_str(),
+                hex32(h.bss_size).c_str(), hex32(h.memsz()).c_str());
+    std::printf("text:     %s .. %s\n", hex32(h.code_start()).c_str(), hex32(h.data_start()).c_str());
+    std::printf("data:     %s .. %s\n", hex32(h.data_start()).c_str(), hex32(h.bss_start()).c_str());
+    std::printf("bss:      %s .. %s\n", hex32(h.bss_start()).c_str(), hex32(h.end_address()).c_str());
+    std::printf("table:    %s .. %s  (%u constructor entries, in the data range)\n",
+                hex32(h.table_start).c_str(), hex32(h.table_end).c_str(), h.table_entry_count());
+    if (profile == nullptr) {
+        std::printf("profile:  none has an overlay window at %s; header checked for self-consistency only\n",
+                    hex32(h.load_address).c_str());
+    } else if (row == nullptr) {
+        std::printf("profile:  %s owns the window %s..%s but lists no overlay with id %u\n",
+                    profile->id.c_str(), hex32(profile->overlay_window.base).c_str(),
+                    hex32(profile->overlay_window.end).c_str(), h.overlay_id);
+    } else if (differences.empty()) {
+        std::printf(
+            "profile:  %s overlay %s (%s, index %u, load segment %u): the header matches the profile\n",
+            profile->id.c_str(), row->name.c_str(), row->path.c_str(), row->index, row->segment_index);
+    } else {
+        std::printf("profile:  %s overlay %s (%s): the header DIFFERS from the profile\n",
+                    profile->id.c_str(), row->name.c_str(), row->path.c_str());
+        for (const std::string& d : differences) {
+            std::printf("          %s\n", d.c_str());
+        }
+    }
+    std::printf("raw header words:\n");
+    for (std::size_t i = 0; i < h.raw_words.size(); i += 4) {
+        std::printf("  +0x%02zx  %s %s %s %s\n", i * 4, hex32(h.raw_words[i]).c_str(),
+                    hex32(h.raw_words[i + 1]).c_str(), hex32(h.raw_words[i + 2]).c_str(),
+                    hex32(h.raw_words[i + 3]).c_str());
     }
     return exit_ok;
 }
@@ -617,7 +833,7 @@ int info_iso(const fs::path& path, bool json) {
     return exit_ok;
 }
 
-int run_info(const Args& args) {
+int run_info(const Args& args, const char* argv0) {
     const bool json = args.flags.count("json") != 0;
     if (args.positional.size() != 1) {
         std::fputs("dq8ctl info: expected exactly one <path> argument\n", stderr);
@@ -628,7 +844,15 @@ int run_info(const Args& args) {
     if (!fs::is_regular_file(path, ec)) {
         throw Error(ErrorCode::io_open, "'" + path.string() + "' is not a file");
     }
-    return looks_like_elf(path) ? info_elf(path, json) : info_iso(path, json);
+    switch (file_kind(path)) {
+    case FileKind::elf:
+        return info_elf(path, json);
+    case FileKind::mwo3:
+        return info_mwo3(path, json, args, argv0);
+    case FileKind::iso:
+        break;
+    }
+    return info_iso(path, json);
 }
 
 int report_error(const Args& args, const Error& e) {
@@ -680,7 +904,7 @@ int main(int argc, char** argv) {
             return run_extract(args, argv[0]);
         }
         if (args.command == "info") {
-            return run_info(args);
+            return run_info(args, argv[0]);
         }
     } catch (const Error& e) {
         return report_error(args, e);
