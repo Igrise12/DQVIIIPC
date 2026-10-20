@@ -7,11 +7,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 DQ8-Native: an open-source native PC port of *Dragon Quest VIII* (PS2, NTSC-U, boot file `SLUS_212.07`) by
 static recompilation of the game's EE code to C++, run on a purpose-built runtime. Not an emulator. GPL-3.0-or-later.
 
-**Current state: milestone M1 (disc intake) complete; no runtime code.** `libdq8core` has the strict ISO 9660 reader,
-SHA-1/CRC-32, an ELF32 header parser, the `MWo3` overlay-container parser, region profiles
-(`data/regions/SLUS_21207.toml`: hashes, sizes, addresses and the S3 loader facts, never bytes) and `verify_image()` /
-`extract()`; `dq8ctl verify|extract|info <iso|elf|bin>` work on the real disc (verify cross-checks all six overlay
-headers); 39 unit tests plus 4 local tests. The plan of record is the three documents in `Docs/`; read them before
+**Current state: milestones M1 (disc intake) and M2 (first recompile) complete; no kernel service yet (M3).**
+- `src/core` (`libdq8core`): ISO 9660 reader, SHA-1/CRC-32, ELF32 reader and writer, `MWo3` parser, region profiles
+  (`data/regions/SLUS_21207.toml`: hashes, sizes, addresses and the S3 loader facts, never bytes), `verify_image()` /
+  `extract()`, a portable process runner, and the recompile pipeline (`core/recomp/`: function maps, per-unit
+  recompiler configs, `ps2_recomp` driver, per-unit module builds). `dq8ctl verify|extract|info|recomp|make-unit-elf`.
+- `include/dq8/abi/`: the game-module ABI (`game_module.h`) and the include root generated code compiles against
+  (`ps2recomp/`: `R5900Context`, the `PS2Runtime` adapter, the macros, the stub/syscall forwarders).
+  `cmake/module/` builds one shared library per code unit (`dq8_unit_<name>`, one export).
+- `src/runtime`, `src/game`, `src/host`: guest memory, ELF loader, dispatch tables, overlay manager, the run loop;
+  `dq8-game` loads the seven modules and runs the main unit from `0x00100008` to its first syscall (`SetupThread`).
+- Tests: 127 unit tests (CI on GCC, Clang, MSVC, ASan), local disc tests, and a synthetic recompile end-to-end suite
+  (label `e2e`, CI job on GCC 13). M2's record: `Docs/milestones/M2-first-recompile.md`.
+
+The plan of record is the three documents in `Docs/`; read them before
 proposing or changing design:
 
 - `Docs/project-brief.md`: goals, scope, facts observed from the disc (§6), feature priorities, milestones and
@@ -21,6 +30,8 @@ proposing or changing design:
 - `Docs/tech-stack.md`: languages, build system, dependencies and their licenses, tooling, dev-environment snapshot (§12).
 - `Docs/spikes/`: one brief per M0 spike (S0–S7); a spike session executes its brief and appends `## Findings`.
   `Docs/spikes/README.md` has the rules and the findings template.
+- `Docs/milestones/`: one shared brief and results record per implementation milestone (M2 onward).
+- `Docs/formats/`: layouts of the game's file formats (no game-derived values).
 
 Decided in brief §14: D1 (name), D2 (license, ADR-0009), D3 (local game-module build, ADR-0008), D4 (PS2Recomp pinned
 plus patch queue, ADR-0003) and D5 (paraLLEl-GS first, ADR-0004). D6 to D9 and ADR-0001, 0002, 0005, 0006, 0007 and
@@ -39,6 +50,12 @@ DQ8_TEST_ISO="$DQ8_ISO" ctest --preset local-dev-clang   # label "local": tests 
 ./build/dev-clang/src/cli/dq8ctl verify "$DQ8_ISO" [--json]   # region gate: boot-file hash vs data/regions/*.toml
 ./build/dev-clang/src/cli/dq8ctl extract "$DQ8_ISO" [--out DIR] [--emit-profile]   # ELF, overlays, IOP modules -> baserom/<id>/ (idempotent)
 ./build/dev-clang/src/cli/dq8ctl info <iso|elf>    # volume listing or ELF headers
+cmake --preset ci-gcc -B build/e2e -DDQ8_BUILD_RECOMP=ON -DDQ8_BUILD_E2E=ON && cmake --build build/e2e -j8   # also builds ps2_recomp
+ctest --test-dir build/e2e -L e2e                  # synthetic recompile end-to-end (no game data)
+tools/ghidra/export_maps.sh                        # seven function maps -> work/recomp/maps (needs the Ghidra projects)
+build/e2e/src/cli/dq8ctl recomp all "$DQ8_ISO" --work work/recomp --maps work/recomp/maps \
+    --ps2-recomp build/e2e/ps2recomp/build/ps2xRecomp/ps2_recomp --module-template cmake/module --abi-include-dir include
+build/e2e/src/host/dq8-game --iso "$DQ8_ISO" --module-dir work/recomp/modules/SLUS_21207 --stop-at-first-syscall [--json]
 python3 -I scripts/check_no_game_data.py --tree [--deep]   # the legal gate; --staged is the pre-commit hook
 pre-commit install                                 # once per clone: clang-format + the checker on every commit
 git ls-files -z -- 'src/*' 'include/*' 'tests/*' | grep -zE '\.(cpp|h)$' | xargs -0 clang-format --dry-run -Werror
@@ -123,6 +140,7 @@ launcher, cli  ->  core only
 ## Next work
 
 All M0 spikes (S0–S7) are done; their findings live in `Docs/spikes/` and are folded into the three docs and
-`Docs/formats/`. Next: M2 (first recompile: one synthetic ELF per overlay, prefixed dispatch tables, the
-precompiled-header build, early HLE of the file-I/O RPC), planned with the project owner first.
+`Docs/formats/`. Next: M3 (boots): kernel HLE starting with `SetupThread`, threads and fibers, the file-I/O RPC before
+the first overlay load, the native overlay loader, and the paraLLEl-GS backend; planned with the project owner first.
+M2's record is `Docs/milestones/M2-first-recompile.md`.
 Do not start implementation work the user has not asked for.

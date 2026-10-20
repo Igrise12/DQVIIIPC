@@ -154,7 +154,7 @@ multi-megabyte units, a job count chosen from free RAM, and a compiler cache key
 ### 4.2 Functions and dispatch
 
 - Each guest function becomes one native function that receives the **EE register context** (128-bit GPRs, HI/LO, FPU registers and flags, the VU0 register file, program counter) and the guest memory arena.
-- **Static calls** (`jal` to a known address) are direct native calls.
+- **Calls go through dispatch.** PS2Recomp at `eb8688b` routes every `jal` through `dispatchGuestBranch` (61,529 sites in the heuristic output); only a `j` to a function of the same code unit becomes a direct native call. A same-unit `jal` fast path is a candidate patch-queue item once profiling (M3) says it matters.
 - **Indirect calls and returns** (`jalr`, `jr`) go through a **flat dispatch table** indexed by guest address. The table covers the main program's code range and the overlay window (§4.3). Returns normally use the native call stack. The dispatcher handles the cases where guest code manipulates the return address (tail calls, coroutines, stack switching).
 - **Switch tables** (computed `jr` inside a function) must be resolved at analysis time and emitted as native `switch` statements. Unresolved ones are reported (§4.6). Spike S2 measured the load on this path for the main program: 121 of 152 computed jumps have a resolved table, 31 do not, and 993 of 1,124 `jalr` sites have no static target.
 - **Unknown target.** A dispatch to an address with no function logs the address into the *unresolved-code report* and then either stops with a diagnostic or falls back to the interpreter (§4.6), depending on a setting.
@@ -172,7 +172,7 @@ recompilers assume, so it is designed in from the start.
 | Responsibility | Mechanism |
 |---|---|
 | Know when an overlay becomes resident | **Primary (S3):** replace the loader `0x00100330` with a native implementation that reads the file from the image into guest RAM at `dest`, tells the manager which overlay is now resident (name-table index or the resident `overlay_id`), repoints the window's dispatch slots **before** returning (the loader itself then runs the constructor table through `jalr`), zeroes bss and returns 1. **Cheaper variant:** hook the empty `0x00100320(dest)` that the game calls after the read and before the flush. **Fallback:** read `overlay_id` at `window + 4`; the header stays resident and nothing ever writes the window. |
-| Route dispatch | The dispatch table has one slot range for the window. The manager points that range at the resident overlay's table when it changes, and at an "empty" table (diagnostic stop) when none is resident. |
+| Route dispatch | Each unit has its own table (`table_base` to `table_end`, which for an overlay lies inside the window but need not start at its base). The dispatcher looks a pc up in the main table, else, if the pc is inside the window, in the resident overlay's table, else reports a miss; with no overlay resident a window pc is a diagnostic stop (`OverlayManager::describe_miss`). |
 | Keep guest memory honest | The loader still places the overlay bytes in guest RAM exactly as the game expects, because overlay files contain data as well as code. Only the *execution* is native. |
 | Detect desynchronization | Debug builds periodically verify the resident bytes against the expected fingerprint and report a mismatch. |
 | Handle stale returns | A return into an overlay that has been replaced is a guest bug that the original game never exhibits. Debug builds detect it with a generation counter on the call stack. |
@@ -641,8 +641,9 @@ flowchart BT
 
 ### 13.3 The module ABI
 
-- Lives in `include/dq8/abi/`, plain C, no exceptions or STL across the boundary.
-- Contains: the register context layout, the guest memory handle, the function-table registration entry point, module metadata (profile id, boot ELF hash, generator version), and the ABI version number.
+- Lives in `include/dq8/abi/` (`game_module.h`, plain C) with the C++ include root `include/dq8/abi/ps2recomp/` that generated code compiles against; no STL or C++ types cross the boundary.
+- **Exceptions (temporary deviation, M2):** the host's `GuestStop` and the emitter's inline `throw` on unhandled instructions unwind through module frames, so host and modules share the C++ runtime (no static libstdc++; MSVC `/EHs /MD`). M3 replaces `GuestStop` with fiber switches (§12.3) and a patch-queue change to the emitter removes the inline throws; after that, nothing unwinds across the boundary.
+- Contains: the register context layout (`R5900Context`), the descriptor each module exports through `dq8_game_module_describe` (unit kind and name, overlay id, profile id, source SHA-1, generator string, context size and alignment, entry point, dispatch table), the host API table that the generated code's `PS2Runtime` adapter forwards to, and the ABI version number (1 since M2).
 - The host refuses a module with an incompatible ABI version and tells the launcher to rebuild.
 - Changing the ABI is an event: version bump, changelog, and a note in the ADR log.
 

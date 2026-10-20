@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | In progress (started 2026-10-20) |
+| **Status** | **Done 2026-10-20.** Exit criterion met on the real disc (see Results). |
 | **Exit criterion** (project-brief.md §11) | Function maps for the main ELF and all six overlays; the recompiler's C++ compiles and links; the program starts from `0x00100008` and reaches the first unimplemented syscall |
 | **Decisions it rests on** | ADR-0003 (PS2Recomp `eb8688b` pinned, own runtime), ADR-0008 (module built locally), architecture.md §2, §4, §13 |
 | **Contract files (day 0, owned by the coordinator)** | `include/dq8/abi/game_module.h`, `include/dq8/abi/ps2recomp/ps2_runtime.h`, `r5900_context.h`, `ps2_address.h` |
@@ -215,4 +215,48 @@ READMEs of `src/core` and `src/cli`.
    notices (five recompiler dependencies with the analyzer off), brief §11, CLAUDE.md.
 
 ## Results
-*(filled in by the coordinator: counts, timings, the first syscall reached; addresses and counts only)*
+
+Measured on 2026-10-20 on the development machine (Ryzen 5 5600, 6 cores / 12 threads, GCC 16), NTSC-U disc
+`SLUS_21207`, with `dq8ctl recomp all` and `dq8-game` built from `main` at `87b04e1`. Addresses and counts only.
+
+**Function maps (session D, `tools/ghidra/ExportFunctionMap.java`).**
+
+| Unit | Functions | Jump tables used by the recompiler | Unresolved computed jumps |
+|---|---|---|---|
+| main | 9,600 | 115 of 116 (plus 9 the recompiler resolved itself) | 18 in Ghidra, 1 left to runtime dispatch |
+| title | 69 | 0 | 0 |
+| casino | 238 | 10 of 10 | 0 |
+| viewer | 16 | 0 | 0 |
+| battle | 612 | 6 of 7 | 0 |
+| menu | 232 | 3 of 4 | 1 |
+| shop | 399 | 0 | 0 |
+
+No link-branch return entries were needed in any unit. Exporting all seven maps takes about 32 s.
+
+**Recompile (`ps2_recomp` built from the submodules, about 1 minute).** Exit 0 on all seven units, **0 unhandled
+instructions** (S1's heuristic scan had 7,948), every branch and case target inside an exported range. Generated
+output: 9,600 + 1,566 overlay functions; the main unit's dispatch table has 161,762 entries over
+`0x00100008`–`0x003CF8EC` (S1's heuristic map produced 739,742 slots). Recompiling takes 1.5 s for main and well
+under a second per overlay.
+
+**Module build (`cmake/module`, 12 jobs, precompiled header).** main 412 s wall (57 MB), battle 25 s, casino 17 s,
+menu 11 s, shop 11 s, title 5 s, viewer 2 s. Every module exports exactly one symbol (`dq8_game_module_describe`) and
+has no undefined references outside the C/C++ runtime. S1 estimated about 15 minutes with a PCH; the measured build is
+about 7 minutes.
+
+**First run.** `dq8-game --iso <disc> --module-dir work/recomp/modules/SLUS_21207 --stop-at-first-syscall` verifies the
+disc, loads and validates all seven modules against the region profile (overlay tables inside the window
+`[0x00461C80, 0x00489A80)`, none resident), loads the seven ELF segments and runs from `0x00100008`. The start-up code
+zeroes bss inline and stops at the **first syscall: `0x3C` `SetupThread`, at `0x001001C8`**, with `$a0` = the global
+pointer `0x003D9770`, `$a1` = stack top `0x01F40000`, `$a2` = stack size `0x000C0000`, `$a3` = argument block
+`0x0041F680`, and `$v0` = `0x00489A80` (the end of bss and of the overlay window, where S3 found the heap begins).
+No MMIO was touched. Exit 0. This is where M3 starts: `SetupThread` is the first kernel service to implement.
+
+**CI.** Unit tests on Linux GCC 13, Clang 18 and ASan, the lint/policy job and the new `Linux GCC 13 recompile
+end-to-end` job pass. Windows MSVC failed on warning C4324 for the 16-byte-aligned `R5900Context`; suppressed in
+`r5900_context.h` (scoped `#pragma warning`) in the results commit.
+
+**Follow-ups found during M2** (not blocking): split overlay functions in the Ghidra projects need the per-call-site
+overlay attribution S3 left open; two upstream helpers look wrong against the hardware (`FPU_CVT_W_S` rounds instead of
+truncating, the variable MMI shifts act on 32-bit lanes); the JSON writer and region lookup are duplicated between
+`dq8ctl` and `dq8-game`; the module template's MSVC path is unverified on a real Windows build of a game module.

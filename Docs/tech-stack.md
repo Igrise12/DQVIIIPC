@@ -35,7 +35,7 @@
 | Language | Used for | Notes |
 |---|---|---|
 | **C++20** | Runtime, core, launcher, CLI, offline tools, generated game module | Result types for errors in hot paths. Exceptions are allowed in the launcher and tools, but the runtime's per-instruction and per-packet paths are exception-free. Generated code builds without exceptions and RTTI. |
-| **C (C11)** | The host and module ABI headers in `include/dq8/abi/` | No STL, exceptions or C++ types cross the boundary (architecture.md §13.3). |
+| **C (C11)** | The host and module ABI header `include/dq8/abi/game_module.h` | No STL or C++ types cross the boundary; exceptions do until M3 (architecture.md §13.3). |
 | **Python 3** | Developer scripts and analysis glue | **Never on the end user's setup path**, so users need no Python. Scripts that read game files run with `python -I` and from a directory that holds no untrusted files. |
 | **Java** | Ghidra scripts (`tools/ghidra/`) | Developers only. Needs the JDK that the chosen Ghidra release requires. |
 | **GLSL** | Shaders for the native renderer, presentation passes, overlay | Compiled to SPIR-V at build time. |
@@ -135,7 +135,7 @@ This is the least conventional part of the stack and the main usability risk, so
 
 | Setting | Choice | Reason |
 |---|---|---|
-| Chunking | Many functions per file, controlled by the generator, not one file per function | Fewer, larger translation units compile faster than thousands of tiny ones. PS2Recomp exposes `single_file_output`, `low_memory_mode` and `output_worker_threads` for this. |
+| Chunking | One file per function (PS2Recomp offers only that or a single file) | Chunking N functions per file needs an emitter patch; with the precompiled header the per-file cost is already low (S1: 0.6 CPU-s per typical unit). |
 | Optimization | `-O2` for all function units; `-O0` or `-O1` for the generated dispatch table | S1: `-O2` costs the same CPU as `-O1` on typical units (front end dominates), so the split buys nothing there; the table is a static initialiser with nothing to optimise. |
 | Language flags | No exceptions, no RTTI (goal) | At `eb8688b` the emitter writes `throw` on unhandled instructions (422 units under the heuristic map), so this needs a clean function map or an emitter patch first (S1). |
 | LTO | Off for the module | Link time grows sharply and benefits are small across a C ABI. |

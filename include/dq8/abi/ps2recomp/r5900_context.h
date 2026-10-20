@@ -29,6 +29,10 @@ enum PS2Exception {
     EXCEPTION_TRAP = 0x0D,
 };
 
+#if defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4324) // padded due to alignas(16): intended, the context holds SIMD registers
+#endif
 struct alignas(16) R5900Context {
     __m128i r[32]; // general-purpose registers, 128-bit
 
@@ -121,6 +125,9 @@ struct alignas(16) R5900Context {
         branch_pc = 0;
     }
 };
+#if defined(_MSC_VER)
+#pragma warning(pop)
+#endif
 
 inline std::uint32_t getRegU32(const R5900Context* ctx, int reg) {
     if (reg <= 0 || reg > 31) {
