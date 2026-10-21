@@ -33,8 +33,15 @@ class EventQueue {
     };
 
     // Schedules `callback` at `at`. `tag` names the event in reports and must outlive it (a string literal).
-    // Events at the same time run in the order they were scheduled. Returns a non-zero id.
+    // Events at the same time run in the order they were scheduled. Returns a non-zero id. The schedule hook,
+    // when set, is told `at` afterwards.
     EventId schedule(Cycles at, std::string_view tag, Callback callback);
+
+    // Called with the time of every newly scheduled event. The machine uses it to pull the clock's deadline
+    // forward, so that an event a device schedules in the middle of a slice (an RPC reply, a DMA completion)
+    // runs at the next safe point after its time instead of at the next deadline set before it existed.
+    using ScheduleHook = std::function<void(Cycles at)>;
+    void set_schedule_hook(ScheduleHook hook) { hook_ = std::move(hook); }
     // Removes a pending event; returns false when it already ran or was cancelled.
     bool cancel(EventId id);
 
@@ -61,6 +68,7 @@ class EventQueue {
     std::unordered_map<EventId, Key> index_;
     std::uint64_t sequence_ = 0;
     EventId next_id_ = 1;
+    ScheduleHook hook_;
 };
 
 } // namespace dq8::rt

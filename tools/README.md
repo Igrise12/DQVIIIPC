@@ -1,6 +1,6 @@
 # tools/
 
-Offline tools that run during setup or development: extract/ (disc and archive extraction), ghidra/ (analysis export scripts), recomp/ (recompiler driver and configuration generation), vu1/ (VU1 microprogram compiler), bringup/ (M3 bring-up helpers: frame SSIM, SIF/RPC trace printer; see bringup/README.md).
+Offline tools that run during setup or development: extract/ (disc and archive extraction), ghidra/ (analysis export scripts), gs/ (`dq8-gs-replay`: GS traces and PCSX2 dumps through our paraLLEl-GS backend, `gs/README.md`), recomp/ (recompiler driver and configuration generation), vu1/ (VU1 microprogram compiler), bringup/ (M3 bring-up helpers: frame SSIM, SIF/RPC trace printer; see bringup/README.md).
 
 ## Function maps for the recompiler (ghidra/)
 

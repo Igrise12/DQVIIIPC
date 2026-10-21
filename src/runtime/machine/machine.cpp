@@ -79,6 +79,14 @@ Machine::Machine(GuestMemory& memory, Dispatcher& dispatcher, MachineConfig conf
     m.kernel_services.set_strict(m.config.strict_kernel);
     // An interrupt that becomes pending makes the next safe point yield to the scheduler.
     m.interrupts.set_raise_hook([&m] { m.clock.force_safe_point(); });
+    // An event scheduled during a slice (an RPC reply while the guest polls RAM for it) lowers the deadline,
+    // so the next safe point after its time yields to the scheduler and runs it. Found by session E's
+    // synthetic run: without it every RPC round trip waited for the next vblank.
+    m.events.set_schedule_hook([&m](Cycles at) {
+        if (at < m.clock.deadline()) {
+            m.clock.set_deadline(at);
+        }
+    });
     m.ee.attach_kernel(m.kernel);
     RunOptions options;
     options.stop_at_first_syscall = m.config.stop_at_first_syscall;

@@ -29,7 +29,6 @@ rest of the contracts listed there:
 | scheduler, kernel | `kernel/ee_kernel.h`, `kernel/{scheduler,kernel_objects}.cpp`, `kernel/kernel_abi.h` | `EeKernel` (adapted from PS2Recomp's `EeScheduler`): guest threads on fibers, strict-priority FIFO selection, the safe points, the handler fiber that runs INTC, DMAC and alarm handlers, threads, semaphores, event flags, alarms on hblank ticks, handler chains, the HLE kernel RAM sentinel, the deadlock report and the no-progress watchdog. |
 | services | `kernel/ee_services.h`, `kernel/services_{thread,sync,interrupt,system}.cpp` | The kernel's own `KernelServices` registrations (owner `kernel`): threads, synchronisation, alarms, interrupt handlers, and the system calls (SetupThread/Heap, OSD configuration, SetSyscall and the syscall-table helpers, documented noops, the exit-path stops). |
 | machine | `machine/machine.cpp` | `Machine`: the clock, events, interrupts, MMIO bus and kernel registry, the vblank events in `VblankPhase` order, spin skipping, and resumable `run()` slices. |
-| declared | `gs/gs_parallel_backend.h`, `platform/platform.h` | What session D implements: the paraLLEl-GS backend factory and the SDL3 platform. |
 
 M3 session B, the EE devices and the GS front end (`make_ee_devices`, in attach order):
 
@@ -56,6 +55,13 @@ M3 session E, overrides and input sources:
 |---|---|---|
 | overrides | `ee/overrides.*`, `ee/dispatcher.*`, `ee/dispatch_table.*`, `ee/overlay_manager.*` | The dispatcher keeps an owned copy of the main table, and the overlay manager one of each overlay table. `Dispatcher::install_override` points one slot at a single trampoline that finds the override by `ctx->pc` (replace, hook_before, hook_after), so `resolve()` is unchanged. It accepts function entries only, not resume points, and checks an optional digest: main units at install time, overlay units on the first call after each residency change. One dispatcher per process holds overrides. The debug stale-return check (`OverlayManager::generation()` around calls from the window) is session A's, in `dispatch_guest_branch`. |
 | input | `io/input_script.*`, `io/input_live.*`, `io/input_record.*` | `IInputSource`s: `.dq8in` scripts (`Docs/formats/dq8-input-script.md`; triggers fed by the host), the live per-vblank latch over the platform's pads, an idle source, and the `--record-input` recorder. |
+
+M3 session D, the paraLLEl-GS backend and the SDL3 platform:
+
+| Area | Files | Purpose |
+|---|---|---|
+| GS backend | `gs/gs_parallel_backend.*`, `gs/parallel/` | The paraLLEl-GS `IGsBackend`: loads the shared library `dq8-gs-parallel` (target `dq8_gs_parallel`, `libdq8-gs-parallel.so`) with `platform/dynlib` through `make_parallel_gs_backend` (from `DQ8_GS_PARALLEL`, next to the executable, or `../lib`) and drives its C ABI (`include/dq8/gs/gs_parallel_abi.h`). `gs/parallel/` builds that library: our wrapper over paraLLEl-GS's `GSInterface` with a headless Granite device, force-progressive anti-blur scanout and a persisted pipeline cache, linked with paraLLEl-GS and Granite and exporting only `dq8_gsp_*` (version script; `NOTICE.md` has the LGPL terms). `dq8_runtime` itself never links Vulkan. |
+| platform | `platform/sdl/` | `dq8_platform_sdl` (linked only by the host): `IPlatform` over SDL3 with the fixed M3 key and gamepad mapping (`sdl_mapping.h`), present as a texture upload with a 4:3 or 16:9 fit, and a window copy for tools and tests (`sdl_platform.h`). |
 
 The dispatch contract (PS2Recomp `PS2Runtime::dispatchGuestBranch` at eb8688b, and the milestone doc):
 

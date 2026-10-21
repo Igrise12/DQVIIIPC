@@ -96,3 +96,16 @@ find_package(Threads REQUIRED)
 target_link_libraries(dq8_runtime PUBLIC dq8::core PRIVATE dq8::stb Threads::Threads ${CMAKE_DL_LIBS})
 dq8_set_warnings(dq8_runtime)
 dq8_enable_sanitizers(dq8_runtime)
+
+# M3 session D: the paraLLEl-GS backend (loads dq8-gs-parallel at run time; no Vulkan link), the library itself, and
+# the SDL3 platform (dq8_platform_sdl, linked only by the host).
+target_sources(dq8_runtime PRIVATE gs/gs_parallel_backend.cpp)
+if(DQ8_BUILD_GS_PARALLEL)
+    add_subdirectory(gs/parallel)
+    # The build tree's copy: the backend's last place to look, so development builds need no DQ8_GS_PARALLEL.
+    set_source_files_properties(gs/gs_parallel_backend.cpp PROPERTIES
+        COMPILE_DEFINITIONS "DQ8_GS_PARALLEL_BUILD_PATH=\"$<TARGET_FILE:dq8_gs_parallel>\"")
+endif()
+if(DQ8_BUILD_WINDOW)
+    add_subdirectory(platform/sdl)
+endif()

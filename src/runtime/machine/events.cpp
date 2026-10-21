@@ -9,6 +9,9 @@ EventId EventQueue::schedule(Cycles at, std::string_view tag, Callback callback)
     const Key key{at, sequence_++};
     events_.emplace(key, Entry{id, tag, std::move(callback)});
     index_.emplace(id, key);
+    if (hook_) {
+        hook_(at);
+    }
     return id;
 }
 
