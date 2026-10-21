@@ -107,6 +107,23 @@ TEST_CASE("events: a callback may schedule more work due in the same pass", "[ma
     CHECK(q.next_time() == 105);
 }
 
+TEST_CASE("events: the schedule hook sees every new event's time", "[machine][events]") {
+    EventQueue q;
+    VirtualClock clock;
+    clock.set_deadline(1000);
+    q.set_schedule_hook([&](Cycles at) {
+        if (at < clock.deadline()) {
+            clock.set_deadline(at);
+        }
+    });
+    q.schedule(5000, "later", [](Cycles) {});
+    CHECK(clock.deadline() == 1000);
+    q.schedule(300, "sooner", [](Cycles) {});
+    CHECK(clock.deadline() == 300);
+    clock.charge(300);
+    CHECK(clock.due());
+}
+
 TEST_CASE("interrupts: INTC write semantics and pending state", "[machine][interrupts]") {
     InterruptController ic;
     int hooks = 0;
