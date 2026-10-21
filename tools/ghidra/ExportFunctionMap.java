@@ -4,7 +4,12 @@
 // Headless postScript: export the function map of one code unit for ps2_recomp.
 //
 //   -postScript ExportFunctionMap.java <out.csv> <out.jump_tables.toml> <out.stats.toml> <unit_start> <unit_end>
-//               [entry_tables=START:END[,START:END...]] [pointer_gaps=1]
+//               [entry_tables=START:END[,START:END...]] [pointer_gaps=1] [entries=ADDR[,ADDR...]]
+//
+// entries: function entries known from outside this program, such as the main-program targets of the overlays'
+// direct jal/j instructions (export_maps.sh scans the overlay files for them): Ghidra's main project never sees
+// overlay code, so it misses functions only overlays call (M3 bring-up: 0x0020F8E0, called from TITLE). A
+// target in a gap is disassembled and made a function when clean; one inside an existing body is reported.
 //
 // entry_tables: pointer tables whose words are function entries (the static-constructor table crt0 walks,
 // from the region profile's [boot].ctor_table). A word that points into the unit at an address Ghidra holds no
@@ -181,6 +186,9 @@ public class ExportFunctionMap extends GhidraScript {
     private final Map<String, Long> counts = new LinkedHashMap<>();
     private final TreeSet<Long> tableEntryFunctions = new TreeSet<>();
     private final TreeSet<Long> pointerGapFunctions = new TreeSet<>();
+    private final TreeSet<Long> delaySlotEntries = new TreeSet<>();
+    private final TreeSet<Long> listedEntryFunctions = new TreeSet<>();
+    private final TreeSet<Long> insideEntries = new TreeSet<>();
 
     private Memory memory;
     private Listing listing;
@@ -209,6 +217,9 @@ public class ExportFunctionMap extends GhidraScript {
             }
             else if (args[i].equals("pointer_gaps=1")) {
                 createPointerGapFunctions(unitStart, unitEnd);
+            }
+            else if (args[i].startsWith("entries=")) {
+                createListedEntries(args[i].substring("entries=".length()), unitStart, unitEnd);
             }
             else {
                 throw new IllegalArgumentException("unknown option " + args[i]);
@@ -679,16 +690,28 @@ public class ExportFunctionMap extends GhidraScript {
                 noInstruction++;
                 continue;
             }
+            // A delay slot belongs to its branch and never starts a function. Ghidra sometimes puts an entry there
+            // (M3 bring-up: TITLE 0x00463580, the slot of a loop's bnez), which cuts the real function short at
+            // the slot: its fall-through then lands inside the bogus one. The bogus body joins the function that
+            // holds the branch.
+            Instruction before = listing.getInstructionAt(toAddr(entry - 4));
+            if (before != null && before.getDelaySlotDepth() > 0 && !out.isEmpty()) {
+                out.get(out.size() - 1).body.add(f.getBody());
+                delaySlotEntries.add(entry);
+                continue;
+            }
             out.add(new Fn(f.getName(), entry, f.getBody()));
         }
         put("dropped_misaligned", misaligned);
         put("dropped_no_instruction", noInstruction);
+        put("delay_slot_entries_joined", delaySlotEntries.size());
         return out;
     }
 
     // End = min(body max + 1, next entry, unit end); records cuts and multi-range bodies.
     private long assignEnds(List<Fn> functions, long unitEnd) {
         long clampedToUnit = 0;
+        long slotsKept = 0;
         long tooSmall = 0;
         long bodyBytesCut = 0;
         long maxEnd = 0;
@@ -701,6 +724,14 @@ public class ExportFunctionMap extends GhidraScript {
                 clampedToUnit++;
             }
             end &= ~3L;
+            // A range never ends between a branch and its delay slot: ps2_recomp emits no delay slot that lies past
+            // a function's End, so the branch would lose it (M3 bring-up: TITLE 0x004629AC, whose slot set the
+            // next stage). A delay-slot entry was joined above, so the slot is never the next entry here.
+            Instruction last = end - 4 >= f.entry ? listing.getInstructionAt(toAddr(end - 4)) : null;
+            if (last != null && last.getDelaySlotDepth() > 0 && end + 4 <= unitEnd && end != next) {
+                end += 4;
+                slotsKept++;
+            }
             f.end = end;
             if (f.body.getNumAddressRanges() > 1) {
                 multiRange.add(String.format("{ function = %s, ranges = %d, body_min = %s, body_end = %s }",
@@ -727,6 +758,7 @@ public class ExportFunctionMap extends GhidraScript {
         functions.clear();
         functions.addAll(kept);
         put("dropped_too_small", tooSmall);
+        put("end_extended_over_delay_slot", slotsKept);
         put("end_clamped_to_unit", clampedToUnit);
         put("body_bytes_cut_by_next_entry", bodyBytesCut);
         return maxEnd;
@@ -1109,7 +1141,10 @@ public class ExportFunctionMap extends GhidraScript {
         put("pointer_gap_rejected", rejected);
     }
 
-    // A made function is kept only when its body lies in the unit and every word of it is an instruction.
+    // A made function is kept only when its body lies in the unit, every word of it is an instruction, and no
+    // word is an encoding that only data produces: COP0 formats user code never uses (floats from 2.0 to about
+    // 500.0 decode as those) and SPECIAL functions the R5900 lacks (MOVCI, DMULT, DDIV, ...). ps2_recomp reports
+    // both as unhandled instructions; M3 bring-up found them in constant tables inside overlay code areas.
     private boolean cleanBody(Function f, long unitStart, long unitEnd) {
         AddressSetView body = f.getBody();
         if (body.getMinAddress().getOffset() < unitStart || body.getMaxAddress().getOffset() >= unitEnd) {
@@ -1117,12 +1152,78 @@ public class ExportFunctionMap extends GhidraScript {
         }
         for (AddressRange r : body) {
             for (long a = r.getMinAddress().getOffset(); a <= r.getMaxAddress().getOffset(); a += 4) {
-                if (listing.getInstructionAt(toAddr(a)) == null) {
+                Instruction ins = listing.getInstructionAt(toAddr(a));
+                if (ins == null || dataOnlyEncoding(readWordOrNull(a))) {
+                    return false;
+                }
+                // The delay slot of the body's last branch is recompiled with it, inside the body or not.
+                if (ins.getDelaySlotDepth() > 0 && dataOnlyEncoding(readWordOrNull(a + 4))) {
                     return false;
                 }
             }
         }
         return true;
+    }
+
+    private static boolean dataOnlyEncoding(long w) {
+        if (w == NO_VALUE) {
+            return true;
+        }
+        int op = (int) (w >>> 26) & 0x3F;
+        if (op == 0x10) { // COP0: only MF0, MT0, BC0 and CO (ERET, EI, DI, TLB) occur in code
+            int rs = (int) (w >>> 21) & 0x1F;
+            return rs != 0x00 && rs != 0x04 && rs != 0x08 && rs != 0x10;
+        }
+        if (op == 0x00) { // SPECIAL functions the R5900 does not implement
+            int funct = (int) w & 0x3F;
+            switch (funct) {
+            case 0x01: case 0x05: case 0x0E: case 0x15: case 0x1C: case 0x1D: case 0x1E: case 0x1F:
+            case 0x35: case 0x37: case 0x39: case 0x3D:
+                return true;
+            default:
+                return false;
+            }
+        }
+        return false;
+    }
+
+    // Makes functions at entries known from outside the program (see entries).
+    private void createListedEntries(String list, long unitStart, long unitEnd) throws Exception {
+        long inside = 0;
+        long rejected = 0;
+        for (String item : list.split(",")) {
+            if (item.isEmpty()) {
+                continue;
+            }
+            long target = Long.decode(item);
+            if (target < unitStart || target >= unitEnd || (target & 3) != 0) {
+                continue;
+            }
+            Address at = toAddr(target);
+            if (getFunctionAt(at) != null) {
+                continue;
+            }
+            if (getFunctionContaining(at) != null) {
+                insideEntries.add(target);
+                inside++;
+                continue;
+            }
+            if (listing.getInstructionAt(at) == null) {
+                new DisassembleCommand(at, null, true).applyTo(currentProgram, monitor);
+            }
+            Function f = listing.getInstructionAt(at) != null ? createFunction(at, null) : null;
+            if (f == null || !cleanBody(f, unitStart, unitEnd)) {
+                if (f != null) {
+                    removeFunction(f);
+                }
+                rejected++;
+                continue;
+            }
+            listedEntryFunctions.add(target);
+        }
+        put("listed_entry_functions_created", listedEntryFunctions.size());
+        put("listed_entries_inside_functions", inside);
+        put("listed_entries_rejected", rejected);
     }
 
     // Makes a function at every pointer-table word that targets the unit and has none yet (see entry_tables).
@@ -1221,6 +1322,11 @@ public class ExportFunctionMap extends GhidraScript {
             writeList(w, "link_return_entries", linkReturns);
             w.println("# Functions made at entry_tables words that Ghidra had no function for.");
             writeList(w, "entry_table_functions", tableEntryFunctions);
+            w.println("# Ghidra entries at a branch's delay slot, joined to the function that holds the branch.");
+            writeList(w, "delay_slot_entries", delaySlotEntries);
+            w.println("# Functions made at entries= targets (overlay calls into main), and targets inside a body.");
+            writeList(w, "listed_entry_functions", listedEntryFunctions);
+            writeList(w, "listed_entries_inside_functions", insideEntries);
             w.println("# Functions made at data-pointer targets in undisassembled gaps (pointer_gaps=1).");
             writeList(w, "pointer_gap_functions", pointerGapFunctions);
             w.println("# The same for link branches whose target is inside their own function (not entries).");

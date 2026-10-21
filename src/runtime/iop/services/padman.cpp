@@ -36,6 +36,7 @@ constexpr std::size_t cmd_slot = 0x08;
 constexpr std::size_t cmd_result = 0x0C;  // open, init, module version
 constexpr std::size_t cmd_area = 0x10;    // open: the EE pad area
 constexpr std::size_t cmd_result2 = 0x14; // open: the IOP actuator buffer; mode and alignment: accepted
+constexpr std::size_t cmd_mode = 0x0C;    // SetMainMode: the mode-table index (0 digital, 1 analog)
 
 constexpr std::uint32_t cmd_open = 0x01;
 constexpr std::uint32_t cmd_set_main_mode = 0x06;
@@ -64,11 +65,18 @@ constexpr std::size_t frame_request = 0x71;
 constexpr std::size_t frame_ok = 0x72;
 
 constexpr std::uint8_t state_disconnected = 0;
+constexpr std::uint8_t state_exec_cmd = 4;
 constexpr std::uint8_t state_stable = 6;
 constexpr std::uint8_t request_complete = 0;
+constexpr std::uint8_t request_busy = 1;
+// Fields a mode change takes before the pad reports the new mode stable, as a real controller does.
+constexpr int mode_switch_fields = 2;
 
-// A DualShock 2 in analog mode (id 0x73: three halfwords after the header), with the digital and analog
-// modes in its table and two actuators.
+// A DualShock 2 with the digital and analog modes in its table and two actuators. It powers up digital (id
+// 0x41: one halfword of buttons) and turns analog (id 0x73: three halfwords) only when the program asks with
+// SetMainMode. The game's title code depends on that: it tests for an analog controller and moves on only
+// after seeing it not yet analog (M3 bring-up, Docs/milestones/M3-boots.md).
+constexpr std::uint8_t id_digital = 0x41;
 constexpr std::uint8_t id_analog = 0x73;
 constexpr std::uint16_t mode_digital = 0x0004;
 constexpr std::uint16_t mode_analog = 0x0007;
@@ -79,6 +87,8 @@ struct OpenPort {
     std::uint32_t area = 0;      // EE address of the two frames
     std::uint32_t actuators = 0; // IOP address of the actuator buffer
     std::int32_t counter = 0;
+    bool analog = false; // the current mode: digital at power-up
+    int switching = 0;   // fields left of a mode change
 };
 
 struct PadmanState {
@@ -91,7 +101,9 @@ void put16(std::vector<std::uint8_t>& f, std::size_t offset, std::uint16_t value
     f[offset + 1] = static_cast<std::uint8_t>(value >> 8);
 }
 
-std::vector<std::uint8_t> make_frame(const PadState& pad, std::int32_t counter) {
+std::vector<std::uint8_t> make_frame(const PadState& pad, const OpenPort& port) {
+    const std::int32_t counter = port.counter;
+    const std::uint8_t id = port.analog ? id_analog : id_digital;
     std::vector<std::uint8_t> f(frame_size, 0);
     put32(f, frame_counter, static_cast<std::uint32_t>(counter));
     f[frame_request] = request_complete;
@@ -101,7 +113,7 @@ std::vector<std::uint8_t> make_frame(const PadState& pad, std::int32_t counter) 
     }
     const auto buttons = static_cast<std::uint16_t>(~pad.buttons); // active low, high byte first on the wire
     f[frame_data + 0] = 0x00;                                      // transfer ok
-    f[frame_data + 1] = id_analog;
+    f[frame_data + 1] = id;
     f[frame_data + 2] = static_cast<std::uint8_t>(buttons & 0xFF);
     f[frame_data + 3] = static_cast<std::uint8_t>(buttons >> 8);
     f[frame_data + 4] = pad.rx;
@@ -120,12 +132,13 @@ std::vector<std::uint8_t> make_frame(const PadState& pad, std::int32_t counter) 
     put16(f, frame_modes + 2, mode_analog);
     put32(f, frame_length, data_length);
     f[frame_mode_config] = 2;
-    f[frame_mode_id] = id_analog;
+    f[frame_mode_id] = id;
     f[frame_ready] = 1;
     f[frame_mode_count] = 2;
-    f[frame_mode_index] = 1;
+    f[frame_mode_index] = port.analog ? 1 : 0;
     f[frame_actuator_count] = 2;
-    f[frame_state] = state_stable;
+    f[frame_state] = port.switching > 0 ? state_exec_cmd : state_stable;
+    f[frame_request] = port.switching > 0 ? request_busy : request_complete;
     f[frame_ok] = 1;
     return f;
 }
@@ -146,6 +159,13 @@ class PadmanServer final : public IopRpcServer, public IopVblankClient {
         std::vector<std::uint8_t> block(args.begin(), args.end());
         block.resize(block_size, 0);
         const std::uint32_t command = arg32(args, cmd_word);
+        if (call.machine.tracing(TraceCategory::rpc)) {
+            call.machine.trace(TraceCategory::rpc, "padman command " + std::to_string(command) + " args " +
+                                                       std::to_string(arg32(args, 0x04)) + " " +
+                                                       std::to_string(arg32(args, 0x08)) + " " +
+                                                       std::to_string(arg32(args, 0x0C)) + " " +
+                                                       std::to_string(arg32(args, 0x10)));
+        }
         switch (command) {
         case cmd_module_version:
             put32(block, cmd_result, module_version);
@@ -161,6 +181,17 @@ class PadmanServer final : public IopRpcServer, public IopVblankClient {
             }
             break;
         case cmd_set_main_mode:
+            if (const auto it = state_->open.find({arg32(args, cmd_port), arg32(args, cmd_slot)});
+                it != state_->open.end()) {
+                // Only a change of mode switches; the game repeats the request until it sees the mode.
+                const bool analog = arg32(args, cmd_mode) == 1;
+                if (it->second.analog != analog) {
+                    it->second.analog = analog;
+                    it->second.switching = mode_switch_fields;
+                }
+            }
+            put32(block, cmd_result2, 1); // accepted; the frames report it busy, then the new mode
+            break;
         case cmd_set_act_align:
             put32(block, cmd_result2, 1); // accepted; the next frame reports it complete
             break;
@@ -179,7 +210,10 @@ class PadmanServer final : public IopRpcServer, public IopVblankClient {
             ++port.counter;
             // The library reads the frame with the larger counter; write over the other one.
             const std::uint32_t half = static_cast<std::uint32_t>(port.counter) & 1u;
-            machine.memory().write_bytes(port.area + half * frame_size, make_frame(pad, port.counter));
+            machine.memory().write_bytes(port.area + half * frame_size, make_frame(pad, port));
+            if (port.switching > 0) {
+                --port.switching;
+            }
         }
     }
 
@@ -193,6 +227,8 @@ class PadmanServer final : public IopRpcServer, public IopVblankClient {
         OpenPort& p = state_->open[{port, slot}];
         p.area = arg32(args, cmd_area);
         p.counter = 0;
+        p.analog = false;
+        p.switching = 0;
         if (p.actuators == 0) {
             const auto buffer = call.iop.allocate(actuator_buffer_size);
             if (!buffer) {

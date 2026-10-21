@@ -33,11 +33,12 @@ void load_padman(SifClient& c) {
 }
 
 std::vector<std::uint8_t> command(SifClient& c, std::uint32_t cmd, std::uint32_t a = 0, std::uint32_t b = 0,
-                                  std::uint32_t d = 0) {
+                                  std::uint32_t d = 0, std::uint32_t at_0c = 0) {
     std::vector<std::uint8_t> req(0x80, 0);
     SifClient::put(req, 0x00, cmd);
     SifClient::put(req, 0x04, a);
     SifClient::put(req, 0x08, b);
+    SifClient::put(req, 0x0C, at_0c);
     SifClient::put(req, 0x10, d);
     c.write(block, req);
     REQUIRE(c.call(pad_client, 1, block, 0x80, block, 0x80));
@@ -111,9 +112,9 @@ TEST_CASE("padman: every vblank writes the next frame from the input source", "[
     CHECK(f[0x70] == 6); // stable
     CHECK(f[0x71] == 0); // request complete
     CHECK(f[0x72] == 1);
-    CHECK(f[0x65] == 0x73);
+    CHECK(f[0x65] == 0x41); // a DualShock 2 powers up digital
     CHECK(f[0x00] == 0x00);
-    CHECK(f[0x01] == 0x73);
+    CHECK(f[0x01] == 0x41);
     CHECK(game_buttons(f) == 0x0840); // start and cross in the library's bit order
     CHECK(f[0x06] == 0x10);
     CHECK(f[0x07] == 0x80);
@@ -121,7 +122,7 @@ TEST_CASE("padman: every vblank writes the next frame from the input source", "[
     CHECK(SifClient::get(f, 0x60) <= 32);
     CHECK(f[0x50] == 0x04);
     CHECK(f[0x52] == 0x07);
-    CHECK(f[0x69] == 1);
+    CHECK(f[0x69] == 0); // the digital mode
 
     rig.m.fire_vblank_start(); // field 1: nothing pressed
     f = current_frame(c);
@@ -134,6 +135,40 @@ TEST_CASE("padman: every vblank writes the next frame from the input source", "[
     CHECK(c.read32(area + 0xD8) == 3);
     CHECK(f[0x70] == 0); // no pad
     CHECK(rig.input.samples == 3);
+}
+
+TEST_CASE("padman: SetMainMode switches to analog after two busy fields, once", "[iop][padman]") {
+    IopRig rig;
+    SifClient& c = rig.client;
+    c.init_rpc();
+    load_padman(c);
+    init_area(c);
+    REQUIRE(SifClient::get(command(c, 0x01, 0, 0, area), 0x0C) == 1);
+    rig.m.fire_vblank_start();
+    CHECK(current_frame(c)[0x01] == 0x41);
+
+    // SetMainMode(port 0, slot 0, mode index 1 = analog, lock 3), as the game sends it.
+    CHECK(SifClient::get(command(c, 0x06, 0, 0, 3, 1), 0x14) == 1);
+    for (int field = 0; field < 2; ++field) {
+        rig.m.fire_vblank_start();
+        const auto f = current_frame(c);
+        CHECK(f[0x70] == 4); // executing the command
+        CHECK(f[0x71] == 1); // request busy
+    }
+    rig.m.fire_vblank_start();
+    auto f = current_frame(c);
+    CHECK(f[0x70] == 6);
+    CHECK(f[0x71] == 0);
+    CHECK(f[0x01] == 0x73);
+    CHECK(f[0x65] == 0x73);
+    CHECK(f[0x69] == 1);
+
+    // The game repeats the request until it sees the mode; a repeat in the same mode does not switch again.
+    CHECK(SifClient::get(command(c, 0x06, 0, 0, 3, 1), 0x14) == 1);
+    rig.m.fire_vblank_start();
+    f = current_frame(c);
+    CHECK(f[0x70] == 6);
+    CHECK(f[0x01] == 0x73);
 }
 
 TEST_CASE("padman: nothing is sampled before a port is open", "[iop][padman]") {

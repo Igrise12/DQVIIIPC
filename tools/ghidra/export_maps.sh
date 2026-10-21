@@ -111,6 +111,35 @@ PY
         if [ -n "$tables" ]; then
             extra+=("$tables")
         fi
+        # Main-program targets of the overlays' direct jal/j instructions: functions only overlays call.
+        targets=$(python3 -I - "$repo/data/regions" "$program" "$bin_dir" <<'PY'
+import pathlib, struct, sys, tomllib
+for f in sorted(pathlib.Path(sys.argv[1]).glob("*.toml")):
+    prof = tomllib.loads(f.read_text())
+    boot = prof.get("boot", {})
+    if pathlib.PurePosixPath(boot.get("path", "")).name != sys.argv[2]:
+        continue
+    lo, hi = boot["load_address"], boot["load_address"] + boot["main_memsz"]
+    window = prof["overlay_window"]
+    found = set()
+    for o in prof.get("overlays", []):
+        data = (pathlib.Path(sys.argv[3]) / pathlib.PurePosixPath(o["path"]).name).read_bytes()
+        start, end = window["header_size"], window["header_size"] + o["text_size"] + o["data_size"]
+        for off in range(start, min(end, len(data)) - 3, 4):
+            w = struct.unpack_from("<I", data, off)[0]
+            if (w >> 26) in (2, 3):  # j, jal
+                pc = window["base"] + off
+                target = (pc & 0xF0000000) | ((w & 0x03FFFFFF) << 2)
+                if lo <= target < hi:
+                    found.add(target)
+    if found:
+        print("entries=" + ",".join("0x%08X" % t for t in sorted(found)))
+    break
+PY
+)
+        if [ -n "$targets" ]; then
+            extra+=("$targets")
+        fi
     else
         project=$projects/s3-$unit
         read -r start end < <(unit_range "$bin_dir/${unit^^}.BIN")
