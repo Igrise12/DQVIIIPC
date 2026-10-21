@@ -146,6 +146,7 @@ class KernelServices {
     std::map<std::int32_t, std::uint32_t> guest_handlers_;
     std::map<std::string, std::uint64_t, std::less<>> counts_;
     bool strict_ = false;
+    std::string strict_message_; // the last strict-mode stop's reason (owned here, not by a fiber frame)
 };
 
 } // namespace dq8::rt

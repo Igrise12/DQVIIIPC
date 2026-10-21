@@ -3,10 +3,18 @@
 #include "runtime/ee/ee_runtime.h"
 
 #include "runtime/ee/context.h"
+#include "runtime/kernel/ee_kernel.h"
 #include "runtime/kernel/kernel_calls.h"
+#include "runtime/kernel/kernel_services.h"
+#include "runtime/machine/cost_model.h"
+#include "runtime/machine/machine_services.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <exception>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -14,8 +22,14 @@ namespace dq8::rt {
 
 namespace {
 
+constexpr unsigned reg_v0 = 2;
 constexpr unsigned reg_v1 = 3;
 constexpr unsigned reg_a0 = 4;
+constexpr unsigned reg_ra = 31;
+constexpr std::uint32_t status_exl = 1u << 1;
+
+// Stack a dispatched call must leave free on its fiber: room for the stop path and for host services.
+constexpr std::size_t call_headroom = std::size_t{256} << 10;
 
 std::array<std::uint32_t, 4> argument_registers(const R5900Context& ctx) {
     return {gpr_u32(ctx, reg_a0), gpr_u32(ctx, reg_a0 + 1), gpr_u32(ctx, reg_a0 + 2),
@@ -53,6 +67,11 @@ std::string_view exception_name(std::uint32_t code) noexcept {
     }
 }
 
+bool handler_active(const ExecState& state, std::int32_t number) {
+    return std::find(state.active_syscall_handlers.begin(), state.active_syscall_handlers.end(), number) !=
+           state.active_syscall_handlers.end();
+}
+
 // The dq8_runtime_api trampolines: `host` is the EeRuntime the adapter was built by.
 EeRuntime& self(void* host) noexcept {
     return *static_cast<EeRuntime*>(host);
@@ -64,8 +83,9 @@ std::int32_t api_dispatch_guest_branch(void* host, std::uint8_t* rdram, R5900Con
     return self(host).dispatch_guest_branch(rdram, ctx, target, source, fallthrough, kind, debug_name) ? 1
                                                                                                        : 0;
 }
-std::int32_t api_ee_checkpoint_due(void* /*host*/, std::uint32_t /*cycles*/) {
-    return 0; // no virtual clock in M2
+std::int32_t api_ee_checkpoint_due(void* host, std::uint32_t cycles) {
+    self(host).checkpoint(cycles);
+    return 0; // any switch already happened inside the call: generated code never unwinds for it
 }
 void api_handle_syscall(void* host, std::uint8_t* rdram, R5900Context* ctx, std::uint32_t encoded_id) {
     self(host).handle_syscall(rdram, ctx, encoded_id);
@@ -215,8 +235,10 @@ const dq8_runtime_api& EeRuntime::api() noexcept {
     return api_table;
 }
 
-EeRuntime::EeRuntime(GuestMemory& memory, const Dispatcher& dispatcher, const KernelHle& kernel)
-    : memory_(memory), dispatcher_(dispatcher), kernel_(kernel), ctx_(std::make_unique<R5900Context>()) {
+EeRuntime::EeRuntime(GuestMemory& memory, const Dispatcher& dispatcher, MachineServices& machine,
+                     KernelServices& kernel_services)
+    : memory_(memory), dispatcher_(dispatcher), machine_(machine), services_(kernel_services),
+      offline_(std::make_unique<ExecState>()), power_on_(std::make_unique<R5900Context>()) {
     adapter_.api = &api_table;
     adapter_.host = this;
     trace_ = [](std::string_view line) {
@@ -225,19 +247,57 @@ EeRuntime::EeRuntime(GuestMemory& memory, const Dispatcher& dispatcher, const Ke
     };
 }
 
+EeRuntime::~EeRuntime() = default;
+
+R5900Context& EeRuntime::context() noexcept {
+    if (exec_ != nullptr && exec_->ctx != nullptr) {
+        return *exec_->ctx;
+    }
+    if (kernel_ != nullptr) {
+        if (const ExecState* last = kernel_->last_exec(); last != nullptr && last->ctx != nullptr) {
+            return *last->ctx;
+        }
+        return kernel_->boot_context();
+    }
+    return *power_on_;
+}
+
+ExecState& EeRuntime::state_for(R5900Context* ctx) {
+    if (exec_ != nullptr) {
+        return *exec_;
+    }
+    offline_->ctx = ctx;
+    return *offline_;
+}
+
+void EeRuntime::annotate_stop(StopInfo& info) const {
+    if (info.last_branch.empty()) {
+        info.last_branch = last_branch_;
+        info.last_source = last_source_;
+        info.last_target = last_target_;
+    }
+}
+
+void EeRuntime::stop(StopInfo info) {
+    machine_.stop(std::move(info));
+    std::abort(); // MachineServices::stop never returns; GCC does not trust [[noreturn]] through a virtual
+                  // call
+}
+
 void EeRuntime::count_dispatch(std::uint32_t target, std::uint32_t source, std::string_view how,
                                std::string_view unit) {
     if (options_.max_dispatches != 0 && dispatches_ >= options_.max_dispatches) {
         StopInfo s;
         s.reason = StopReason::max_dispatches;
-        s.pc = ctx_->pc;
+        s.pc = context().pc;
         s.address = target;
         s.source = source;
         s.message = "dispatch budget of " + std::to_string(options_.max_dispatches) + " used up before " +
                     std::string(how) + " to " + hex32(target);
-        throw GuestStop(std::move(s));
+        stop(std::move(s));
     }
     ++dispatches_;
+    machine_.clock().charge(machine_.cost().dispatch);
     last_branch_ = how;
     last_source_ = source;
     last_target_ = target;
@@ -251,10 +311,11 @@ void EeRuntime::count_dispatch(std::uint32_t target, std::uint32_t source, std::
     }
 }
 
-void EeRuntime::stop_missing(std::uint32_t target, std::uint32_t source, std::string_view how) {
+void EeRuntime::stop_missing(std::uint32_t pc, std::uint32_t target, std::uint32_t source,
+                             std::string_view how) {
     StopInfo s;
     s.reason = StopReason::missing_function;
-    s.pc = ctx_->pc;
+    s.pc = pc;
     s.address = target;
     s.source = source;
     s.message = dispatcher_.describe_miss(target);
@@ -263,102 +324,296 @@ void EeRuntime::stop_missing(std::uint32_t target, std::uint32_t source, std::st
     } else {
         s.message += " (" + std::string(how) + " from " + hex32(source) + ")";
     }
-    throw GuestStop(std::move(s));
+    stop(std::move(s));
 }
+
+// ---- Dispatch.
 
 bool EeRuntime::dispatch_guest_branch(std::uint8_t* rdram, R5900Context* ctx, std::uint32_t target_pc,
                                       std::uint32_t source_pc, std::uint32_t fallthrough_pc,
                                       std::uint32_t kind, const char* debug_name) {
+    ExecState& st = state_for(ctx);
     ctx->pc = target_pc;
     const bool is_call = kind == DQ8_BRANCH_DIRECT_CALL || kind == DQ8_BRANCH_INDIRECT_CALL;
     const std::string_view how =
         debug_name != nullptr ? std::string_view(debug_name) : branch_kind_name(kind);
     // A return (strict-return builds only) and a jump to 0 unwind to the run loop without a table lookup: the
-    // run loop resumes through the resume entry, or ends the program at pc 0.
+    // run loop resumes through the resume entry, or ends the thread at pc 0.
     if (!is_call && (kind == DQ8_BRANCH_RETURN || target_pc == 0)) {
         count_dispatch(target_pc, source_pc, how, {});
+        st.unwinding = true;
         return false;
     }
     const DispatchTarget target = dispatcher_.resolve(target_pc);
     count_dispatch(target_pc, source_pc, how, target.unit);
     if (target.fn == nullptr) {
-        stop_missing(target_pc, source_pc, how);
+        stop_missing(ctx->pc, target_pc, source_pc, how);
     }
     if (!is_call) {
-        return false; // the generated caller returns; the run loop continues at ctx->pc
+        st.unwinding = true; // the generated callers return; the run loop continues at ctx->pc
+        return false;
     }
-    if (depth_ >= options_.max_call_depth) {
+    if (st.depth >= options_.max_call_depth ||
+        (st.fiber != nullptr && st.fiber->headroom() < call_headroom)) {
         StopInfo s;
         s.reason = StopReason::call_depth;
         s.pc = ctx->pc;
         s.address = target_pc;
         s.source = source_pc;
-        s.message = "more than " + std::to_string(options_.max_call_depth) +
-                    " nested guest calls; the host stack guard stopped the guest at " + std::string(how) +
-                    " " + hex32(source_pc) + " -> " + hex32(target_pc);
-        throw GuestStop(std::move(s));
+        s.message = (st.depth >= options_.max_call_depth
+                         ? "more than " + std::to_string(options_.max_call_depth) + " nested guest calls"
+                         : "the fiber's stack has less than " + std::to_string(call_headroom >> 10) +
+                               " KiB left after " + std::to_string(st.depth) + " nested guest calls") +
+                    "; the host stack guard stopped the guest at " + std::string(how) + " " +
+                    hex32(source_pc) + " -> " + hex32(target_pc);
+        stop(std::move(s));
     }
-    ++depth_;
+    if (kernel_ != nullptr) {
+        kernel_->safe_point(st); // may run other threads; the call below then happens when we are resumed
+    }
+#if !defined(NDEBUG)
+    // Stale-return check (M3-boots.md, contract decision 2): a call made from overlay code must return into
+    // the overlay that made it.
+    const OverlayManager& overlays = dispatcher_.overlays();
+    const bool from_window = overlays.in_window(source_pc);
+    const std::uint64_t generation = from_window ? overlays.generation() : 0;
+#endif
+    ++st.depth;
     target.fn(rdram, ctx, &adapter_);
-    --depth_;
-    if (ctx->pc == 0) {
-        return false; // the program ends; unwind to the run loop
+    --st.depth;
+    if (st.unwinding) {
+        return false; // a jump or a mismatched return below us: keep unwinding to the run loop
     }
-    if (ctx->pc == target_pc) {
-        ctx->pc = fallthrough_pc; // pc unchanged: treated as a plain return
+    if (ctx->pc != fallthrough_pc) {
+        st.unwinding = true; // returned somewhere else (pc 0, a changed $ra, its own entry): unwind
+        return false;
     }
-    return ctx->pc == fallthrough_pc;
+#if !defined(NDEBUG)
+    if (from_window && overlays.generation() != generation) {
+        StopInfo s;
+        s.reason = StopReason::stale_return;
+        s.pc = ctx->pc;
+        s.address = fallthrough_pc;
+        s.source = source_pc;
+        s.message = "stale return: the call at " + hex32(source_pc) + " in the overlay window returned to " +
+                    hex32(fallthrough_pc) + " after the resident overlay changed (generation " +
+                    std::to_string(generation) + " -> " + std::to_string(overlays.generation()) + ")";
+        stop(std::move(s));
+    }
+#endif
+    return true;
 }
 
-void EeRuntime::handle_syscall(std::uint8_t* rdram, R5900Context* ctx, std::uint32_t encoded_id) {
-    const std::uint32_t number = encoded_id != 0 ? encoded_id : gpr_u32(*ctx, reg_v1);
-    if (!options_.stop_at_first_syscall && kernel_.handle_syscall(number, rdram, ctx)) {
-        return;
+void EeRuntime::checkpoint(std::uint32_t cycles) {
+    machine_.clock().charge(Cycles{cycles} * machine_.cost().backedge_scale);
+    if (exec_ != nullptr && kernel_ != nullptr) {
+        kernel_->safe_point(*exec_);
     }
-    const auto name = kernel_call_name(number);
-    StopInfo s;
-    s.reason = StopReason::syscall;
-    s.pc = ctx->pc;
-    s.address = ctx->pc - 4u; // generated code sets pc to the instruction after the syscall first
-    s.has_number = true;
-    s.number = number;
-    s.call_name = name ? std::string(*name) : std::string();
-    s.call_kind = DQ8_CALL_SYSCALL;
-    s.args = argument_registers(*ctx);
-    s.message = "syscall " + format_kernel_call_number(number) + " (" +
-                (name ? std::string(*name) : std::string("unknown")) + ") at " + hex32(s.address) + ": " +
-                format_args(s.args) +
-                (options_.stop_at_first_syscall ? "" : "; the kernel HLE has no handler for it");
-    throw GuestStop(std::move(s));
 }
 
-void EeRuntime::call_named(std::uint32_t kind, const char* name, std::uint8_t* rdram, R5900Context* ctx) {
-    const std::string_view call = name != nullptr ? std::string_view(name) : std::string_view();
-    const bool stop_here =
-        kind == DQ8_CALL_TODO || (kind == DQ8_CALL_SYSCALL && options_.stop_at_first_syscall);
-    if (!stop_here && !call.empty() && kernel_.handle_named(call, rdram, ctx)) {
-        return;
+// ---- Run loops.
+
+void EeRuntime::run_from_pc(ExecState& st, R5900Context& ctx, std::uint32_t base_depth) {
+    const std::uint32_t pc = ctx.pc;
+    const DispatchTarget target = dispatcher_.resolve(pc);
+    count_dispatch(pc, 0, "run-loop", target.unit);
+    if (target.fn == nullptr) {
+        stop_missing(pc, pc, 0, "run-loop");
     }
-    StopInfo s;
-    s.reason = StopReason::named_call;
-    s.pc = ctx->pc;
-    s.call_name = std::string(call);
-    s.call_kind = kind;
-    s.args = argument_registers(*ctx);
-    if (kind == DQ8_CALL_SYSCALL) {
-        if (const auto number = kernel_call_number(call)) {
-            s.has_number = true;
-            s.number = static_cast<std::uint32_t>(*number);
+    st.unwinding = false;
+    st.depth = base_depth;
+    // Exceptions are caught here, on the fiber that threw them; the stop happens after the handler is left
+    // (fiber.h, invariant 1).
+    std::optional<StopInfo> caught;
+    try {
+        target.fn(memory_.rdram(), &ctx, &adapter_);
+    } catch (const GuestStop& stop) {
+        caught = stop.info();
+    } catch (const std::exception& e) {
+        caught.emplace();
+        caught->reason = StopReason::guest_error;
+        caught->pc = ctx.pc;
+        caught->address = ctx.pc;
+        caught->message = std::string("generated code threw at ") + hex32(ctx.pc) + ": " + e.what();
+    } catch (...) {
+        caught.emplace();
+        caught->reason = StopReason::guest_error;
+        caught->pc = ctx.pc;
+        caught->address = ctx.pc;
+        caught->message = "generated code threw a non-standard exception at " + hex32(ctx.pc);
+    }
+    if (caught) {
+        stop(std::move(*caught));
+    }
+}
+
+void EeRuntime::run_thread(ExecState& st, bool boot_thread) {
+    for (;;) {
+        if (kernel_ != nullptr) {
+            kernel_->safe_point(st); // the run loop is a safe point too
         }
+        R5900Context& ctx = *st.ctx;
+        if (ctx.pc == 0) {
+            if (boot_thread || kernel_ == nullptr) {
+                StopInfo s;
+                s.reason = StopReason::program_end;
+                s.message = "pc reached 0: the entry function returned";
+                stop(std::move(s));
+            }
+            kernel_->exit_current(false); // a thread's entry function returned: ExitThread
+        }
+        run_from_pc(st, ctx, 0);
     }
-    s.message = std::string(call_kind_name(kind)) + " call " +
-                (call.empty() ? std::string("<unnamed>") : s.call_name) +
-                (s.has_number ? " (" + format_kernel_call_number(s.number) + ")" : std::string()) +
-                ", returning to " + hex32(ctx->pc) + ": " + format_args(s.args) +
-                (kind == DQ8_CALL_TODO ? "; the recompiler left it unbound"
-                 : stop_here           ? ""
-                                       : "; the kernel HLE has no handler for it");
-    throw GuestStop(std::move(s));
+}
+
+void EeRuntime::call_guest(ExecState& st, R5900Context& ctx) {
+    R5900Context* const saved_ctx = st.ctx;
+    const bool saved_unwinding = st.unwinding;
+    const std::uint32_t base_depth = st.depth;
+    st.ctx = &ctx;
+    while (ctx.pc != 0) {
+        if (kernel_ != nullptr) {
+            kernel_->safe_point(st);
+        }
+        run_from_pc(st, ctx, base_depth);
+    }
+    st.ctx = saved_ctx;
+    st.unwinding = saved_unwinding;
+    st.depth = base_depth;
+}
+
+// ---- Kernel calls.
+
+void EeRuntime::run_syscall_handler(ExecState& st, R5900Context& ctx, std::int32_t number,
+                                    std::uint32_t handler) {
+    // The handler runs as a nested call on a copy of the caller's registers (the kernel's saved user context)
+    // and returns to pc 0; only $v0 comes back. A call of the same number inside it reaches the native
+    // service.
+    st.nested_contexts.push_back(std::make_unique<R5900Context>(ctx));
+    R5900Context& nested = *st.nested_contexts.back();
+    nested.pc = handler;
+    nested.cop0_status |= status_exl;
+    set_gpr_lo(nested, reg_ra, 0);
+    st.active_syscall_handlers.push_back(number);
+    call_guest(st, nested);
+    std::memcpy(&ctx.r[reg_v0], &nested.r[reg_v0], sizeof ctx.r[reg_v0]);
+    st.active_syscall_handlers.pop_back();
+    st.nested_contexts.pop_back();
+}
+
+void EeRuntime::trace_kernel_call(std::string_view name, const R5900Context& ctx) {
+    if (machine_.tracing(TraceCategory::kernel)) {
+        machine_.trace(TraceCategory::kernel, std::string(name) + "(" + format_args(argument_registers(ctx)) +
+                                                  ") -> " + hex32(gpr_u32(ctx, reg_v0)));
+    }
+}
+
+void EeRuntime::handle_syscall(std::uint8_t* /*rdram*/, R5900Context* ctx, std::uint32_t encoded_id) {
+    ExecState& st = state_for(ctx);
+    const std::uint32_t number = encoded_id != 0 ? encoded_id : gpr_u32(*ctx, reg_v1);
+    const auto n = static_cast<std::int32_t>(number);
+    machine_.clock().charge(machine_.cost().kernel_call);
+    const auto stop_here = [&](std::string_view suffix) {
+        const auto name = kernel_call_name(number);
+        StopInfo s;
+        s.reason = StopReason::syscall;
+        s.pc = ctx->pc;
+        s.address = ctx->pc - 4u; // generated code sets pc to the instruction after the syscall first
+        s.has_number = true;
+        s.number = number;
+        s.call_name = name ? std::string(*name) : std::string();
+        s.call_kind = DQ8_CALL_SYSCALL;
+        s.args = argument_registers(*ctx);
+        s.message = "syscall " + format_kernel_call_number(number) + " (" +
+                    (name ? std::string(*name) : std::string("unknown")) + ") at " + hex32(s.address) + ": " +
+                    format_args(s.args) + std::string(suffix);
+        stop(std::move(s));
+    };
+    if (options_.stop_at_first_syscall) {
+        stop_here("");
+    }
+    const KernelResolution r = services_.resolve_number(number);
+    if (r.kind == KernelResolution::Kind::guest_handler && !handler_active(st, n)) {
+        run_syscall_handler(st, *ctx, n, r.guest_address);
+        if (kernel_ != nullptr) {
+            kernel_->after_kernel_call(st);
+        }
+        return;
+    }
+    const KernelServiceInfo* service = r.service;
+    if (r.kind == KernelResolution::Kind::guest_handler) {
+        const auto name = kernel_call_name(number);
+        service = name ? services_.find(*name) : nullptr;
+    }
+    if (service == nullptr) {
+        stop_here("; the kernel HLE has no handler for it");
+    }
+    KernelCallContext call(machine_, *ctx, service->name,
+                           r.name.empty() ? std::string_view(service->name) : r.name, true, n,
+                           r.interrupt_context);
+    if (kernel_ != nullptr && !kernel_->in_handler()) {
+        kernel_->note_progress();
+    }
+    services_.invoke(*service, call);
+    trace_kernel_call(service->name, *ctx);
+    if (kernel_ != nullptr) {
+        kernel_->after_kernel_call(st);
+    }
+}
+
+void EeRuntime::call_named(std::uint32_t kind, const char* name, std::uint8_t* /*rdram*/, R5900Context* ctx) {
+    ExecState& st = state_for(ctx);
+    const std::string_view call = name != nullptr ? std::string_view(name) : std::string_view();
+    const auto stop_here = [&](std::string_view suffix) {
+        StopInfo s;
+        s.reason = StopReason::named_call;
+        s.pc = ctx->pc;
+        s.call_name = std::string(call);
+        s.call_kind = kind;
+        s.args = argument_registers(*ctx);
+        if (kind == DQ8_CALL_SYSCALL) {
+            if (const auto number = kernel_call_number(call)) {
+                s.has_number = true;
+                s.number = static_cast<std::uint32_t>(*number);
+            }
+        }
+        s.message = std::string(call_kind_name(kind)) + " call " +
+                    (call.empty() ? std::string("<unnamed>") : s.call_name) +
+                    (s.has_number ? " (" + format_kernel_call_number(s.number) + ")" : std::string()) +
+                    ", returning to " + hex32(ctx->pc) + ": " + format_args(s.args) + std::string(suffix);
+        stop(std::move(s));
+    };
+    if (kind == DQ8_CALL_TODO) {
+        stop_here("; the recompiler left it unbound");
+    }
+    machine_.clock().charge(machine_.cost().kernel_call);
+    if (kind == DQ8_CALL_SYSCALL && options_.stop_at_first_syscall) {
+        stop_here("");
+    }
+    const KernelResolution r = call.empty() ? KernelResolution{} : services_.resolve_name(call);
+    if (r.kind == KernelResolution::Kind::guest_handler && !handler_active(st, r.number)) {
+        run_syscall_handler(st, *ctx, r.number, r.guest_address);
+        if (kernel_ != nullptr) {
+            kernel_->after_kernel_call(st);
+        }
+        return;
+    }
+    const KernelServiceInfo* service =
+        r.kind == KernelResolution::Kind::guest_handler ? services_.find(r.name) : r.service;
+    if (service == nullptr) {
+        stop_here("; the kernel HLE has no handler for it");
+    }
+    // A by-name call has no syscall number of its own (KernelCallContext: has_number means a syscall
+    // instruction); an i-form name still marks interrupt context.
+    KernelCallContext c(machine_, *ctx, service->name, call, false, 0, r.interrupt_context);
+    if (kernel_ != nullptr && !kernel_->in_handler()) {
+        kernel_->note_progress();
+    }
+    services_.invoke(*service, c);
+    trace_kernel_call(call, *ctx);
+    if (kernel_ != nullptr) {
+        kernel_->after_kernel_call(st);
+    }
 }
 
 void EeRuntime::signal_exception(R5900Context* ctx, std::uint32_t exception) {
@@ -369,7 +624,7 @@ void EeRuntime::signal_exception(R5900Context* ctx, std::uint32_t exception) {
     s.number = exception;
     s.message = "guest exception: " + std::string(exception_name(exception)) + " (code " +
                 std::to_string(exception) + ") at " + hex32(ctx->pc);
-    throw GuestStop(std::move(s));
+    stop(std::move(s));
 }
 
 void EeRuntime::stop_unsupported(R5900Context* ctx, std::string_view what, std::uint32_t address) {
@@ -381,56 +636,7 @@ void EeRuntime::stop_unsupported(R5900Context* ctx, std::string_view what, std::
     if (address != 0) {
         s.message += " (address " + hex32(address) + ")";
     }
-    throw GuestStop(std::move(s));
-}
-
-RunResult EeRuntime::run(const RunOptions& options) {
-    options_ = options;
-    dispatches_ = 0;
-    depth_ = 0;
-    last_branch_.clear();
-    last_source_ = 0;
-    last_target_ = 0;
-    const auto finish = [this](StopInfo info) {
-        info.last_branch = last_branch_;
-        info.last_source = last_source_;
-        info.last_target = last_target_;
-        return RunResult{std::move(info), dispatches_};
-    };
-    for (;;) {
-        try {
-            const std::uint32_t pc = ctx_->pc;
-            if (pc == 0) {
-                StopInfo s;
-                s.reason = StopReason::program_end;
-                s.message = "pc reached 0: the entry function returned";
-                return finish(std::move(s));
-            }
-            const DispatchTarget target = dispatcher_.resolve(pc);
-            count_dispatch(pc, 0, "run-loop", target.unit);
-            if (target.fn == nullptr) {
-                stop_missing(pc, 0, "run-loop");
-            }
-            depth_ = 0;
-            target.fn(memory_.rdram(), ctx_.get(), &adapter_);
-        } catch (const GuestStop& stop) {
-            return finish(stop.info());
-        } catch (const std::exception& e) {
-            StopInfo s;
-            s.reason = StopReason::guest_error;
-            s.pc = ctx_->pc;
-            s.address = ctx_->pc;
-            s.message = std::string("generated code threw at ") + hex32(ctx_->pc) + ": " + e.what();
-            return finish(std::move(s));
-        } catch (...) {
-            StopInfo s;
-            s.reason = StopReason::guest_error;
-            s.pc = ctx_->pc;
-            s.address = ctx_->pc;
-            s.message = "generated code threw a non-standard exception at " + hex32(ctx_->pc);
-            return finish(std::move(s));
-        }
-    }
+    stop(std::move(s));
 }
 
 } // namespace dq8::rt

@@ -9,9 +9,10 @@
 #include <string_view>
 #include <utility>
 
-// GuestStop ends a run: a host hook throws it and EeRuntime::run() catches it, unwinding through the
-// generated code's frames on the way (Docs/milestones/M2-first-recompile.md, "M2 deviation from architecture
-// §13.3"). M3 replaces the throw with a fiber switch; StopInfo stays the report.
+// StopInfo is the report of a stopped run. Since M3 a stop on a guest fiber is a fiber switch
+// (MachineServices::stop records the StopInfo and switches away for good, ADR-0007); GuestStop remains only
+// as an exception type: code that cannot switch (GuestMemory's trap-mmio, a stop requested off any fiber)
+// throws it, and it is caught inside the fiber that threw it or by the machine's scheduler loop.
 namespace dq8::rt {
 
 // Why the guest stopped. The spellings from to_string() are printed in dq8-game's --json output; add values,
@@ -27,6 +28,12 @@ enum class StopReason {
     guest_exception,  // trap, break or an exception the generated code signalled
     unsupported,      // a service M2 does not provide (TLB instructions, VU0 microprograms, GIF DMA kicks)
     guest_error,      // the generated code threw, e.g. on an instruction the recompiler did not translate
+    // M3
+    deadlock,    // no guest thread can ever run again (all waiting or dormant, nothing to wake them)
+    no_progress, // the watchdog: no thread made progress for MachineConfig::no_progress_fields fields
+    kernel_ram_collision, // guest code wrote into, or installed code in, the HLE kernel's reserved RAM
+    stale_return,         // a call from the overlay window returned after the resident overlay changed
+    requested,            // the host asked for the stop (--stop-at-pc, --stop-at-rpc)
 };
 
 std::string_view to_string(StopReason reason) noexcept;
@@ -45,10 +52,13 @@ struct StopInfo {
     std::string call_name;               // kernel call, stub or TODO name, when known
     std::uint32_t call_kind = 0;         // dq8_call_kind for named_call, 0 otherwise
     std::array<std::uint32_t, 4> args{}; // $a0..$a3 for syscall and named_call
-    // The last dispatched branch before the stop, filled in by EeRuntime::run() (empty when there was none).
+    // The last dispatched branch before the stop, filled in by the machine (empty when there was none).
     std::string last_branch; // the emitter's debug name ("JAL", "JALR", "JR", ...) or "run-loop"
     std::uint32_t last_source = 0;
     std::uint32_t last_target = 0;
+    // The guest thread that was running: its id, 0 for the scheduler's own stack, negative for the interrupt
+    // handler fiber.
+    std::int32_t thread_id = 0;
 };
 
 class GuestStop : public std::exception {

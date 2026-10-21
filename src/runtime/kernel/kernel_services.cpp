@@ -186,7 +186,10 @@ void KernelServices::invoke(const KernelServiceInfo& service, KernelCallContext&
     ++it->second;
     if ((service.flags & kernel_service_noop) != 0) {
         if (strict_) {
-            call.unimplemented("noop in strict mode (" + service.note + ")");
+            // The stop abandons this fiber's frames (fiber.h, invariant 2), so the message must not be owned
+            // by a temporary or a local of this frame: it lives in the registry.
+            strict_message_ = "noop in strict mode (" + service.note + ")";
+            call.unimplemented(strict_message_);
         }
         if (!service.fn) {
             return;

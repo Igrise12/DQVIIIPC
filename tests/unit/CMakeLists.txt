@@ -47,6 +47,12 @@ add_executable(dq8_unit_tests
     test_machine_primitives.cpp
     test_kernel_services.cpp
     test_m3_contracts.cpp
+    test_fiber.cpp
+    test_scheduler.cpp
+    test_kernel_threads.cpp
+    test_kernel_sync.cpp
+    test_kernel_interrupts.cpp
+    test_kernel_system.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(dq8_unit_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")
@@ -87,13 +93,14 @@ add_test(NAME host.dq8_game_elf_contract
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
 set_tests_properties(host.dq8_game_elf_contract PROPERTIES FIXTURES_REQUIRED dq8_contract_elf LABELS unit)
 
-# Without --stop-at-first-syscall the same stop is "any other guest stop": exit 1.
+# Without --stop-at-first-syscall the kernel serves SetupThread (M3) and the program loops on it until the
+# dispatch budget ends the run: "any other guest stop", exit 1.
 add_test(NAME host.dq8_game_elf_contract_exit1
     COMMAND "${CMAKE_COMMAND}"
         "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
-        "-DARGS=--elf@@${_contract_elf}@@--module-dir@@$<TARGET_FILE_DIR:dq8_unit_contract>"
+        "-DARGS=--elf@@${_contract_elf}@@--module-dir@@$<TARGET_FILE_DIR:dq8_unit_contract>@@--max-dispatches@@10"
         -DEXPECT_EXIT=1
-        "-DEXPECT=stopped after 2 dispatches: syscall: syscall 0x3C [(]SetupThread[)]"
+        "-DEXPECT=stopped after 10 dispatches: max-dispatches: dispatch budget of 10"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
 set_tests_properties(host.dq8_game_elf_contract_exit1 PROPERTIES FIXTURES_REQUIRED dq8_contract_elf LABELS unit)
 
