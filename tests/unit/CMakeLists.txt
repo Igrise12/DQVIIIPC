@@ -111,3 +111,44 @@ add_test(NAME host.dq8_game_elf_no_modules
         "-DEXPECT=\"code\":\"module-validation\"@@no unit modules"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
 set_tests_properties(host.dq8_game_elf_no_modules PROPERTIES FIXTURES_REQUIRED dq8_contract_elf LABELS unit)
+
+# The synthetic machine run (support/machine_unit.h): a multi-thread program in the emitter's shape as a game
+# module, its ELF and a synthetic ISO, run headless with the trace backend for 10 vblanks; the GS stream and RAM
+# hashes must match the golden values below. Needs the M3 machine in dq8-game (src/host/CMakeLists.txt).
+add_library(dq8_unit_machine SHARED support/machine_unit.cpp)
+target_include_directories(dq8_unit_machine PRIVATE "${PROJECT_SOURCE_DIR}/include" "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(dq8_unit_machine SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")
+target_compile_features(dq8_unit_machine PRIVATE cxx_std_20)
+set_target_properties(dq8_unit_machine PROPERTIES
+    PREFIX ""
+    CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/machine_modules"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/machine_modules")
+dq8_set_warnings(dq8_unit_machine)
+dq8_enable_sanitizers(dq8_unit_machine)
+
+add_executable(dq8_machine_inputs support/write_machine_inputs.cpp support/machine_unit_data.cpp
+                                  support/iso_builder.cpp)
+target_include_directories(dq8_machine_inputs PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/include")
+dq8_set_warnings(dq8_machine_inputs)
+
+set(_machine_elf "${CMAKE_CURRENT_BINARY_DIR}/machine.elf")
+set(_machine_iso "${CMAKE_CURRENT_BINARY_DIR}/machine.iso")
+add_test(NAME host.machine_inputs COMMAND dq8_machine_inputs "${_machine_elf}" "${_machine_iso}")
+set_tests_properties(host.machine_inputs PROPERTIES FIXTURES_SETUP dq8_machine_inputs LABELS unit)
+
+# Golden values of the 10-vblank run, recorded when sessions A, B and C are merged (Docs/milestones/M3-boots.md).
+set(DQ8_MACHINE_SYNTHETIC_GS_HASH "pending-merge-of-sessions-a-b-c")
+set(DQ8_MACHINE_SYNTHETIC_RAM_SHA1 "pending-merge-of-sessions-a-b-c")
+if(DQ8_HOST_MACHINE)
+    add_test(NAME host.dq8_game_machine_synthetic
+        COMMAND "${CMAKE_COMMAND}"
+            "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+            "-DARGS=--elf@@${_machine_elf}@@--module-dir@@$<TARGET_FILE_DIR:dq8_unit_machine>@@--disc@@${_machine_iso}@@--headless@@--gs@@trace@@--vblanks@@10@@--json"
+            -DEXPECT_EXIT=0
+            "-DEXPECT=\"ended\":\"vblanks\"@@\"vblanks\":10@@\"gs_hash\":\"${DQ8_MACHINE_SYNTHETIC_GS_HASH}\"@@\"ram_sha1\":\"${DQ8_MACHINE_SYNTHETIC_RAM_SHA1}\""
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
+    set_tests_properties(host.dq8_game_machine_synthetic PROPERTIES FIXTURES_REQUIRED dq8_machine_inputs LABELS unit)
+    add_dependencies(dq8_unit_tests dq8_unit_machine)
+endif()

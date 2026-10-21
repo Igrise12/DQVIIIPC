@@ -27,6 +27,8 @@ foreach(_src machine/machine.cpp machine/ee_devices.cpp gs/gs_pipeline.cpp iop/i
     endif()
 endforeach()
 message(STATUS "dq8-game: M3 machine path ${DQ8_HOST_MACHINE}")
+# tests/unit registers the machine-path tests only when it is there.
+set(DQ8_HOST_MACHINE ${DQ8_HOST_MACHINE} PARENT_SCOPE)
 
 if(DQ8_HOST_MACHINE)
     add_executable(dq8-game main.cpp run_machine.cpp)
