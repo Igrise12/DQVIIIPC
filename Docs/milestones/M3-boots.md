@@ -227,6 +227,53 @@ Day 0 also brought:
 - PCSX2 (GPL-3.0-or-later) may be read and adapted with attribution.
 - Game evidence (Ghidra, PCSX2 logs, save states) stays local; record only addresses, ids, offsets and counts.
 
+## Contract decisions after day 0
+
+Recorded in the order they were made. Each names the owner who implements it.
+
+1. **GS backend factories (2026-10-21).**
+   - B adds `src/runtime/gs/gs_backends.h` with `std::unique_ptr<IGsBackend> make_null_gs_backend();` and
+     `std::unique_ptr<IGsBackend> make_trace_gs_backend(std::filesystem::path file);` (an empty path records nothing;
+     the stream hash stays in `GsPipeline`).
+   - D adds, in `src/runtime/gs/gs_parallel_backend.h`, `struct ParallelGsConfig { std::filesystem::path library;
+     std::uint32_t super_sampling = 1; std::filesystem::path pipeline_cache; };` and
+     `std::unique_ptr<IGsBackend> make_parallel_gs_backend(const ParallelGsConfig&);`. It throws
+     `std::runtime_error` when the library or the device fails, and the host maps that to exit 3.
+   - The parallel backend's loader only `dlopen`s, so it is compiled into `dq8_runtime` on every platform. The
+     shared library is the target `dq8_gs_parallel`, with output name `dq8-gs-parallel` plus the platform prefix and
+     suffix, built when `DQ8_BUILD_GS_PARALLEL` is on. The host looks for it next to its executable unless told
+     otherwise.
+   - The SDL3 platform is the static library `dq8_platform_sdl`, built when `DQ8_BUILD_WINDOW` is on. The host
+     defines `DQ8_HAVE_WINDOW` when it links it.
+2. **Stale-return check (2026-10-21).**
+   - A implements it in `dispatch_guest_branch` in debug builds (`!NDEBUG`), with the API already on `main`.
+   - Around each dispatched call whose `source_pc` is in the window (`dispatcher.overlays().in_window(source_pc)`),
+     A reads `dispatcher.overlays().generation()` before the call. If it has moved afterwards, A stops with a new
+     `StopReason::stale_return` (spelled `"stale_return"`), reporting the caller and both generations.
+   - E needs no new `Dispatcher` API for it. (E first proposed `Dispatcher::check_return`; that is dropped because A
+     merges before E.)
+3. **Trace categories (2026-10-21, on `main`).**
+   - `machine_services.h` has `TraceCategory {kernel, sif, rpc, dma, gs}`, `trace_bit()`, the pure virtual
+     `tracing(category)` and the helper `trace(category, message)`, which emits a `"trace"` event with fields `cat`
+     and `msg`.
+   - `MachineConfig::trace_mask` holds the bits. A implements `Machine::tracing`; `FakeMachine` has a `trace_mask`
+     member, off by default.
+   - The host prints trace events on stderr and leaves them out of `--events` unless asked.
+4. **Host-requested stops (2026-10-21).**
+   - A appends `StopReason::requested` (spelled `"requested"`) for `--stop-at-pc` and `--stop-at-rpc`.
+   - `--movies stop` uses `unsupported`.
+5. **IOP events (2026-10-21).** C emits:
+   - `iop_module` {`name` (string), `id` (u64)} on each module load;
+   - `rpc_bind` {`sid` (u64), `server` (u64, 0 while unregistered)} when a bind *succeeds*; failed retries are not
+     events;
+   - `rpc_call` {`sid` (u64), `fno` (u64)} only when `tracing(TraceCategory::rpc)` is on.
+
+   `.dq8in` `after rpc_bind:SID` and `--stop-at-rpc SID[:FNO]` key on these fields.
+6. **The stopped thread's context (2026-10-21).**
+   - A appends `std::int32_t thread_id` to `StopInfo` (0 = scheduler stack, negative = the handler fiber).
+   - After a stop, `EeRuntime::context()` returns the context of the thread (or handler) that was running when the
+     run stopped. That is what the host's JSON `context` prints.
+
 ## Upstream reuse (PS2Recomp `eb8688b`)
 
 | Upstream | Destination | Change |
@@ -382,7 +429,7 @@ Also: an unregistered sid gives server 0, the reset handshake works, and an IOP�
 - `nm -D` shows only `dq8_gsp_*`, and create fails cleanly with no device.
 - The SDL dummy-driver test passes.
 - **Locally:** S7's settings dump (`work/pcsx2/probe-20261019-183359/settings-screen.gs`) replays through our wrapper at
-  SSIM ≥ 0.99 against S5b's reference, and shows in the window.
+  SSIM ≥ 0.99 against S5b's reference (`work/parallel-gs/ref/settings-rgba.png`), and shows in the window.
 - MSVC: OFF by default; record the result of one build attempt.
 
 ### E: Game layer, overrides, host, CI, local tooling
