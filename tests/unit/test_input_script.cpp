@@ -236,3 +236,14 @@ TEST_CASE("record input: the recording replays the same states", "[input]") {
     CHECK(RecordingInput::format_changes(0, 2, make_pad_state(false, 0), PadState{}) ==
           std::vector<std::string>{"2 disconnect"});
 }
+
+TEST_CASE("input script: the authored boot-to-title script parses", "[input]") {
+    const InputScript s = load_input_script(std::filesystem::path(DQ8_SOURCE_DIR) / "tests" / "local" /
+                                            "input" / "SLUS_21207-boot-to-title.dq8in");
+    REQUIRE(s.lines.size() == 7);
+    CHECK(s.lines[0].time == InputScriptLine::Time::after);
+    CHECK(s.lines[0].trigger == InputTrigger{"overlay", "TITLE"});
+    CHECK(s.lines[0].buttons == pad_down);
+    CHECK(s.lines[1].buttons == pad_cross);
+    CHECK(s.lines[2].buttons == pad_cross);
+}

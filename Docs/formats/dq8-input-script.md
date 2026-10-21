@@ -36,7 +36,7 @@ full length.
 ## Syntax
 
 ```
-dq8in 1                               # header: the first non-comment line, format version 1
+dq8in 1                               # header: the first line that is not blank or a comment, version 1
 # comment; '#' starts a comment anywhere on a line
 
 600 press cross                       # vblank 600: Cross for 4 vblanks (the default length)
