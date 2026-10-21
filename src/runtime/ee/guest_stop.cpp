@@ -28,6 +28,16 @@ std::string_view to_string(StopReason reason) noexcept {
         return "unsupported";
     case StopReason::guest_error:
         return "guest-error";
+    case StopReason::deadlock:
+        return "deadlock";
+    case StopReason::no_progress:
+        return "no-progress";
+    case StopReason::kernel_ram_collision:
+        return "kernel-ram-collision";
+    case StopReason::stale_return:
+        return "stale_return";
+    case StopReason::requested:
+        return "requested";
     }
     return "unknown";
 }

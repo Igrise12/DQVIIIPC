@@ -29,11 +29,15 @@ struct MachineConfig {
     bool stop_at_first_syscall = false;  // M2 behaviour: stop at the first kernel call, implemented or not
     bool trace_dispatch = false;
     std::uint32_t trace_mask = 0; // trace_bit(TraceCategory) bits (machine_services.h)
+    // The no-progress watchdog: stop with StopReason::no_progress after this many fields in which no guest
+    // thread made a kernel call or switched (about 20 s at NTSC). 0 turns it off.
+    std::uint32_t no_progress_fields = 1200;
 };
 
 struct RunLimits {
     std::uint64_t until_vblank = 0;   // end the slice once vblank_count() reaches this; 0 = no vblank limit
-    std::uint64_t max_dispatches = 0; // end the run with StopReason::max_dispatches; 0 = no limit
+    std::uint64_t max_dispatches = 0; // end the run with StopReason::max_dispatches once this many dispatches
+                                      // happened since boot; 0 = no limit
 };
 
 struct SliceResult {

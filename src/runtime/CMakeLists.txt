@@ -13,12 +13,18 @@ add_library(dq8_runtime STATIC
     ee/ee_runtime.cpp
     ee/game_module.cpp
     kernel/kernel_calls.cpp
-    kernel/kernel_hle.cpp
     kernel/kernel_services.cpp
     kernel/fiber_stack.cpp
+    kernel/scheduler.cpp
+    kernel/kernel_objects.cpp
+    kernel/services_thread.cpp
+    kernel/services_sync.cpp
+    kernel/services_interrupt.cpp
+    kernel/services_system.cpp
     machine/clock.cpp
     machine/events.cpp
     machine/interrupts.cpp
+    machine/machine.cpp
     machine/machine_services.cpp
     machine/mmio.cpp
     platform/dynlib.cpp

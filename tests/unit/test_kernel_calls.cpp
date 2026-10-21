@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #include "runtime/kernel/kernel_calls.h"
-#include "runtime/kernel/kernel_hle.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <set>
@@ -85,16 +84,4 @@ TEST_CASE("kernel calls: the public SDK numbering", "[kernel]") {
     CHECK_FALSE(kernel_call_number("NoSuchCall").has_value());
     CHECK(format_kernel_call_number(0x3C) == "0x3C");
     CHECK(format_kernel_call_number(static_cast<std::uint32_t>(-0x1A)) == "-0x1A");
-}
-
-TEST_CASE("kernel HLE: empty in M2, handlers by name", "[kernel]") {
-    KernelHle hle;
-    CHECK_FALSE(hle.handle_syscall(0x3C, nullptr, nullptr));
-    CHECK_FALSE(hle.handle_named("FlushCache", nullptr, nullptr));
-    int ran = 0;
-    hle.register_handler("FlushCache", [&ran](std::uint8_t*, R5900Context*) { ++ran; });
-    CHECK(hle.has_handler("FlushCache"));
-    CHECK(hle.handle_named("FlushCache", nullptr, nullptr));
-    CHECK(hle.handle_syscall(0x64, nullptr, nullptr)); // the number reaches the same handler
-    CHECK(ran == 2);
 }

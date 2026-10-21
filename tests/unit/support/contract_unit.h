@@ -18,7 +18,7 @@
 namespace contract {
 
 inline constexpr std::uint32_t table_base = 0x00200000u;
-inline constexpr std::uint32_t table_end = 0x00200200u;
+inline constexpr std::uint32_t table_end = 0x00200600u;
 inline constexpr char unit_name[] = "contract";
 inline constexpr char source_sha1[] = "0123456789abcdef0123456789abcdef01234567";
 
@@ -34,6 +34,37 @@ inline constexpr std::uint32_t missing_target = 0x002001F0u;   // the empty slot
 inline constexpr std::uint32_t scratchpad_store = 0x00200160u; // sw/lw through a scratchpad literal
 inline constexpr std::uint32_t unhandled = 0x002001A0u;        // an instruction the recompiler did not handle
 inline constexpr std::uint32_t recurse = 0x002001C0u;          // calls itself forever
+
+// M3 programs (machine and kernel): they run on a dq8::rt::Machine, use kernel calls by number, and keep
+// their data at `data`. Each saves its $ra in $s2 around calls and returns through it.
+inline constexpr std::uint32_t data = 0x00280000u;         // parameter blocks and result words
+inline constexpr std::uint32_t worker_stack = 0x00290000u; // the second thread's stack (0x4000 bytes)
+inline constexpr std::uint32_t two_threads = 0x00200200u;  // CreateSema, CreateThread, StartThread, WaitSema
+inline constexpr std::uint32_t worker = 0x00200260u;       // marks data+0x84, SignalSema(a0), returns (exits)
+inline constexpr std::uint32_t vblank_sema = 0x002002A0u;  // AddIntcHandler(2), EnableIntc(2), WaitSema
+inline constexpr std::uint32_t vblank_handler = 0x00200300u; // counts at data+0x88, iSignalSema(a1)
+inline constexpr std::uint32_t backedge_irq = 0x00200320u; // AddIntcHandler(2), EnableIntc(2), jal spin_loop
+inline constexpr std::uint32_t backedge_resume = 0x00200358u;
+inline constexpr std::uint32_t spin_loop = 0x00200380u;    // polls data+0x90 on a back-edge until non-zero
+inline constexpr std::uint32_t flag_handler = 0x002003C0u; // stores 1 at data+0x90
+inline constexpr std::uint32_t self_loop_caller =
+    0x002003E0u; // AddIntcHandler(9), EnableIntc(9), jal self_loop
+inline constexpr std::uint32_t self_loop_resume = 0x00200410u;
+inline constexpr std::uint32_t self_loop = 0x00200420u; // $s0 += 1 with the back-edge to its own entry
+inline constexpr std::uint32_t self_loop_iterations = 2000u;
+inline constexpr std::uint32_t jr_self_caller = 0x00200460u; // jal jr_self
+inline constexpr std::uint32_t jr_self_resume = 0x00200470u;
+inline constexpr std::uint32_t jr_self = 0x002004A0u;       // $s0 += 1, then `jr` to its own entry until 3
+inline constexpr std::uint32_t count_handler = 0x002004E0u; // counts at data+0x94
+
+// Host-side counts of C++ entries into the functions above (a resume through the run loop counts again,
+// which is how the tests see a return cascade).
+struct Counters {
+    unsigned spin_loop_entries = 0;
+    unsigned self_loop_entries = 0;
+    unsigned jr_self_entries = 0;
+};
+Counters& counters();
 
 } // namespace contract
 

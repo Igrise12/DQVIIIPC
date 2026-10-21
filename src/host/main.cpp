@@ -22,7 +22,7 @@
 #include "runtime/ee/guest_memory.h"
 #include "runtime/ee/overlay_manager.h"
 #include "runtime/kernel/kernel_calls.h"
-#include "runtime/kernel/kernel_hle.h"
+#include "runtime/machine/machine.h"
 
 #include <charconv>
 #include <cstdint>
@@ -296,9 +296,8 @@ struct Session {
     rt::LoadedElf elf;
     rt::GuestMemory memory;
     rt::OverlayManager overlays;
-    rt::KernelHle kernel;
     std::unique_ptr<rt::Dispatcher> dispatcher;
-    std::unique_ptr<rt::EeRuntime> ee;
+    std::unique_ptr<rt::Machine> machine;
 };
 
 // Registers the validated units: the main unit's table with the dispatcher, overlay tables with the manager.
@@ -614,7 +613,7 @@ void print_result(const Session& s, const rt::RunResult& r) {
         std::printf("last dispatch: %s %s -> %s\n", r.stop.last_branch.c_str(),
                     hex32(r.stop.last_source).c_str(), hex32(r.stop.last_target).c_str());
     }
-    std::fputs(rt::format_context(s.ee->context()).c_str(), stdout);
+    std::fputs(rt::format_context(s.machine->ee().context()).c_str(), stdout);
     const auto& log = s.memory.mmio_log();
     std::printf("mmio: %zu addresses, %llu accesses\n", log.size(),
                 static_cast<unsigned long long>(s.memory.mmio_access_count()));
@@ -671,9 +670,16 @@ int run_game(const Options& o, const char* argv0) {
         print_setup(s);
         std::fflush(stdout); // before the run's stderr diagnostics
     }
-    s.ee = std::make_unique<rt::EeRuntime>(s.memory, *s.dispatcher, s.kernel);
-    rt::reset_context(s.ee->context(), s.elf.entry);
-    const rt::RunResult result = s.ee->run(o.run);
+    rt::MachineConfig config;
+    config.stop_at_first_syscall = o.run.stop_at_first_syscall;
+    config.max_call_depth = o.run.max_call_depth;
+    config.trace_dispatch = o.run.trace_dispatch;
+    s.machine = std::make_unique<rt::Machine>(s.memory, *s.dispatcher, config);
+    s.machine->boot(s.elf.entry);
+    rt::RunLimits limits;
+    limits.max_dispatches = o.run.max_dispatches;
+    const rt::SliceResult slice = s.machine->run(limits);
+    const rt::RunResult result{slice.stop.value_or(rt::StopInfo{}), slice.dispatches};
     const int code =
         stopped_at_syscall(result.stop) && o.run.stop_at_first_syscall ? exit_at_syscall : exit_guest_stop;
     if (o.json) {
@@ -683,7 +689,7 @@ int run_game(const Options& o, const char* argv0) {
         json_setup(j, s);
         json_stop(j, result.stop);
         j.member("dispatches", result.dispatches);
-        json_context(j, s.ee->context());
+        json_context(j, s.machine->ee().context());
         json_mmio(j, s.memory);
         j.member("exit_code", code);
         j.end_object();
