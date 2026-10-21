@@ -735,7 +735,7 @@ This table is the practical meaning of "scalable". Each row says what to add and
 
 ## 18. Decision log
 
-Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are accepted. The first batch is proposed here. ADR-0009 was accepted on 2026-10-19 and ADRs 0003, 0004 and 0008 on 2026-10-20 (files in `Docs/adr/`). The others still await the project owner's confirmation of the corresponding items in the brief (§14).
+Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are accepted. The first batch is proposed here. ADR-0009 was accepted on 2026-10-19, ADRs 0003, 0004 and 0008 on 2026-10-20, and ADRs 0005, 0007, 0011 and 0012 on 2026-10-21 at the start of M3 (files in `Docs/adr/`). The others still await the project owner's confirmation of the corresponding items in the brief (§14).
 
 | ADR | Decision | Status | Rationale in one line |
 |---|---|---|---|
@@ -743,12 +743,14 @@ Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are acc
 | 0002 | Split into redistributable host and locally built game module over a versioned C ABI | Proposed | Keeps the legal boundary clean and avoids rebuilding the game on every host update. |
 | 0003 | PS2Recomp as a pinned dependency with a patch queue, own runtime | **Accepted** (2026-10-20; `Docs/adr/0003-ps2recomp-pinned-dependency.md`) | Experimental upstream, no overlay support, we need control of the runtime. |
 | 0004 | GS behind an interface, parallel-gs first, native renderer later, trace backend early | **Accepted** (2026-10-20; `Docs/adr/0004-parallel-gs-first-backend.md`) | Accuracy and resolution scaling now, flexibility later, testability throughout. |
-| 0005 | SDL3 for window, input and audio | Proposed | Cross-platform, gamepad API, already used by sibling projects. |
+| 0005 | SDL3 for window, input and audio | **Accepted** (2026-10-21; `Docs/adr/0005-sdl3-window-input-audio.md`) | Cross-platform, gamepad API, already used by sibling projects. |
 | 0006 | Schema-driven settings and launcher | Proposed | New features add settings without UI code. |
-| 0007 | One deterministic machine thread with fibers, separate render, audio and I/O threads | Proposed | Determinism and testability before parallelism. |
+| 0007 | One deterministic machine thread with fibers, separate render, audio and I/O threads | **Accepted** (2026-10-21; `Docs/adr/0007-machine-thread-fibers.md`; minicoro behind `rt::Fiber`, virtual clock, cost model) | Determinism and testability before parallelism. |
 | 0008 | Local setup build from the user's disc | **Accepted** (2026-10-20; `Docs/adr/0008-local-game-module-build.md`) | Only approach consistent with the legal stance. |
 | 0009 | GPL-3.0-or-later | **Accepted** (2026-10-19) | Follows from using PS2Recomp. |
 | 0010 | Launcher is a thin front end over `libdq8core`, Dear ImGui first | Proposed | One toolkit with the in-game overlay, replaceable later. |
+| 0011 | IOP as native RPC servers first (SIF protocol, file I/O, disc, modules, pad, memory card; null servers for the sound modules); interpreting the IRX modules deferred | **Accepted** (2026-10-21; `Docs/adr/0011-iop-native-servers-first.md`) | Every SDK library is recompiled game code, so the SIF protocol is needed either way; the title screen needs no audio. |
+| 0012 | Overlay residency through the loader hook, with the game's own loader over native file I/O | **Accepted** (2026-10-21; `Docs/adr/0012-overlay-residency-loader-hook.md`; to be confirmed in bring-up) | One file-I/O path for archives and overlays; the hook fires between "bytes in RAM" and "code live". |
 
 ---
 

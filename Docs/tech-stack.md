@@ -107,7 +107,7 @@ Versions: use the **latest stable release at the time each dependency is added**
 | **Formatting and logging** | fmt, spdlog | MIT | fmt is also a PS2Recomp dependency. |
 | **Launcher and overlay UI** | **Dear ImGui** (SDL3 and Vulkan backends) | MIT | One toolkit for launcher and in-game overlay. File pickers use SDL3's native dialogs. |
 | **Upscaling shader** | AMD FidelityFX FSR 1 (EASU and RCAS) | MIT | Presentation pass (architecture.md §6.3). |
-| **Fibers** | **minicoro** (alternatives: boost.context, OS fibers) | MIT or public domain | Guest threads (architecture.md §12.3). Evaluate cost with deep guest stacks. |
+| **Fibers** | **minicoro** `02dad0f` (fallbacks behind `rt::Fiber`: ucontext, Win32 fibers) | MIT-0 or Unlicense | Guest threads (architecture.md §12.3, ADR-0007, accepted 2026-10-21). Annotates fiber switches for AddressSanitizer itself and saves the Windows thread-information block. Evaluate cost with deep guest stacks. |
 | **Fast hashing** | xxHash | BSD-2-Clause | Cache keys, texture hashes. |
 | **Digests** | A small vendored SHA-1 and CRC-32 implementation, or the platform crypto API | Public domain or system | Disc verification. |
 | **Compression** | zstd | BSD-3-Clause | Caches and dumps. |

@@ -13,6 +13,8 @@ constexpr std::array calls{
     KernelCall{0x01, "ResetEE"},
     KernelCall{0x02, "GsSetCrt"},
     KernelCall{0x04, "ExitThread", true}, // SDK "Exit"; PS2Recomp ends the calling thread
+    KernelCall{0x06, "LoadExecPS2"},
+    KernelCall{0x0D, "SetVTLBRefillHandler"},
     KernelCall{0x10, "AddIntcHandler"},
     KernelCall{0x11, "RemoveIntcHandler"},
     KernelCall{0x12, "AddDmacHandler"},
@@ -95,6 +97,7 @@ constexpr std::array calls{
     KernelCall{0x62, "DisableCache"},
     KernelCall{0x64, "FlushCache"},
     KernelCall{-0x68, "iFlushCache"},
+    KernelCall{0x6B, "sceSifStopDma"},
     KernelCall{0x6E, "SetOsdConfigParam2"},
     KernelCall{0x6F, "GetOsdConfigParam2"},
     KernelCall{0x70, "GsGetIMR"},
@@ -113,9 +116,11 @@ constexpr std::array calls{
     KernelCall{-0x79, "sceSifSetReg", true},
     KernelCall{0x7A, "sceSifGetReg"},
     KernelCall{-0x7A, "sceSifGetReg", true},
+    KernelCall{0x7B, "ExecOSD"},
     KernelCall{0x7C, "Deci2Call"},
     KernelCall{-0x7C, "Deci2Call", true},
     KernelCall{0x7F, "GetMemorySize"},
+    KernelCall{0x80, "GetGsDxDyOffset"}, // _GetGsDxDyOffset in the SDK headers (to be confirmed)
     KernelCall{0x82, "InitTLB"},
     KernelCall{0x83, "FindAddress"},
     KernelCall{0x85, "SetMemoryMode"},

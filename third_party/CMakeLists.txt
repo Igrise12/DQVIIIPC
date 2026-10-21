@@ -20,3 +20,15 @@ if(DQ8_BUILD_TESTS)
         set(CMAKE_MODULE_PATH "${CMAKE_MODULE_PATH}" PARENT_SCOPE)
     endif()
 endif()
+
+# Header-only dependencies as INTERFACE targets with system include directories (no warnings from their code).
+# minicoro's implementation is compiled in exactly one translation unit of ours (MINICORO_IMPL, ADR-0007).
+add_library(dq8_minicoro INTERFACE)
+add_library(dq8::minicoro ALIAS dq8_minicoro)
+target_include_directories(dq8_minicoro SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/minicoro")
+# stb: only stb_image_write.h is used, compiled in one translation unit (STB_IMAGE_WRITE_IMPLEMENTATION).
+add_library(dq8_stb INTERFACE)
+add_library(dq8::stb ALIAS dq8_stb)
+target_include_directories(dq8_stb SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/stb")
+# SDL3 (DQ8_BUILD_WINDOW) and paraLLEl-GS (DQ8_BUILD_GS_PARALLEL) are wired up in cmake/Sdl3.cmake and
+# cmake/ParallelGs.cmake (M3 session D).

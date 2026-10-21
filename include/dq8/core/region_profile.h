@@ -86,6 +86,25 @@ struct RegionProfile {
         std::vector<std::string> name_table_order; // overlay names in name_table order (index order)
     } overlay_window;
 
+    // The IOP modules the game loads and the native services that stand in for each
+    // (Docs/milestones/M3-boots.md, ADR-0011). Optional: empty when the profile has no [iop] table.
+    struct IopModule {
+        std::string name;                  // file basename without extension, upper case: "PADMAN"
+        std::vector<std::string> services; // runtime catalogue names: "padman.v1", "null:0x123456", ...
+    };
+    struct Iop {
+        std::string reset_image; // disc path of the IOP update image the game resets the IOP with
+        std::vector<IopModule> modules;
+    } iop;
+
+    // The movie player entry points the runtime overrides to skip movies (M3: playback is M4). Optional and
+    // marked "to be confirmed" in the profile until bring-up proves them.
+    struct Movie {
+        std::vector<std::uint32_t> player_entries;  // main-program functions the scenes call to play a movie
+        std::string scene_unit;                     // the overlay holding the scene functions, e.g. "TITLE"
+        std::vector<std::uint32_t> scene_functions; // fallback override targets inside the overlay window
+    } movie;
+
     std::vector<ProfileOverlay> overlays; // in the file's order; every overlay has a unique id and index
     std::vector<ProfileFile> files;
     std::vector<std::string> not_extracted; // disc paths; a trailing '/' marks a directory

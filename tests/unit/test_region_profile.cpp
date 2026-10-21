@@ -8,6 +8,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <fstream>
 #include <string>
+#include <vector>
 
 using Catch::Matchers::ContainsSubstring;
 using dq8::core::Error;
@@ -269,7 +270,51 @@ TEST_CASE("the shipped region profiles are valid", "[core][profile]") {
                 }
             }
             CHECK(p.boot.sha1 == "f24bfd21c21f6454c05934224ab52cde837bc90b");
+            CHECK(p.iop.reset_image == "MODULES/IOPRP300.IMG");
+            REQUIRE(p.iop.modules.size() == 15); // S7's load order
+            CHECK(p.iop.modules.front().name == "SIO2MAN");
+            CHECK(p.iop.modules.back().name == "PCMPLAY");
+            CHECK(p.iop.modules.back().services == std::vector<std::string>{"null:0x123456"});
+            REQUIRE(p.movie.player_entries.size() == 2);
+            CHECK(p.movie.scene_unit == "TITLE");
+            CHECK(p.movie.scene_functions.size() == 3);
         }
     }
     CHECK(found);
+}
+
+TEST_CASE("the optional [iop] and [movie] tables are validated", "[core][profile]") {
+    dq8::test::TempDir tmp;
+    const std::string base = std::string(minimal_profile) +
+                             "[[files]]\npath = \"MODULES/IOPRP.IMG\"\nrole = \"iop_image\"\nsize = 0\n";
+    const std::string iop =
+        "[iop]\nreset_image = \"MODULES/IOPRP.IMG\"\n"
+        "[[iop.modules]]\nname = \"X\"\nservices = [\"padman.v1\", \"null:0x80000701\"]\n";
+    const std::string movie = "[movie]\nplayer_entries = [0x00100020]\nscene_unit = \"A\"\n"
+                              "scene_functions = [0x00200040]\n";
+
+    // Absent tables leave the fields empty.
+    const auto plain = dq8::core::load_region_profile(write(tmp.path(), "plain.toml", minimal_profile));
+    CHECK(plain.iop.modules.empty());
+    CHECK(plain.movie.player_entries.empty());
+
+    const auto good = dq8::core::load_region_profile(write(tmp.path(), "good.toml", base + iop + movie));
+    REQUIRE(good.iop.modules.size() == 1);
+    CHECK(good.iop.modules[0].services.size() == 2);
+    CHECK(good.movie.scene_functions == std::vector<std::uint32_t>{0x00200040});
+
+    auto fails = [&](const std::string& text, const std::string& what) {
+        const auto file = write(tmp.path(), "bad.toml", text);
+        CHECK_THROWS_WITH(dq8::core::load_region_profile(file), ContainsSubstring(what));
+    };
+    fails(base + replace_line(iop, "IOPRP.IMG", "X.IRX") + movie, "role iop_image");
+    fails(base + replace_line(iop, "name = \"X\"", "name = \"Y\"") + movie, "no [[files]] entry for Y.IRX");
+    fails(base + replace_line(iop, "name = \"X\"", "name = \"x\"") + movie, "upper-case");
+    fails(base + replace_line(iop, "padman.v1", "PadMan") + movie, "catalogue names");
+    fails(base + replace_line(iop, "null:0x80000701", "null:12") + movie, "catalogue names");
+    fails(base + iop + replace_line(movie, "0x00100020", "0x00300000"), "inside the main program");
+    fails(base + iop + replace_line(movie, "0x00200040", "0x00100040"), "inside the overlay window");
+    fails(base + iop + replace_line(movie, "scene_unit = \"A\"", "scene_unit = \"B\""),
+          "not an overlay name");
+    fails(base + iop + replace_line(movie, "0x00100020", "0x00100022"), "4-byte aligned");
 }

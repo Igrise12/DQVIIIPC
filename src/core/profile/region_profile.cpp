@@ -180,6 +180,24 @@ std::string upper(std::string s) {
 }
 
 // True when `path` is one of the not_extracted entries or lies under one of its directory entries.
+// An IOP service name from the runtime's catalogue ("fileio", "padman.v1") or a null server "null:0x<hex>".
+bool is_service_name(const std::string& s) {
+    static constexpr std::string_view null_prefix = "null:0x";
+    if (s.rfind(null_prefix, 0) == 0) {
+        const std::string digits = s.substr(null_prefix.size());
+        return !digits.empty() && digits.size() <= 8 && is_hex(digits);
+    }
+    if (s.empty()) {
+        return false;
+    }
+    for (const char c : s) {
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.')) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool is_not_extracted(const std::string& path, const std::vector<std::string>& not_extracted) {
     const std::string p = upper(path);
     for (const std::string& n : not_extracted) {
@@ -436,6 +454,111 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
             note_path(t, f.path, "files");
             p.files.push_back(std::move(f));
         }
+    }
+
+    if (const toml::value* iop = r.optional(root, "iop")) {
+        if (!iop->is_table()) {
+            r.fail(*iop, "[iop] must be a table");
+        }
+        auto file_with_role = [&](const std::string& path, const std::string& role) {
+            for (const ProfileFile& f : p.files) {
+                if (upper(f.path) == upper(path) && f.role == role) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        p.iop.reset_image = r.disc_path(*iop, "reset_image", "iop");
+        if (!file_with_role(p.iop.reset_image, "iop_image")) {
+            r.fail(iop->at("reset_image"), "[iop].reset_image '" + p.iop.reset_image +
+                                               "' is not a [[files]] entry with role iop_image");
+        }
+        const toml::value* modules = r.optional(*iop, "modules");
+        if (modules == nullptr || !modules->is_array()) {
+            r.fail(*iop, "[iop] must hold a [[iop.modules]] array");
+        }
+        std::set<std::string> names;
+        for (const toml::value& t : modules->as_array()) {
+            if (!t.is_table()) {
+                r.fail(t, "[[iop.modules]] entries must be tables");
+            }
+            RegionProfile::IopModule m;
+            m.name = r.string(t, "name", "iop.modules");
+            if (m.name != upper(m.name) || m.name.find_first_of("./\\") != std::string::npos) {
+                r.fail(t.at("name"), "[[iop.modules]].name '" + m.name +
+                                         "' must be an upper-case file basename without extension");
+            }
+            if (!names.insert(m.name).second) {
+                r.fail(t.at("name"), "[[iop.modules]].name '" + m.name + "' is listed twice");
+            }
+            bool found = false;
+            for (const ProfileFile& f : p.files) {
+                const std::string u = upper(f.path);
+                const std::size_t slash = u.find_last_of('/');
+                const std::string base = slash == std::string::npos ? u : u.substr(slash + 1);
+                found = found || (f.role == "iop_module" && base == m.name + ".IRX");
+            }
+            if (!found) {
+                r.fail(t.at("name"), "[[iop.modules]].name '" + m.name + "' has no [[files]] entry for " +
+                                         m.name + ".IRX with role iop_module");
+            }
+            const toml::value* services = r.optional(t, "services");
+            if (services == nullptr || !services->is_array()) {
+                r.fail(t, "[[iop.modules]] needs a 'services' array (empty when the module serves no RPC)");
+            }
+            for (const toml::value& item : services->as_array()) {
+                if (!item.is_string() || !is_service_name(item.as_string())) {
+                    r.fail(item, "[[iop.modules]].services entries are catalogue names ([a-z0-9.] such as "
+                                 "\"padman.v1\") or \"null:0x<hex>\"");
+                }
+                m.services.push_back(item.as_string());
+            }
+            p.iop.modules.push_back(std::move(m));
+        }
+    }
+
+    if (const toml::value* movie = r.optional(root, "movie")) {
+        if (!movie->is_table()) {
+            r.fail(*movie, "[movie] must be a table");
+        }
+        auto addresses = [&](const char* key) {
+            const toml::value* v = r.optional(*movie, key);
+            if (v == nullptr || !v->is_array() || v->as_array().empty()) {
+                r.fail(*movie, std::string("[movie] needs a non-empty '") + key + "' array of addresses");
+            }
+            std::vector<std::uint32_t> out;
+            for (const toml::value& item : v->as_array()) {
+                if (!item.is_integer() || item.as_integer() < 0 || item.as_integer() > 0xFFFFFFFFll ||
+                    item.as_integer() % 4 != 0) {
+                    r.fail(item, std::string("[movie].") + key + " entries must be 4-byte aligned addresses");
+                }
+                out.push_back(static_cast<std::uint32_t>(item.as_integer()));
+            }
+            return std::pair<const toml::value*, std::vector<std::uint32_t>>{v, std::move(out)};
+        };
+        const auto [players_at, players] = addresses("player_entries");
+        for (const std::uint32_t a : players) {
+            if (a < main_begin || a >= main_end) {
+                r.fail(*players_at, "[movie].player_entries must lie inside the main program");
+            }
+        }
+        p.movie.player_entries = players;
+        p.movie.scene_unit = r.string(*movie, "scene_unit", "movie");
+        bool known = false;
+        for (const ProfileOverlay& o : p.overlays) {
+            known = known || o.name == p.movie.scene_unit;
+        }
+        if (!known) {
+            r.fail(movie->at("scene_unit"),
+                   "[movie].scene_unit '" + p.movie.scene_unit + "' is not an overlay name");
+        }
+        const auto [scenes_at, scenes] = addresses("scene_functions");
+        for (const std::uint32_t a : scenes) {
+            if (a < w.base || a >= w.end) {
+                r.fail(*scenes_at, "[movie].scene_functions must lie inside the overlay window");
+            }
+        }
+        p.movie.scene_functions = scenes;
     }
     return p;
 }

@@ -244,13 +244,14 @@ menu 11 s, shop 11 s, title 5 s, viewer 2 s. Every module exports exactly one sy
 has no undefined references outside the C/C++ runtime. S1 estimated about 15 minutes with a PCH; the measured build is
 about 7 minutes.
 
-**First run.** `dq8-game --iso <disc> --module-dir work/recomp/modules/SLUS_21207 --stop-at-first-syscall` verifies the
-disc, loads and validates all seven modules against the region profile (overlay tables inside the window
-`[0x00461C80, 0x00489A80)`, none resident), loads the seven ELF segments and runs from `0x00100008`. The start-up code
-zeroes bss inline and stops at the **first syscall: `0x3C` `SetupThread`, at `0x001001C8`**, with `$a0` = the global
-pointer `0x003D9770`, `$a1` = stack top `0x01F40000`, `$a2` = stack size `0x000C0000`, `$a3` = argument block
-`0x0041F680`, and `$v0` = `0x00489A80` (the end of bss and of the overlay window, where S3 found the heap begins).
-No MMIO was touched. Exit 0. This is where M3 starts: `SetupThread` is the first kernel service to implement.
+**First run.** `dq8-game --iso <disc> --module-dir work/recomp/modules/SLUS_21207 --stop-at-first-syscall` verifies
+the disc, loads and validates all seven modules against the region profile (overlay tables inside the window
+`[0x00461C80, 0x00489A80)`, none resident), loads the seven ELF segments and runs from `0x00100008`. The start-up
+code zeroes bss inline and stops at the **first syscall: `0x3C` `SetupThread`, at `0x001001C8`**, with `$a0` = the
+global pointer `0x003D9770`, `$a1` = the stack argument `0x01F40000` (its bottom, as M3 found), `$a2` = stack size
+`0x000C0000`, `$a3` = argument block `0x0041F680`, and `$v0` = `0x00489A80` (the end of bss and of the overlay
+window, where S3 found the heap begins). No MMIO was touched. Exit 0. This is where M3 starts: `SetupThread` is the
+first kernel service to implement.
 
 **CI.** Unit tests on Linux GCC 13, Clang 18 and ASan, the lint/policy job and the new `Linux GCC 13 recompile
 end-to-end` job pass. Windows MSVC failed on warning C4324 for the 16-byte-aligned `R5900Context`; suppressed in

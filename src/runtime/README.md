@@ -17,6 +17,16 @@ What exists (milestone M2, the first recompile: run the main unit from its entry
 | modules | `ee/game_module.*`, `platform/dynlib.*` | `GameModule::open` (`dlopen(RTLD_NOW \| RTLD_LOCAL)` / `LoadLibraryW`, the one export, the descriptor), `validate_descriptor` against a `UnitSpec` (every problem in one pass; a bad magic, ABI version or size alone), `load_modules` (all units, all problems), module file naming (`dq8_unit_<name>` with the platform's prefix and suffix). |
 | kernel | `kernel/kernel_calls.*`, `kernel/kernel_hle.*` | The kernel call number <-> name table (public SDK numbering as PS2Recomp's numeric dispatcher has it; negative numbers are the interrupt-context calls; aliases marked) and `KernelHle`, a by-name handler registry that is empty in M2. |
 
+M3 (Docs/milestones/M3-boots.md) adds the machine around it. Day 0 put these on `main`; sessions A–E implement the
+rest of the contracts listed there:
+
+| Area | Files | Purpose |
+|---|---|---|
+| machine | `machine/clock.*`, `machine/events.*`, `machine/cost_model.h`, `machine/spin_detector.h` | Virtual time in EE cycles (`VirtualClock`, exact NTSC/PAL `VideoTiming`), the deterministic `EventQueue`, the named cost model charged at safe points, and polling-loop detection (ADR-0007). |
+| devices | `machine/interrupts.*`, `machine/mmio.*`, `machine/machine_services.h` | `InterruptController` (INTC and DMAC status with their write semantics), `MmioBus` (physical device ranges), and the `MachineServices` / `IDevice` contract every device is attached through. |
+| kernel | `kernel/kernel_services.*`, `kernel/kernel_layout.h` | The kernel-call registry that replaces `KernelHle` (aliases, SetSyscall guest handlers first, unimplemented calls stop) and `KernelCallContext` (arguments and sign-extended results); the HLE kernel RAM layout. |
+| declared | `kernel/{fiber,scheduler}.h`, `machine/{machine,ee_devices}.h`, `iop/*.h`, `io/*.h`, `gs/*.h`, `ee/overrides.h`, `platform/platform.h` | Interfaces the M3 sessions implement: fibers and the scheduler, the `Machine`, the EE devices, the IOP services, disc and pad input, the GS pipeline and backends, overrides, the SDL3 platform. |
+
 The dispatch contract (PS2Recomp `PS2Runtime::dispatchGuestBranch` at eb8688b, and the milestone doc):
 
 - `dispatch_guest_branch` sets `ctx->pc = target` and counts a dispatch. A jump (`J`, `JR`) returns `false`: the generated caller returns and the run loop continues at `ctx->pc`. A call (`JAL`, `JALR`) runs the target on the host stack; `pc == 0` afterwards returns `false` (program end), an unchanged `pc` counts as a return to `fallthrough`, and the result is `ctx->pc == fallthrough`. When it is `false` the caller returns too, and the run loop re-enters through the resume entry at `jal+8` (a table slot pointing at the owning function, whose `switch (ctx->pc)` jumps to the label).
@@ -30,4 +40,4 @@ Rules:
 - Nothing here knows Dragon Quest: no addresses, overlay names, unit names or profile ids. The game layer (`src/game/`) turns a region profile into `UnitSpec`s and an `OverlayWindowSpec`.
 - Nothing crosses the module boundary except the C ABI in `include/dq8/abi/`. In M2, C++ exceptions do cross it (`GuestStop`, and the emitter's inline `throw`): host and modules must share the C++ runtime (milestone doc, "M2 deviation"). M3 replaces `GuestStop` with fiber switches.
 - Guest memory never holds a host pointer. Guest-visible behaviour goes through the dedicated helpers, never raw host float operations (architecture §4.4).
-- Every component is unit-tested without game data (`tests/unit/test_{dispatch,guest_memory,game_module_desc,ee_runtime_contract,kernel_calls}.cpp`).
+- Every component is unit-tested without game data (`tests/unit/test_{dispatch,guest_memory,game_module_desc,ee_runtime_contract,kernel_calls,kernel_services,machine_primitives,m3_contracts}.cpp`); device tests use `tests/unit/support/fake_machine.h`.

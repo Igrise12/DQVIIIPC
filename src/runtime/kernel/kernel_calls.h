@@ -12,7 +12,8 @@
 // number). The numbers and the handler each one reaches follow PS2Recomp eb8688b's numeric syscall dispatcher
 // (ps2xRuntime/src/lib/Kernel/Syscalls/Dispatcher.cpp), so a syscall instruction and a by-name call from
 // generated code (ps2_syscalls::Name) meet on the same name. Names are the handler names PS2Recomp emits; a
-// few kernel calls have no by-name form in PS2Recomp's call list and are reachable by number only.
+// few kernel calls have no by-name form in PS2Recomp's call list and are reachable by number only. M3 added
+// the numbers missing from PS2Recomp's dispatcher (0x06, 0x0D, 0x6B, 0x7B, 0x80) under their SDK names.
 namespace dq8::rt {
 
 struct KernelCall {

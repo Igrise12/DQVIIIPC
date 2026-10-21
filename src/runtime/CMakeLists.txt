@@ -14,6 +14,11 @@ add_library(dq8_runtime STATIC
     ee/game_module.cpp
     kernel/kernel_calls.cpp
     kernel/kernel_hle.cpp
+    kernel/kernel_services.cpp
+    machine/clock.cpp
+    machine/events.cpp
+    machine/interrupts.cpp
+    machine/mmio.cpp
     platform/dynlib.cpp
 )
 add_library(dq8::runtime ALIAS dq8_runtime)

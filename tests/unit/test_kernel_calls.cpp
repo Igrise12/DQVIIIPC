@@ -27,9 +27,10 @@ const std::set<std::string_view> stub_list{PS2_STUB_LIST(DQ8_TEST_NAME)};
 
 // Kernel calls that PS2Recomp's dispatcher reaches by number but that have no ps2_syscalls:: or ps2_stubs::
 // form: they can only arrive through a syscall instruction.
-const std::set<std::string_view> number_only{"SetupHeap",         "EnableIntcHandler",  "DisableIntcHandler",
-                                             "EnableDmacHandler", "DisableDmacHandler", "FindAddress",
-                                             "iDeleteSema"};
+const std::set<std::string_view> number_only{
+    "SetupHeap",      "EnableIntcHandler", "DisableIntcHandler", "EnableDmacHandler",    "DisableDmacHandler",
+    "FindAddress",    "iDeleteSema",       "LoadExecPS2",        "SetVTLBRefillHandler", "ExecOSD",
+    "GetGsDxDyOffset"};
 
 } // namespace
 

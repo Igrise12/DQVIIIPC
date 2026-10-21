@@ -27,3 +27,18 @@ endif()
 if(DQ8_BUILD_E2E AND NOT (DQ8_BUILD_RECOMP AND DQ8_BUILD_TESTS))
     message(FATAL_ERROR "DQ8_BUILD_E2E needs DQ8_BUILD_RECOMP=ON and DQ8_BUILD_TESTS=ON")
 endif()
+
+# M3 (Docs/milestones/M3-boots.md). Fibers: the backend behind rt::Fiber (ADR-0007).
+set(DQ8_FIBER_BACKEND "minicoro" CACHE STRING "Fiber backend for guest threads: minicoro, ucontext or win32")
+set_property(CACHE DQ8_FIBER_BACKEND PROPERTY STRINGS minicoro ucontext win32)
+# The SDL3 window and input of dq8-game (ADR-0005). The submodule is the default; an installed SDL3 builds faster.
+option(DQ8_BUILD_WINDOW "Build dq8-game's SDL3 window, input and presentation" ON)
+option(DQ8_USE_SYSTEM_SDL3 "Use an installed SDL3 instead of the third_party/SDL submodule" OFF)
+# The paraLLEl-GS backend as the shared library dq8-gs-parallel (ADR-0004). Its MSVC build is unverified in M3.
+if(MSVC)
+    set(_dq8_gs_parallel_default OFF)
+else()
+    set(_dq8_gs_parallel_default ON)
+endif()
+option(DQ8_BUILD_GS_PARALLEL "Build the paraLLEl-GS backend library dq8-gs-parallel (needs Vulkan at run time)"
+       ${_dq8_gs_parallel_default})

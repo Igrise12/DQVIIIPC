@@ -231,7 +231,7 @@ Each milestone ends with a demonstrable result. A milestone is done only when it
 | **M0** | **Foundations** | **Done 2026-10-20.** Workspace, docs, CI, all eight spikes (S0–S7) with findings; D1–D5 decided (ADRs 0003, 0004, 0008, 0009); D6 deferred to M5; D7–D9 pending. |
 | **M1** | **Disc and binary intake** | **Done 2026-10-20.** `dq8ctl` reads the ISO, verifies the boot hash and the ELF against the region profile, extracts the ELF, overlays and IOP modules idempotently, and parses and cross-checks the six `MWo3` overlay containers; 39 unit and 4 local tests. (The archive index was spike S4's deliverable, not an M1 gate.) |
 | **M2** | **Analysis and first recompile** | **Done 2026-10-20.** Ghidra function maps for all seven units; `ps2_recomp` (built from the pinned submodules) emits 0 unhandled instructions; seven game modules build (main in about 7 minutes on 6 cores); `dq8-game` runs from `0x00100008` to the first syscall, `SetupThread` (`Docs/milestones/M2-first-recompile.md`). |
-| **M3** | **Boots** | Memory, kernel HLE, threads, CDVD and overlay switching work. Game reaches the title screen. First pixels through the GS backend. |
+| **M3** | **Boots** | Memory, kernel HLE, threads, CDVD and overlay switching work. Game reaches the title screen. First pixels through the GS backend. Split into **M3a** (headless boot to the title screen with the trace backend) and **M3b** (paraLLEl-GS pixels, the SDL3 window, live input); a minimal pad service moves here from M4 because the first-run settings screen needs input. **In progress** since 2026-10-21 (`Docs/milestones/M3-boots.md`). |
 | **M4** | **Playable core** | Pad, memory card, audio, VU1 and movies work. A new game can be started, a battle fought (battle overlay), the menu and shop used, and a save made and reloaded. |
 | **M5** | **Launcher MVP** | First-run wizard, verification, setup with progress, settings UI, controller mapping, resolution scaling. A new user can go from ISO to playing without a terminal. |
 | **M6** | **Full playthrough** | The entire game is completed on Linux and Windows at full speed without game-breaking defects. |
@@ -284,7 +284,7 @@ even if full-speed playthrough takes longer than hoped.
 
 ## 14. Open decisions
 
-Decisions that need an answer from the project owner. Defaults are proposed so work can proceed, but each is recorded in the ADR log (architecture.md §18) once decided. D1 and D2 were decided on 2026-10-19, D3, D4 and D5 on 2026-10-20; D6 to D9 are still proposals.
+Decisions that need an answer from the project owner. Defaults are proposed so work can proceed, but each is recorded in the ADR log (architecture.md §18) once decided. D1 and D2 were decided on 2026-10-19, D3, D4 and D5 on 2026-10-20; D6 to D9 are still proposals. Two design decisions outside this table were accepted on 2026-10-21 at the start of M3: SDL3 for window, input and audio (ADR-0005) and one deterministic machine thread with guest threads on fibers (ADR-0007).
 
 | # | Decision | Decision or proposed default | Why it matters |
 |---|---|---|---|
