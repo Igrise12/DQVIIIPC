@@ -113,4 +113,24 @@ inline void put64(std::vector<std::uint8_t>& out, std::uint64_t v) {
     out.insert(out.end(), p, p + 8);
 }
 
+// DMAtag (lower 64 bits): QWC, ID, IRQ, ADDR (bit 31 of ADDR selects the scratchpad).
+constexpr std::uint64_t dma_tag(std::uint32_t qwc, std::uint32_t id, std::uint32_t addr = 0,
+                                bool irq = false) {
+    return std::uint64_t{qwc & 0xFFFFu} | (std::uint64_t{id & 7u} << 28) | (irq ? (1ull << 31) : 0ull) |
+           (std::uint64_t{addr} << 32);
+}
+// Writes a whole quadword tag (upper half `hi`) at a guest RAM or scratchpad byte pointer.
+inline void write_qword(std::uint8_t* at, std::uint64_t lo, std::uint64_t hi = 0) {
+    std::memcpy(at, &lo, 8);
+    std::memcpy(at + 8, &hi, 8);
+}
+// GIFtag (lower 64 bits).
+constexpr std::uint64_t gif_tag(std::uint32_t nloop, std::uint32_t flg, std::uint32_t nreg, bool eop = true) {
+    return std::uint64_t{nloop & 0x7FFFu} | (eop ? (1ull << 15) : 0ull) | (std::uint64_t{flg & 3u} << 58) |
+           (std::uint64_t{nreg & 0xFu} << 60);
+}
+constexpr std::uint32_t vif_code(std::uint32_t cmd, std::uint32_t num, std::uint32_t imm, bool irq = false) {
+    return (irq ? 0x80000000u : 0u) | ((cmd & 0x7Fu) << 24) | ((num & 0xFFu) << 16) | (imm & 0xFFFFu);
+}
+
 } // namespace dq8::test
