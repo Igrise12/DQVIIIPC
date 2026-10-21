@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Day 0 (contracts) done 2026-10-21; sessions A–E next, then bring-up |
+| **Status** | Day 0 (contracts) done 2026-10-21; sessions A–E merged 2026-10-21 (430 unit tests on Clang, GCC and ASan); bring-up on the real disc next |
 | **Exit (brief §11)** | Memory, kernel HLE, threads, CDVD and overlay switching work; the game reaches the title screen; first pixels through the GS backend |
 | **Owner choices (2026-10-21)** | Native IOP servers, with null servers for the two sound servers (ADR-0011) · SDL3 window plus headless mode · five parallel sessions, then serial bring-up · movies skipped (playback is M4) · ADR-0005 and ADR-0007 accepted |
 | **Split** | **M3a**: headless boot to the title screen with the trace backend. **M3b**: paraLLEl-GS pixels, the window, live input |
@@ -819,6 +819,25 @@ the top of each `src/runtime/iop/services/*.cpp`.
 - Trace lines (`TraceCategory::sif`) cover transfers, register writes, SIF0 arming and every packet in either
   direction.
 - `rpc` traces cover binds.
+
+## Integration (2026-10-21)
+
+Sessions merged in the order A, B, C, E, D, then E's follow-up. Fixes the coordinator made while integrating:
+- The machine hands its MMIO bus to `GuestMemory` (A had left a marked placeholder until B's
+  `set_mmio_bus` existed), and detaches it on destruction.
+- `Dispatcher::set_main` keeps the main table as a view, and takes the owned copy only when the first main-unit
+  override is installed. A's machine harness fills its table after `set_main`.
+- E's boot-to-title input script became `tests/local/input/boot-to-title.dq8in`. A name starting with `SLUS_` is
+  dropped by `.gitignore` and refused by the no-game-data checker, so the file had never been committed.
+- `EventQueue` has a schedule hook, and the machine lowers the clock's deadline with it. Without it, an event a
+  device schedules mid-slice (an RPC reply while the guest polls RAM for it) ran only at the next vblank: every RPC
+  round trip cost up to one field. Found by E's synthetic machine run.
+
+State at the end of integration:
+- The synthetic machine CTest checks threads, the vblank handler, the GIF sprite and a real fileio read over the SIF
+  protocol, then pins the GS-stream and RAM hashes. They are identical across runs, speeds, all three backends,
+  and Clang Debug and GCC Release builds.
+- M2's real-disc acceptance (`--stop-at-first-syscall`) still stops at `SetupThread`, now through the machine.
 
 ## Bring-up log
 

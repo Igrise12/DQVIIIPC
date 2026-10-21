@@ -140,9 +140,11 @@ launcher, cli  ->  core only
 ## Next work
 
 All M0 spikes (S0–S7) are done; their findings live in `Docs/spikes/` and are folded into the three docs and
-`Docs/formats/`. **M3 (boots) is in progress**, planned with the project owner on 2026-10-21: day 0 (the shared
-contracts, submodules, ADR-0005/0007/0011/0012) is on `main`; five sessions A–E then implement the execution core and
-kernel, the devices and GS pipeline, the SIF/IOP services, the paraLLEl-GS backend and SDL3 platform, and the host and
-game layer, followed by a serial bring-up on the real disc. Everything a session needs is in
-`Docs/milestones/M3-boots.md`. M2's record is `Docs/milestones/M2-first-recompile.md`.
+`Docs/formats/`. **M3 (boots) is in progress**, planned with the project owner on 2026-10-21:
+- day 0 (the shared contracts, submodules, ADR-0005/0007/0011/0012) and sessions A–E are merged on `main`: the
+  execution core and kernel, the devices and GS pipeline, the SIF/IOP services, the paraLLEl-GS backend and SDL3
+  platform, and the host and game layer;
+- next is the serial bring-up on the real disc (M3a headless boot to the title, then M3b pixels and window).
+
+Everything is in `Docs/milestones/M3-boots.md`. M2's record is `Docs/milestones/M2-first-recompile.md`.
 Do not start implementation work the user has not asked for.
