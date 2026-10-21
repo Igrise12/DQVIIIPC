@@ -29,7 +29,7 @@ rest of the contracts listed there:
 | scheduler, kernel | `kernel/ee_kernel.h`, `kernel/{scheduler,kernel_objects}.cpp`, `kernel/kernel_abi.h` | `EeKernel` (adapted from PS2Recomp's `EeScheduler`): guest threads on fibers, strict-priority FIFO selection, the safe points, the handler fiber that runs INTC, DMAC and alarm handlers, threads, semaphores, event flags, alarms on hblank ticks, handler chains, the HLE kernel RAM sentinel, the deadlock report and the no-progress watchdog. |
 | services | `kernel/ee_services.h`, `kernel/services_{thread,sync,interrupt,system}.cpp` | The kernel's own `KernelServices` registrations (owner `kernel`): threads, synchronisation, alarms, interrupt handlers, and the system calls (SetupThread/Heap, OSD configuration, SetSyscall and the syscall-table helpers, documented noops, the exit-path stops). |
 | machine | `machine/machine.cpp` | `Machine`: the clock, events, interrupts, MMIO bus and kernel registry, the vblank events in `VblankPhase` order, spin skipping, and resumable `run()` slices. |
-| declared | `machine/ee_devices.h`, `iop/*.h`, `io/*.h`, `gs/*.h`, `ee/overrides.h`, `platform/platform.h` | Interfaces the other M3 sessions implement: the EE devices, the IOP services, disc and pad input, the GS pipeline and backends, overrides, the SDL3 platform. |
+| declared | `gs/*.h` (backends D), `ee/overrides.h`, `platform/platform.h` | Interfaces the other M3 sessions implement: the EE devices, the IOP services, disc and pad input, the GS pipeline and backends, overrides, the SDL3 platform. |
 
 M3 session B, the EE devices and the GS front end (`make_ee_devices`, in attach order):
 
@@ -42,6 +42,13 @@ M3 session B, the EE devices and the GS front end (`make_ee_devices`, in attach 
 | GS | `gs/gs_priv_device.*`, `gs/gs_pipeline.cpp`, `gs/gs_backends.*`, `gs/gs_trace_format.h`, `gs/png_writer.cpp` | The privileged page with the gs and kernel vblank phases and the GS kernel calls; `GsPipeline` (hash chain, render thread, mailbox, PNG dumps, inline mode); the `null` and `trace` backends. |
 
 Adapted upstream code (PS2Recomp eb8688b) is tagged `GPL-3.0-only`; register behaviour taken from PCSX2 says so where it is used. The device tests run on `tests/unit/support/ee_rig.h`.
+
+M3 session C, the IOP as native services (ADR-0011):
+
+| Area | Files | Purpose |
+|---|---|---|
+| IOP | `iop/iop.*`, `iop/sif_link.*`, `iop/sif_protocol.h`, `iop/iop_rpc.*`, `iop/iop_modules.*`, `iop/iop_memory.*`, `iop/services/*` | The IOP as native services (ADR-0011, session C): the SIF registers and the `sceSif*` kernel calls, SIF1 transfers into IOP RAM and SIF0 packets back (one per EE arming, at virtual times), the command layer (init handshakes, IOP reset), RPC bind/call/other-data, the module registry driven by the profile's `[iop]` rows, and the servers: fileio (asynchronous completion records), iopheap, loadfile, cdvdfsv, the pad server, mcserv (adapted from PS2Recomp, GPL-3.0-only) and null servers. Layouts: `Docs/milestones/M3-boots.md`, "Protocol notes". |
+| disc | `io/disc_source.h`, `io/iso_disc_source.cpp` | `make_iso_disc_source`: path lookup (any separator, case, `;1`) and sector reads over a verified ISO image. |
 
 The dispatch contract (PS2Recomp `PS2Runtime::dispatchGuestBranch` at eb8688b, and the milestone doc):
 

@@ -62,6 +62,15 @@ add_executable(dq8_unit_tests
     test_gs_priv.cpp
     test_gs_trace.cpp
     test_gs_pipeline.cpp
+    test_sif.cpp
+    test_iop_rpc.cpp
+    test_fileio.cpp
+    test_cdvdfsv.cpp
+    test_iopheap.cpp
+    test_loadfile.cpp
+    test_padman.cpp
+    test_mcserv.cpp
+    test_disc_source.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(dq8_unit_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")

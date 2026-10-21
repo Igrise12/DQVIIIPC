@@ -42,6 +42,20 @@ add_library(dq8_runtime STATIC
     vu/vu_upper.cpp
     vu/vu_units.cpp
     platform/dynlib.cpp
+    io/iso_disc_source.cpp
+    iop/iop.cpp
+    iop/iop_memory.cpp
+    iop/iop_modules.cpp
+    iop/iop_rpc.cpp
+    iop/sif_link.cpp
+    iop/services/cdvdfsv.cpp
+    iop/services/common.cpp
+    iop/services/fileio.cpp
+    iop/services/iopheap.cpp
+    iop/services/loadfile.cpp
+    iop/services/mcserv.cpp
+    iop/services/null_server.cpp
+    iop/services/padman.cpp
 )
 # Exactly one fiber backend (ADR-0007, DQ8_FIBER_BACKEND in cmake/Dq8Options.cmake).
 if(DQ8_FIBER_BACKEND STREQUAL "minicoro")
