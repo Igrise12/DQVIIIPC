@@ -19,6 +19,7 @@ add_library(dq8_runtime STATIC
     machine/clock.cpp
     machine/events.cpp
     machine/interrupts.cpp
+    machine/machine_services.cpp
     machine/mmio.cpp
     io/input_script.cpp
     io/input_live.cpp
