@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+dq8in 1
+# SLUS-21207 (the only region profile so far): boot to the title screen.
+# Our own input, authored for DQ8-Native M3 (no game data).
+# Every screen before the title runs in mode 4 with the TITLE overlay resident:
+#   1. the memory-card check, which passes without input on an unformatted card;
+#   2. the first-run settings: Down, Cross, Cross;
+#   3. the logo movies: Cross skips each one;
+#   4. the title.
+# Offsets are first estimates. M3 bring-up tunes them against the run's events
+# (Docs/milestones/M3-boots.md, "Bring-up log"). With --movies skip the player returns at once, and the
+# Cross presses are harmless.
+
+# The first-run settings screen comes after TITLE is resident and the memory-card check.
+after overlay:TITLE +600 press down 4
++30 press cross 4
++30 press cross 4
+
+# The logo movies.
++120 press cross 4
++120 press cross 4
++120 press cross 4
++120 press cross 4

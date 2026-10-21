@@ -29,7 +29,7 @@ rest of the contracts listed there:
 | scheduler, kernel | `kernel/ee_kernel.h`, `kernel/{scheduler,kernel_objects}.cpp`, `kernel/kernel_abi.h` | `EeKernel` (adapted from PS2Recomp's `EeScheduler`): guest threads on fibers, strict-priority FIFO selection, the safe points, the handler fiber that runs INTC, DMAC and alarm handlers, threads, semaphores, event flags, alarms on hblank ticks, handler chains, the HLE kernel RAM sentinel, the deadlock report and the no-progress watchdog. |
 | services | `kernel/ee_services.h`, `kernel/services_{thread,sync,interrupt,system}.cpp` | The kernel's own `KernelServices` registrations (owner `kernel`): threads, synchronisation, alarms, interrupt handlers, and the system calls (SetupThread/Heap, OSD configuration, SetSyscall and the syscall-table helpers, documented noops, the exit-path stops). |
 | machine | `machine/machine.cpp` | `Machine`: the clock, events, interrupts, MMIO bus and kernel registry, the vblank events in `VblankPhase` order, spin skipping, and resumable `run()` slices. |
-| declared | `gs/*.h` (backends D), `ee/overrides.h`, `platform/platform.h` | Interfaces the other M3 sessions implement: the EE devices, the IOP services, disc and pad input, the GS pipeline and backends, overrides, the SDL3 platform. |
+| declared | `gs/gs_parallel_backend.h`, `platform/platform.h` | What session D implements: the paraLLEl-GS backend factory and the SDL3 platform. |
 
 M3 session B, the EE devices and the GS front end (`make_ee_devices`, in attach order):
 
@@ -49,6 +49,13 @@ M3 session C, the IOP as native services (ADR-0011):
 |---|---|---|
 | IOP | `iop/iop.*`, `iop/sif_link.*`, `iop/sif_protocol.h`, `iop/iop_rpc.*`, `iop/iop_modules.*`, `iop/iop_memory.*`, `iop/services/*` | The IOP as native services (ADR-0011, session C): the SIF registers and the `sceSif*` kernel calls, SIF1 transfers into IOP RAM and SIF0 packets back (one per EE arming, at virtual times), the command layer (init handshakes, IOP reset), RPC bind/call/other-data, the module registry driven by the profile's `[iop]` rows, and the servers: fileio (asynchronous completion records), iopheap, loadfile, cdvdfsv, the pad server, mcserv (adapted from PS2Recomp, GPL-3.0-only) and null servers. Layouts: `Docs/milestones/M3-boots.md`, "Protocol notes". |
 | disc | `io/disc_source.h`, `io/iso_disc_source.cpp` | `make_iso_disc_source`: path lookup (any separator, case, `;1`) and sector reads over a verified ISO image. |
+
+M3 session E, overrides and input sources:
+
+| Area | Files | Purpose |
+|---|---|---|
+| overrides | `ee/overrides.*`, `ee/dispatcher.*`, `ee/dispatch_table.*`, `ee/overlay_manager.*` | The dispatcher keeps an owned copy of the main table, and the overlay manager one of each overlay table. `Dispatcher::install_override` points one slot at a single trampoline that finds the override by `ctx->pc` (replace, hook_before, hook_after), so `resolve()` is unchanged. It accepts function entries only, not resume points, and checks an optional digest: main units at install time, overlay units on the first call after each residency change. One dispatcher per process holds overrides. The debug stale-return check (`OverlayManager::generation()` around calls from the window) is session A's, in `dispatch_guest_branch`. |
+| input | `io/input_script.*`, `io/input_live.*`, `io/input_record.*` | `IInputSource`s: `.dq8in` scripts (`Docs/formats/dq8-input-script.md`; triggers fed by the host), the live per-vblank latch over the platform's pads, an idle source, and the `--record-input` recorder. |
 
 The dispatch contract (PS2Recomp `PS2Runtime::dispatchGuestBranch` at eb8688b, and the milestone doc):
 

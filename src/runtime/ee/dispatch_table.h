@@ -6,11 +6,16 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
+#include <vector>
 
 // One code unit's flat dispatch table (architecture §4.2): one slot per 4 bytes of guest address from `base`
 // to `end`, holding the recompiled function that starts there or a resume entry (the owning function, which
-// switches on ctx->pc), or null. A view: the module that owns the slots must outlive it.
+// switches on ctx->pc), or null. Either a view (the module that owns the slots must outlive it) or an owned
+// copy (owned_copy()), which the dispatcher and the overlay manager keep so that overrides can repoint single
+// slots (overrides.h); copies of an owned table share its slots. Function pointers in either form point into
+// the module, so the module must outlive both.
 namespace dq8::rt {
 
 class DispatchTable {
@@ -21,8 +26,12 @@ class DispatchTable {
     DispatchTable(std::uint32_t base, std::uint32_t end, std::span<const dq8_guest_fn> slots);
 
     // The table a validated descriptor describes (validate_descriptor() first; this only re-checks the
-    // shape).
+    // shape). A view.
     static DispatchTable from_descriptor(const dq8_game_module_desc& desc);
+
+    // The same slots in storage of its own. An empty table copies to an empty table.
+    DispatchTable owned_copy() const;
+    bool owned() const noexcept { return storage_ != nullptr; }
 
     std::uint32_t base() const noexcept { return base_; }
     std::uint32_t end() const noexcept { return end_; }
@@ -38,13 +47,24 @@ class DispatchTable {
         return slots_[(addr - base_) >> 2];
     }
 
+    // True when `addr` holds a function's own entry rather than a resume entry: the slot is non-null and no
+    // lower slot of the table holds the same function (a resume entry points at its owning function, whose
+    // entry lies below it). Linear in the distance from the table base.
+    bool is_function_entry(std::uint32_t addr) const noexcept;
+
     // Non-null slots (functions and resume entries). Linear in slot_count().
     std::size_t entry_count() const noexcept;
 
   private:
+    friend class Dispatcher;
+    // Owned tables only (the dispatcher's override installation): points the slot for `addr` at `fn` in the
+    // shared storage and returns what it held. The table object itself does not change, hence const.
+    dq8_guest_fn replace_slot(std::uint32_t addr, dq8_guest_fn fn) const;
+
     std::uint32_t base_ = 0;
     std::uint32_t end_ = 0;
     std::span<const dq8_guest_fn> slots_;
+    std::shared_ptr<std::vector<dq8_guest_fn>> storage_; // set for an owned copy; slots_ views it
 };
 
 } // namespace dq8::rt

@@ -6,12 +6,13 @@
 #   STEP=build     dq8ctl recomp build: one game module per unit through cmake/module
 #   STEP=exports   every module exports exactly one dynamic symbol, the descriptor entry point
 #   STEP=run       dq8-game --elf runs the main unit and must stop at the expected syscall with the expected
-#                  a0, v0 and v1
+#                  a0, v0 and v1 (RUN_MODE=syscall), or, on the M3 machine (RUN_MODE=machine), at the function
+#                  in the fixture's stop_pc.txt (--stop-at-pc, reason "requested") with the expected a0 and v0
 #
 # Inputs: FIXTURE_DIR (dq8_e2e_fixtures output for this fixture), WORK_DIR, UNITS (comma-separated, main
 # first), DQ8CTL, DQ8_GAME, PS2_RECOMP, NM, MODULE_TEMPLATE (cmake/module), ABI_INCLUDE_DIR, WINDOW
-# (BASE:END, overlay fixtures only), RESIDENT (overlay id, overlay fixtures only), EXPECT_SYSCALL,
-# EXPECT_A0, EXPECT_V0.
+# (BASE:END, overlay fixtures only), RESIDENT (overlay id, overlay fixtures only), RUN_MODE (syscall or
+# machine), EXPECT_SYSCALL, EXPECT_A0, EXPECT_V0.
 cmake_minimum_required(VERSION 3.25)
 
 # --- The parts of dq8ctl (session C) and dq8-game (session B) the M2 brief leaves open. ---------------------
@@ -101,8 +102,14 @@ elseif(STEP STREQUAL "run")
     find_modules(modules)
     list(GET modules 0 first_module)
     get_filename_component(module_dir "${first_module}" DIRECTORY)
-    set(run_args --elf "${FIXTURE_DIR}/units/main.elf" --module-dir "${module_dir}" --stop-at-first-syscall
-                 --max-dispatches 1000 --json)
+    if(RUN_MODE STREQUAL "machine")
+        file(STRINGS "${FIXTURE_DIR}/stop_pc.txt" stop_pc LIMIT_COUNT 1)
+        set(run_args --elf "${FIXTURE_DIR}/units/main.elf" --module-dir "${module_dir}" --headless
+                     --vblanks 120 --stop-at-pc "${stop_pc}" --json)
+    else()
+        set(run_args --elf "${FIXTURE_DIR}/units/main.elf" --module-dir "${module_dir}" --stop-at-first-syscall
+                     --max-dispatches 1000 --json)
+    endif()
     if(WINDOW)
         list(APPEND run_args --window "${WINDOW}" --resident "${RESIDENT}")
     endif()
@@ -121,12 +128,20 @@ elseif(STEP STREQUAL "run")
         message(FATAL_ERROR "dq8-game printed no JSON object:\n${step_output}")
     endif()
     string(JSON kind GET "${report}" ${json_stop_kind})
-    if(NOT kind STREQUAL "syscall")
-        message(FATAL_ERROR "expected a syscall stop, got '${kind}':\n${report}")
+    if(RUN_MODE STREQUAL "machine")
+        if(NOT kind STREQUAL "requested")
+            message(FATAL_ERROR "expected the --stop-at-pc stop, got '${kind}':\n${report}")
+        endif()
+        set(reg_checks "a0=${EXPECT_A0}" "v0=${EXPECT_V0}")
+    else()
+        if(NOT kind STREQUAL "syscall")
+            message(FATAL_ERROR "expected a syscall stop, got '${kind}':\n${report}")
+        endif()
+        string(JSON number GET "${report}" ${json_syscall_number})
+        expect_equal("syscall number" "${number}" "${EXPECT_SYSCALL}")
+        set(reg_checks "a0=${EXPECT_A0}" "v0=${EXPECT_V0}" "v1=${EXPECT_SYSCALL}")
     endif()
-    string(JSON number GET "${report}" ${json_syscall_number})
-    expect_equal("syscall number" "${number}" "${EXPECT_SYSCALL}")
-    foreach(reg_expect IN ITEMS "a0=${EXPECT_A0}" "v0=${EXPECT_V0}" "v1=${EXPECT_SYSCALL}")
+    foreach(reg_expect IN LISTS reg_checks)
         string(REPLACE "=" ";" reg_expect "${reg_expect}")
         list(GET reg_expect 0 reg)
         list(GET reg_expect 1 value)

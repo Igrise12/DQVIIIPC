@@ -10,6 +10,7 @@ add_library(dq8_runtime STATIC
     ee/dispatch_table.cpp
     ee/overlay_manager.cpp
     ee/dispatcher.cpp
+    ee/overrides.cpp
     ee/ee_runtime.cpp
     ee/game_module.cpp
     kernel/kernel_calls.cpp
@@ -41,6 +42,9 @@ add_library(dq8_runtime STATIC
     vu/vu_lower.cpp
     vu/vu_upper.cpp
     vu/vu_units.cpp
+    io/input_script.cpp
+    io/input_live.cpp
+    io/input_record.cpp
     platform/dynlib.cpp
     io/iso_disc_source.cpp
     iop/iop.cpp

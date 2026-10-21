@@ -500,7 +500,7 @@ M3b: `--gs parallel` frames, the window, live input.
 ## Acceptance
 
 **M3a**
-1. `dq8-game --iso … --headless --gs trace --input-script tests/local/input/SLUS_21207-boot-to-title.dq8in
+1. `dq8-game --iso … --headless --gs trace --input-script tests/local/input/boot-to-title.dq8in
    --until title --vblanks 6000` exits 0. The events show TITLE resident through the hook, mode 4, and no stop.
 2. Zero unimplemented-service stops. Every census name and number has a service or a documented noop (coverage table
    below). Unhandled MMIO on the boot path is limited to a reviewed allowlist.

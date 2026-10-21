@@ -26,19 +26,26 @@ if(NOT TARGET dq8-game OR NOT EXISTS "${_e2e_template}/CMakeLists.txt")
 endif()
 find_program(DQ8_NM NAMES nm REQUIRED)
 
-# fixture  units     window                 resident
+# fixture  units     window                 resident  run: syscall (M2 single thread) or machine (M3)
 set(_e2e_fixtures
-    "call|main||"
-    "bgezal|main||"
-    "overlay|main,ovl|0x00300000:0x00310000|1")
+    "call|main|||syscall"
+    "bgezal|main|||syscall"
+    "overlay|main,ovl|0x00300000:0x00310000|1|syscall"
+    "irq|main|||machine")
 foreach(_row IN LISTS _e2e_fixtures)
     string(REPLACE "|" ";" _row "${_row}")
     list(GET _row 0 _fixture)
     list(GET _row 1 _units)
     list(GET _row 2 _window)
     list(GET _row 3 _resident)
+    list(GET _row 4 _run_mode)
     set(_previous e2e_fixtures)
-    foreach(_step generate build exports run)
+    set(_steps generate build exports run)
+    # The machine fixtures run only once dq8-game has the M3 machine (src/host/CMakeLists.txt).
+    if(_run_mode STREQUAL "machine" AND NOT DQ8_HOST_MACHINE)
+        list(REMOVE_ITEM _steps run)
+    endif()
+    foreach(_step IN LISTS _steps)
         set(_name e2e.${_fixture}.${_step})
         add_test(NAME ${_name}
                  COMMAND "${CMAKE_COMMAND}"
@@ -54,6 +61,7 @@ foreach(_row IN LISTS _e2e_fixtures)
                          "-DABI_INCLUDE_DIR=${PROJECT_SOURCE_DIR}/include"
                          "-DWINDOW=${_window}"
                          "-DRESIDENT=${_resident}"
+                         -DRUN_MODE=${_run_mode}
                          -DEXPECT_SYSCALL=0x3C
                          -DEXPECT_A0=0x12345678
                          -DEXPECT_V0=0x12345679
