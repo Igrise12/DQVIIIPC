@@ -46,10 +46,15 @@ struct Headroom {
     std::size_t inner = 0;
 };
 
+// The frame's address is published here so that the compiler keeps all of it: Clang 18 at -O3 shrank an
+// unpublished volatile array to the one byte the function touched. Cleared before returning.
+char* volatile frame_sink = nullptr;
+
 void measure_inner(Headroom* h) {
-    volatile char frame[4096];
-    frame[0] = 1;
-    h->inner = Fiber::current()->headroom() + static_cast<std::size_t>(frame[0] - 1);
+    char frame[8192]; // twice the checked margin, so a tail call from measure() cannot eat it
+    frame_sink = frame;
+    h->inner = Fiber::current()->headroom();
+    frame_sink = nullptr;
 }
 
 void measure(void* arg) {
