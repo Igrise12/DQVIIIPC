@@ -7,8 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 DQ8-Native: an open-source native PC port of *Dragon Quest VIII* (PS2, NTSC-U, boot file `SLUS_212.07`) by
 static recompilation of the game's EE code to C++, run on a purpose-built runtime. Not an emulator. GPL-3.0-or-later.
 
-**Current state: M1 (disc intake) and M2 (first recompile) complete; M3a (headless boot to the title) met on
-2026-10-21; M3b (pixels and window) next.**
+**Current state: M1 (disc intake) and M2 (first recompile) complete; M3 (boots) acceptance met on 2026-10-21:
+M3a (headless boot to the title) and M3b (paraLLEl-GS pixels at PCSX2 parity, the SDL3 window with keyboard and
+gamepad). M3 closes once CI is green on the last fix; M4 (playable core) is next.**
 - `src/core` (`libdq8core`): ISO 9660 reader, SHA-1/CRC-32, ELF32 reader and writer, `MWo3` parser, region profiles
   (`data/regions/SLUS_21207.toml`: hashes, sizes, addresses and the S3 loader facts, never bytes), `verify_image()` /
   `extract()`, a portable process runner, and the recompile pipeline (`core/recomp/`: function maps, per-unit
@@ -20,8 +21,8 @@ static recompilation of the game's EE code to C++, run on a purpose-built runtim
   kernel, DMAC/VIF/GIF/VU1, the GS pipeline with null, trace and paraLLEl-GS backends, SIF and the native IOP servers,
   guest memory, ELF loader, dispatch tables, overrides and the overlay manager. `src/game`: the profile-driven game
   layer (residency hook, movie skip, title watcher, `--until`). `src/host`: `dq8-game`, headless or SDL3 window.
-- `dq8-game --until title` boots the disc to the title menu in 1,200 vblanks, deterministically (M3a, see
-  `Docs/milestones/M3-boots.md` §Results).
+- `dq8-game --until title` boots the disc to the title menu in 1,200 vblanks, deterministically; `--window` plays
+  it live (see `Docs/milestones/M3-boots.md` §Results).
 - Tests: 434 unit tests (CI on GCC, Clang, MSVC, ASan), local disc tests, a synthetic machine run pinned to golden
   hashes, and a synthetic recompile end-to-end suite (label `e2e`, CI job on GCC 13).
 
@@ -152,7 +153,10 @@ All M0 spikes (S0–S7) are done; their findings live in `Docs/spikes/` and are 
   platform, and the host and game layer;
 - the M3a bring-up on the real disc is done: the headless boot reaches the title menu, deterministically, with no
   unimplemented kernel call and no unhandled MMIO (acceptance results and the bring-up log in the milestone file);
-- next is M3b: `--gs parallel` frames against the PCSX2 references (SSIM) and the `--window` mode with live input.
+- M3b is done too: paraLLEl-GS frames match PCSX2's software renderer (settings 0.9998, title logo 0.9989 SSIM),
+  and `--window` runs at real time with keyboard and gamepad input (`tools/bringup/window_smoke.py`);
+- next: confirm CI on the ASan fix, then plan M4 (playable core: audio, memory card saves, movies, VU1, New Game,
+  battle, menu and shop) with the project owner.
 
 Everything is in `Docs/milestones/M3-boots.md`. M2's record is `Docs/milestones/M2-first-recompile.md`.
 Do not start implementation work the user has not asked for.

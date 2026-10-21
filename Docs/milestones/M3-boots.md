@@ -856,6 +856,8 @@ State at the end of integration:
 | Title-screen marker | `--until title` on the stage word (`0x003D4018` = 1000) met at vblank 756, right after the settings screen. Compared PCSX2 save states: four title-screen and title-menu states (one in 16:9) against the publisher-logo and settings-screen states | Stage 1000 covers the logos too. Five words agree across the title states and differ from the others: `0x003D4000` (128), `0x003D4004` (1), `0x003D4008` (1), `0x004670CC` (1), `0x004670D0` (128). TITLE `0x00465080` fades the title in: while `0x003D4004` is set it raises `0x003D4000` to `0x80`, then it sets `0x003D4008` = 1 | Profile `[title]`: overlay TITLE, byte `0x003D4008` = 1. Met at vblank 1200 with the title menu on screen |
 | Unhandled MMIO on the boot path | Run summary `mmio`: stores of 0 to `0x10008080`, `0x10009080`, `0x1000A080`, `0x1000B080` and `0x1000B480`, from pc `0x0010A008`, twice each | The SDK's DMA reset clears SADR (offset `0x80`) on channels 0 to 4 as well; only the scratchpad channels 8 and 9 have one | The DMAC takes those writes, drops them, and reads 0 there. The boot to the title has no unhandled MMIO left |
 | Disc-read order against PCSX2 | PCSX2 `--verbose-cdvd` boot with the same settings input, against our `--trace rpc` `disc read` lines (new in `fileio` and `cdvdfsv`). Reads below LSN 2119 are the IOP's own (directories, the ELF, IOPRP, the IRX modules) and are dropped; adjacent or overlapping reads are merged, since PCSX2's fileio reads overlap by one sector | The first 65 runs are identical and in the same order, through LSN 976910 (163 sectors, vblank 266), with `TITLE.BIN` (1135078, 11 sectors) at vblank 93. PCSX2 then streams `L5_CI_W.MVI` and `TAKA_W.MVI`, with `DATA2.DAT` reads at 977073 to 977858 between them; we skip those. Both runs then read LSN 976025 | Acceptance 4 holds up to the skipped movies. TITLE is loaded through fileio by path, so no LSN cache takes part in M3 |
+| Black screen after the skipped movies | Run with the settings presses only: movies skipped at vblanks 1139 and 1141, the title marker met at 2640, black in between. RAM 100 vblanks apart: the TITLE words `0x004670C0` and `0x004670D4` grow by 50. Decompiled TITLE `0x00464500` | TITLE stage 10 (`0x003D2630` = 10) runs the flyover timeline on `0x004670C0`, one step per 30 Hz frame, whether or not its movie plays: the title fades in from step 638 and is complete at 648. A button press before 648 sets the counter to 648; a press after it opens the menu (stage 11). After 4,110 idle steps the attract sequence starts | No change: this is the game's own timeline. While the movie is skipped the flyover time shows black, and Cross skips it as on the PS2. A seamless skip would write guest state, a patch-mechanism decision left for later |
+| Title-frame parity with a moving background | Logo title (`work/pcsx2/boot-title-20261021-193902/title-logo.gs`) against our frames: 0.67 full frame, 0.76 on a logo crop, about what two PCSX2 captures five seconds apart give (0.66 and 0.75) | The map behind the logo scrolls. Our title run (the boot-to-title script without its last two presses) scanned every 6 vblanks from 1160 to 2600, then every vblank: at vblank 2415 the map stands where PCSX2's capture has it | Acceptance 8 is measured at that vblank (Results) |
 
 ## Kernel coverage
 
@@ -900,5 +902,47 @@ unimplemented.
    (SCISSOR, TEX0, FRAME, PRIM). The difference is in sprite vertices only, and the map is panned elsewhere in the
    two captures. Not yet explained; to be confirmed against a capture at the same frame.
 
-**Performance (recorded, not gated):** to the title in 9 s of wall time with the null backend at `--speed max`,
-about 133 vblanks per second, 5.7 million dispatches. With `--speed 1` it takes 20 s, the 1,200 fields at 59.94 Hz.
+**M3b: acceptance 7 to 10 met on 2026-10-21.** References come from one PCSX2 run with the same settings input
+(`work/pcsx2/boot-title-20261021-193902`): the screenshot PCSX2's software renderer embeds in each GS dump, as in S5b.
+Scores are SSIM by `tools/bringup/ssim.sh`: bilinear to 640×480, crops in those coordinates.
+
+7. Settings screen (vblank 641, `--gs parallel`) against `settings-full.gs`: **0.9998**.
+8. Logo title at vblank 2415, where the scrolling map lines up with the capture:
+   - logo crop 480×330 at (80, 30): **0.9989**;
+   - copyright text crop 600×36 at (20, 424): 0.9987;
+   - full frame: 0.9984.
+
+   Away from that vblank the full frame scores 0.67, the same as two PCSX2 captures five seconds apart (0.66).
+   Recorded only, with the map not aligned: the menu window crop 330×105 at (25, 22) scores 0.985, and the slot
+   window's message crop 560×90 at (40, 370) scores 0.976.
+9. `--window` on a private Xvfb display, driven by `tools/bringup/window_smoke.py`:
+   - both inputs play the boot to the slot window, through settings, Wide Screen, Sound, the title and the menu:
+     the keyboard by XTest, and a temporary uinput gamepad that SDL's evdev backend maps as an Xbox 360 pad;
+   - the input dq8-game records matches the presses;
+   - pacing is real time, 58.9 vblanks per second of wall time including start-up (59.94 Hz), and the game draws on
+     alternate vsyncs (30 Hz);
+   - SIGINT closes the window cleanly, with exit 0.
+
+   Not checked here: a physical gamepad, and a window under a desktop compositor.
+10. `libdq8-gs-parallel.so` exports the nine `dq8_gsp_*` symbols and nothing else in the GCC 13 and Clang 18
+    Release builds. The build copies `COPYING.LGPLv3` and the library's `NOTICE.md` next to it, and
+    `THIRD_PARTY_NOTICES.md` lists it. MSVC: the library stays OFF in CI; no MSVC build was attempted in M3.
+
+**Always:**
+11. CI at `5b0d892`: GCC, Clang, MSVC, the GCC 13 end-to-end job and lint are green. ASan+UBSan failed the fiber
+    headroom test, because the 8 KiB frame of the Clang 18 fix sat on ASan's fake stack. The next commit makes it a
+    dynamic allocation. In the Ubuntu 24.04 CI container, with clang-18's ASan runtime added, ASan+UBSan passes all
+    434 unit tests; ci-clang and ci-gcc pass all 433. M2's `--stop-at-first-syscall` still stops at `SetupThread`.
+12. Performance (recorded, not gated):
+
+    | Build | Backend | Time to the title (1,200 vblanks) | Vblanks per second |
+    |---|---|---|---|
+    | Release, clang-18 | null | 1.7 s | 688 |
+    | Release, clang-18 | paraLLEl-GS (pipeline compiles included) | 2.9 s | 416 |
+    | Debug | null | 9 s | 133 |
+    | Debug | paraLLEl-GS | 9.2 s | 131 |
+
+    - `--speed 1` takes 20 s, the 1,200 fields at 59.94 Hz; the boot makes 5.7 million dispatches.
+    - The RAM hash at the title is the same in the Debug build (host Clang) and the Release build (clang-18).
+
+**Stretch (New Game makes the next overlay resident):** not attempted.
