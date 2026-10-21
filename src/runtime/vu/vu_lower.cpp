@@ -61,7 +61,7 @@ void VuInterpreter::execLower(uint32_t instr, uint8_t* vuData, uint32_t dataSize
     if (instr == 0x00000000 || instr == 0x8000033C) // NOP
         return;
 
-    uint8_t opHi = (instr >> 25) & 0x7F;
+    uint8_t opHi = static_cast<uint8_t>((instr >> 25) & 0x7F);
     const uint32_t pcMask = microAddressMask();
 
     // The lower instruction encoding uses bits 31:25 for the primary opcode

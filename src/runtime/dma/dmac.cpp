@@ -261,6 +261,9 @@ void Dmac::fail(unsigned ch, const std::string& what) {
                    std::string(to_string(static_cast<DmaChannel>(ch))) + "): " + what + " (CHCR " +
                    hex32(channels_[ch].chcr) + ")";
     machine_->stop(std::move(info));
+#if defined(__GNUC__)
+    __builtin_unreachable(); // stop() is [[noreturn]]; GCC does not carry that through the virtual call
+#endif
 }
 
 void Dmac::start(unsigned ch) {

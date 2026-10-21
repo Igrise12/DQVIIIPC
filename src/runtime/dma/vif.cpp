@@ -91,6 +91,9 @@ void Vif::fail(const std::string& what) {
     info.reason = StopReason::unsupported;
     info.message = std::string(name()) + ": " + what + " (VIFcode " + hex32(regs_.code) + ")";
     machine_->stop(std::move(info));
+#if defined(__GNUC__)
+    __builtin_unreachable(); // stop() is [[noreturn]]; GCC does not carry that through the virtual call
+#endif
 }
 
 bool Vif::read32(std::uint32_t offset, std::uint32_t& value, const MmioContext& at) {
