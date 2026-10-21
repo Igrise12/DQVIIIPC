@@ -5,7 +5,7 @@
 #   - the exit status and the golden GS stream and RAM hashes;
 #   - in the RAM dump, the program's own counters: the vblank handler ran once per vblank before the last,
 #     the worker thread woke once per drawn frame, and the fileio read returned the file's first word;
-#   - in the GS trace, one 144-byte PATH3 transfer (the sprite packet) per drawn frame.
+#   - in the GS trace, one 160-byte PATH3 transfer (the sprite packet) per drawn frame.
 #   cmake -DDQ8_GAME=<exe> -DELF=<elf> -DMODULE_DIR=<dir> -DISO=<iso> -DWORK_DIR=<dir> -DVBLANKS=<n>
 #         -DGS_HASH=<sha1> -DRAM_SHA1=<sha1> -P run_machine_synthetic.cmake
 cmake_minimum_required(VERSION 3.25)
@@ -66,9 +66,9 @@ expect("fileio completions (open, read, close)" "${completions}" 3)
 expect("first word of the disc file" "${file_word}" 0x18110A03)
 
 # The trace backend's stream (src/runtime/gs/gs_trace_format.h): a transfer record is {u8 0, u8 path, u32 size,
-# data}, with PCSX2's path numbering (2 = PATH3). The sprite packet is 0x90 bytes. Count its headers.
+# data}, with PCSX2's path numbering (2 = PATH3). The sprite packet is 0xA0 bytes. Count its headers.
 file(READ "${trace}" stream HEX)
-string(REGEX MATCHALL "000290000000" headers "${stream}")
+string(REGEX MATCHALL "0002a0000000" headers "${stream}")
 list(LENGTH headers transfers)
 expect("PATH3 sprite transfers in the GS trace" "${transfers}" "${frames}")
 

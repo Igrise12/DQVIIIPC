@@ -11,7 +11,7 @@
 //                           loop: WaitSema(vsync_sema); jal draw_frame; SignalSema(work_sema); b loop
 //   0x00200300 gs_init:     GsSetCrt(1, 2, 1); PMODE, DISPFB1, DISPLAY1 (sd); D_CTRL = 1; jr ra
 //   0x00200400 vblank_handler: vblanks += 1; iSignalSema(vsync_sema); v0 = 0; jr ra
-//   0x00200500 draw_frame:  rgbaq.r = frames * 8; D2_MADR = gif_packet; D2_QWC = 9; D2_CHCR = 0x101;
+//   0x00200500 draw_frame:  rgbaq.r = frames * 8; D2_MADR = gif_packet; D2_QWC = 10; D2_CHCR = 0x101;
 //                           wait: if (D2_CHCR & 0x100) b wait; frames += 1; jr ra
 //   0x00200580 worker:      loop: WaitSema(work_sema); work += 1; b loop
 //   0x00200600 read_file:   the SIF command and RPC layers' init, bind fileio, setup, open, read, close

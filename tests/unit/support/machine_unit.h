@@ -47,8 +47,8 @@ inline constexpr std::uint32_t sreg_mirror = 0x00280040u;     // 32 words: the E
 inline constexpr std::uint32_t sema_param = 0x00280100u;
 inline constexpr std::uint32_t thread_param = 0x00280200u;
 inline constexpr std::uint32_t gif_packet = 0x00281000u; // 16-byte aligned
-inline constexpr std::uint32_t gif_packet_qwords = 9;
-inline constexpr std::uint32_t gif_rgbaq = gif_packet + 6 * 16; // the sprite colour draw_frame updates
+inline constexpr std::uint32_t gif_packet_qwords = 10;
+inline constexpr std::uint32_t gif_rgbaq = gif_packet + 7 * 16; // the sprite colour draw_frame updates
 // The SIF client's memory (Docs/milestones/M3-boots.md, "Protocol notes"), all 16-byte aligned.
 inline constexpr std::uint32_t sif_recv_slot = 0x00282000u;  // 0x80: where IOP packets land
 inline constexpr std::uint32_t sif_scratch = 0x00282080u;    // 0x80: the packet being dispatched
