@@ -40,6 +40,16 @@ struct MachineEvent {
     }
 };
 
+// Diagnostic trace categories (dq8-game --trace kernel,sif,rpc,dma,gs). Bit i of MachineConfig::trace_mask
+// enables category i. Trace lines are MachineEvents of type "trace" with fields "cat" and "msg"; they are
+// deterministic like every event, and the host prints them on stderr (and in --events only when asked).
+enum class TraceCategory : std::uint8_t { kernel = 0, sif = 1, rpc = 2, dma = 3, gs = 4 };
+
+constexpr std::uint32_t trace_bit(TraceCategory category) noexcept {
+    return 1u << static_cast<unsigned>(category);
+}
+std::string_view to_string(TraceCategory category) noexcept;
+
 // The fixed order in which vblank-start work happens (architecture §5.5): GS privileged registers (CSR field
 // and VSINT, the vsync snapshot for the backend), then the kernel's SetVSyncFlag targets, then the IOP's pad
 // DMA, then the INTC vblank-start cause. Listeners of one phase run in registration order.
@@ -78,6 +88,16 @@ class MachineServices {
     virtual void note_activity() = 0;
 
     virtual void emit(MachineEvent event) = 0;
+    // Whether a trace category is on. Check it before building an expensive message.
+    virtual bool tracing(TraceCategory category) const = 0;
+    // Emits a "trace" event when the category is on.
+    void trace(TraceCategory category, std::string message) {
+        if (tracing(category)) {
+            emit(MachineEvent{"trace", {}}
+                     .add("cat", std::string(to_string(category)))
+                     .add("msg", std::move(message)));
+        }
+    }
     // Ends the run with a diagnostic. On a guest fiber this switches away and never returns; elsewhere it
     // throws (the machine catches it). Never returns either way.
     [[noreturn]] virtual void stop(StopInfo info) = 0;

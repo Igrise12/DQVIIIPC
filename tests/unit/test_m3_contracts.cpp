@@ -125,6 +125,17 @@ TEST_CASE("m3 contracts: the fake machine attaches devices and runs vblank phase
     m.emit(rt::MachineEvent{"thread", {}}.add("id", std::int64_t{1}).add("state", std::string("start")));
     REQUIRE(m.emitted.size() == 1);
     CHECK(m.emitted[0].fields.size() == 2);
+
+    m.trace(rt::TraceCategory::sif, "not recorded");
+    CHECK(m.emitted.size() == 1);
+    m.trace_mask = rt::trace_bit(rt::TraceCategory::sif);
+    CHECK(m.tracing(rt::TraceCategory::sif));
+    CHECK_FALSE(m.tracing(rt::TraceCategory::rpc));
+    m.trace(rt::TraceCategory::sif, "bind 0x80000001");
+    REQUIRE(m.emitted.size() == 2);
+    CHECK(m.emitted[1].type == "trace");
+    CHECK(std::get<std::string>(m.emitted[1].fields[0].second) == "sif");
+    CHECK(rt::to_string(rt::TraceCategory::gs) == "gs");
 }
 
 TEST_CASE("m3 contracts: interfaces are abstract where sessions implement them", "[m3][contracts]") {
