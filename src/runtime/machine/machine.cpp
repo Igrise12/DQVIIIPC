@@ -86,13 +86,15 @@ Machine::Machine(GuestMemory& memory, Dispatcher& dispatcher, MachineConfig conf
     options.trace_dispatch = m.config.trace_dispatch;
     m.ee.set_options(options);
     register_ee_kernel_services(m.kernel_services, m.kernel);
-    // TODO(M3 session B): route device addresses through the bus once GuestMemory gains set_mmio_bus
-    // (Docs/milestones/M3-boots.md, "Devices"):
-    //   memory.set_mmio_bus(&m.mmio, &m.clock, m.config.cost.mmio_access);
-    // Until then every device access stays M2's logged hole.
+    // Device addresses go through the bus; a handled access charges the cost model's MMIO cost, an unhandled
+    // one stays M2's logged hole (Docs/milestones/M3-boots.md, "Devices").
+    memory.set_mmio_bus(&m.mmio, &m.clock, m.config.cost.mmio_access);
 }
 
-Machine::~Machine() = default;
+Machine::~Machine() {
+    // The memory usually outlives the machine: leave it without a dangling bus.
+    impl_->memory.set_mmio_bus(nullptr, nullptr, 0);
+}
 
 void Machine::attach(IDevice& device) {
     if (impl_->booted) {
