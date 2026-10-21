@@ -4,7 +4,18 @@ on:
     branches: [main]
   pull_request:
 
-# CI never has game data. Only tests labelled "unit" run here.
+# CI never has game data. Only tests labelled "unit" (and "e2e" in recomp-e2e) run here.
+
+env:
+  # SDL3 is built from third_party/SDL (ADR-0005); these are the headers its Linux video, input and audio
+  # backends need. Window tests use SDL's dummy video driver, so no display is required.
+  SDL3_LINUX_DEPS: >-
+    libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev
+    libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev
+    libgles2-mesa-dev libdrm-dev libgbm-dev libasound2-dev libpulse-dev libdbus-1-dev libudev-dev
+  SDL_VIDEO_DRIVER: dummy
+  SDL_AUDIO_DRIVER: dummy
+
 jobs:
   build-test:
     name: ${{ matrix.name }}
@@ -23,23 +34,26 @@ jobs:
         run: bash scripts/init_submodules.sh
       - name: Install Linux tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build ${{ matrix.cc }}
+        run: sudo apt-get update && sudo apt-get install -y ninja-build ${{ matrix.cc }} ${{ env.SDL3_LINUX_DEPS }}
       - name: Register compiler problem matchers (errors become annotations readable without the logs)
         shell: bash
         run: |
           echo "::add-matcher::.github/problem-matchers/gcc.json"
           echo "::add-matcher::.github/problem-matchers/msvc.json"
+      # The paraLLEl-GS backend stays OFF on MSVC (its MSVC build is unverified in M3, Docs/milestones/M3-boots.md).
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }} ${{ runner.os == 'Linux' && format('-DCMAKE_C_COMPILER={0} -DCMAKE_CXX_COMPILER={1}', matrix.cc, matrix.cxx) || '' }}
+        run: cmake --preset ${{ matrix.preset }} ${{ runner.os == 'Linux' && format('-DCMAKE_C_COMPILER={0} -DCMAKE_CXX_COMPILER={1}', matrix.cc, matrix.cxx) || '-DDQ8_BUILD_GS_PARALLEL=OFF' }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
       - name: Unit tests
         run: ctest --preset unit-${{ matrix.preset }}
-      - name: Smoke-run dq8ctl
+      - name: Smoke-run dq8ctl and dq8-game
         shell: bash
         run: |
-          exe=$(find build/${{ matrix.preset }} -name 'dq8ctl' -o -name 'dq8ctl.exe' | head -1)
-          "$exe" --version
+          for tool in dq8ctl dq8-game; do
+            exe=$(find build/${{ matrix.preset }} -name "$tool" -o -name "$tool.exe" | head -1)
+            "$exe" --version
+          done
 
   sanitizers:
     name: Linux Clang ASan+UBSan
@@ -49,7 +63,7 @@ jobs:
       - name: Submodules (pinned subset, scripts/init_submodules.sh)
         shell: bash
         run: bash scripts/init_submodules.sh
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build clang-18
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build clang-18 ${{ env.SDL3_LINUX_DEPS }}
       - run: echo "::add-matcher::.github/problem-matchers/gcc.json"
       - run: cmake --preset asan -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
       - run: cmake --build --preset asan --parallel
@@ -67,10 +81,11 @@ jobs:
         run: bash scripts/init_submodules.sh
       - run: sudo apt-get update && sudo apt-get install -y ninja-build gcc-13 g++-13
       - run: echo "::add-matcher::.github/problem-matchers/gcc.json"
+      # Headless only: the end-to-end runs need neither the window nor the paraLLEl-GS backend.
       - name: Configure
         run: >-
           cmake --preset ci-gcc -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13
-          -DDQ8_BUILD_RECOMP=ON -DDQ8_BUILD_E2E=ON
+          -DDQ8_BUILD_RECOMP=ON -DDQ8_BUILD_E2E=ON -DDQ8_BUILD_WINDOW=OFF -DDQ8_BUILD_GS_PARALLEL=OFF
       - name: Build (host, ps2_recomp, fixture generator)
         run: cmake --build --preset ci-gcc --parallel
       - name: End-to-end tests
