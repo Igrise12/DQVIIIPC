@@ -7,17 +7,21 @@
 //   0x00200000 start:       SetupThread(0, main_stack, main_stack_size, 0, 0); sp = v0; jal main; Exit
 //   0x00200100 main:        jal gs_init; vsync_sema = CreateSema(&sema_param); work_sema = CreateSema(...);
 //                           handler = AddIntcHandler(2, vblank_handler, 0); EnableIntc(2);
-//                           worker = CreateThread(&thread_param); StartThread(worker, 0); jal read_file; EI;
+//                           worker = CreateThread(&thread_param); StartThread(worker, 0); EI; jal read_file;
 //                           loop: WaitSema(vsync_sema); jal draw_frame; SignalSema(work_sema); b loop
 //   0x00200300 gs_init:     GsSetCrt(1, 2, 1); PMODE, DISPFB1, DISPLAY1 (sd); D_CTRL = 1; jr ra
 //   0x00200400 vblank_handler: vblanks += 1; iSignalSema(vsync_sema); v0 = 0; jr ra
-//   0x00200500 draw_frame:  rgbaq.r = frames * 8; D2_MADR = gif_packet; D2_QWC = 9; D2_CHCR = 0x101;
+//   0x00200500 draw_frame:  rgbaq.r = frames * 8; D2_MADR = gif_packet; D2_QWC = 10; D2_CHCR = 0x101;
 //                           wait: if (D2_CHCR & 0x100) b wait; frames += 1; jr ra
 //   0x00200580 worker:      loop: WaitSema(work_sema); work += 1; b loop
-//   0x00200600 read_file:   the fileio read (see read_file below); jr ra
+//   0x00200600 read_file:   the SIF command and RPC layers' init, bind fileio, setup, open, read, close
+//   (below) 0x00200700 sif0_handler: DMAC channel 5: one IOP packet per interrupt from the receive slot
 #include "support/machine_unit.h"
 
 #include "ps2_runtime_macros.h"
+
+#include <initializer_list>
+#include <optional>
 
 namespace {
 
@@ -34,6 +38,14 @@ constexpr uint32_t sys_create_sema = 0x40;
 constexpr uint32_t sys_signal_sema = 0x42;
 constexpr uint32_t sys_isignal_sema = 0xFFFFFFBDu; // -0x43
 constexpr uint32_t sys_wait_sema = 0x44;
+constexpr uint32_t sys_add_dmac_handler = 0x12;
+constexpr uint32_t sys_enable_dmac = 0x16;
+constexpr uint32_t sys_sif_dma_stat = 0x76;
+constexpr uint32_t sys_sif_set_dma = 0x77;
+constexpr uint32_t sys_sif_set_dchain = 0x78;
+constexpr uint32_t sys_isif_set_dchain = 0xFFFFFF88u; // -0x78
+constexpr uint32_t sys_sif_set_reg = 0x79;
+constexpr uint32_t sys_sif_get_reg = 0x7A;
 
 constexpr uint32_t reg_v0 = 2, reg_v1 = 3, reg_a0 = 4, reg_a1 = 5, reg_a2 = 6, reg_a3 = 7, reg_t0 = 8;
 constexpr uint32_t reg_t1 = 9, reg_sp = 29, reg_ra = 31;
@@ -125,6 +137,8 @@ label_200108:
     SET_GPR_U32(ctx, reg_a0, GPR_U32(ctx, reg_v0));
     SET_GPR_U32(ctx, reg_a1, 0u);
     syscall_at(rdram, ctx, runtime, 0x200168u, sys_start_thread);
+    ctx->pc = 0x200170u;
+    ctx->cop0_status |= 0x10000; // EI
     SET_GPR_U32(ctx, reg_ra, 0x200180u);
     ctx->pc = 0x200600u;
     if (!runtime->dispatchGuestBranch(rdram, ctx, 0x200600u, 0x200178u, 0x200180u,
@@ -133,7 +147,6 @@ label_200108:
     }
 label_200180:
     ctx->pc = 0x200180u;
-    ctx->cop0_status |= 0x10000; // EI
 label_200188:
     ctx->pc = 0x200188u;
     SET_GPR_U32(ctx, reg_a0, READ32(var_vsync_sema));
@@ -226,16 +239,281 @@ label_200580:
     goto label_200580;
 }
 
+// The SIF client (read_file and sif0_handler). It speaks the protocol of Docs/milestones/M3-boots.md
+// ("Protocol notes") the way the game's EE libraries do. It is written as structured C++ rather than one
+// statement per instruction, over the same PS2Runtime surface the emitter uses: guest loads and stores,
+// syscalls with the number in v1, and a back-edge checkpoint in every wait loop.
+namespace {
+
+constexpr uint32_t uncached = 0x20000000u;
+constexpr uint32_t sid_fileio = 0x80000001u;
+constexpr uint32_t cid_change_saddr = 0x80000000u;
+constexpr uint32_t cid_set_sreg = 0x80000001u;
+constexpr uint32_t cid_init = 0x80000002u;
+constexpr uint32_t cid_rpc_end = 0x80000008u;
+constexpr uint32_t cid_rpc_bind = 0x80000009u;
+constexpr uint32_t cid_rpc_call = 0x8000000Au;
+constexpr uint32_t cid_fileio_done = 0x80000011u;
+constexpr uint32_t smflg_cmd_ready = 0x20000u;
+constexpr uint32_t fio_version = 0x30303033u;
+
+struct Guest {
+    uint8_t* rdram;
+    R5900Context* ctx;
+    PS2Runtime* runtime;
+
+    uint32_t r32(uint32_t addr) { return READ32(addr); }
+    void w32(uint32_t addr, uint32_t value) { WRITE32(addr, value); }
+    uint8_t r8(uint32_t addr) { return READ8(addr); }
+    void w8(uint32_t addr, uint8_t value) { WRITE8(addr, value); }
+    void copy(uint32_t dest, uint32_t src, uint32_t bytes) {
+        for (uint32_t i = 0; i < bytes; i += 4) {
+            w32(dest + i, r32(src + i));
+        }
+    }
+    void zero(uint32_t dest, uint32_t bytes) {
+        for (uint32_t i = 0; i < bytes; i += 4) {
+            w32(dest + i, 0);
+        }
+    }
+    // A syscall at `pc` with up to six arguments in a0..a3, t0, t1; returns v0.
+    uint32_t sys(uint32_t pc, uint32_t number, std::initializer_list<uint32_t> args = {}) {
+        int reg = static_cast<int>(reg_a0);
+        for (const uint32_t a : args) {
+            SET_GPR_U32(ctx, reg, a);
+            reg = reg == static_cast<int>(reg_a3) ? static_cast<int>(reg_t0) : reg + 1;
+        }
+        ctx->pc = pc;
+        syscall_at(rdram, ctx, runtime, pc, number);
+        return GPR_U32(ctx, reg_v0);
+    }
+    // The back-edge of a wait loop at `pc`: the checkpoint the emitter puts on every backward branch.
+    void back_edge(uint32_t pc) {
+        ctx->pc = pc;
+        (void)runtime->eeCheckpointDue();
+    }
+
+    // Sends a command packet of `size` bytes at `packet`, with `extra_size` bytes from `extra_src` ahead of
+    // it to `extra_dest`, and waits until the transfer is done (sceSifDmaStat < 0).
+    void send(uint32_t pc, uint32_t cid, uint32_t packet, uint32_t size, uint32_t opt, uint32_t extra_src = 0,
+              uint32_t extra_dest = 0, uint32_t extra_size = 0) {
+        w32(packet + 0x0, size | (extra_size << 8));
+        w32(packet + 0x4, extra_size != 0 ? extra_dest : 0);
+        w32(packet + 0x8, cid);
+        w32(packet + 0xC, opt);
+        uint32_t n = 0;
+        if (extra_size != 0) {
+            descriptor(n++, extra_src, extra_dest, extra_size, 0);
+        }
+        descriptor(n++, packet, r32(var_iop_buffer), size, 0x44);
+        const uint32_t id = sys(pc, sys_sif_set_dma, {sif_desc, n});
+        while (static_cast<int32_t>(sys(pc + 8, sys_sif_dma_stat, {id})) >= 0) {
+            back_edge(pc + 8);
+        }
+    }
+    void descriptor(uint32_t i, uint32_t src, uint32_t dest, uint32_t size, uint32_t attr) {
+        const uint32_t at = sif_desc + 16 * i;
+        w32(at + 0x0, src);
+        w32(at + 0x4, dest);
+        w32(at + 0x8, size);
+        w32(at + 0xC, attr);
+    }
+    void send_word(uint32_t pc, uint32_t cid, uint32_t opt, uint32_t word) {
+        zero(sif_cmd_packet, 0x20);
+        w32(sif_cmd_packet + 0x10, word);
+        send(pc, cid, sif_cmd_packet, 0x14, opt);
+    }
+
+    // The one RPC packet slot, filled in for a new request: flags (allocated), its own uncached address and
+    // the next request number. Returns the uncached address.
+    uint32_t alloc_packet() {
+        zero(sif_rpc_packet, 0x40);
+        const uint32_t id = r32(var_rpc_id) + 1u;
+        w32(var_rpc_id, id);
+        w32(sif_rpc_packet + 0x10, 5u);
+        w32(sif_rpc_packet + 0x14, sif_rpc_packet | uncached);
+        w32(sif_rpc_packet + 0x18, id);
+        return sif_rpc_packet | uncached;
+    }
+    // sceSifCheckStatRpc's test.
+    bool call_done(uint32_t client) {
+        const uint32_t packet = r32(client) & 0x1FFFFFFFu;
+        return packet == 0 || r32(client + 0x04) != r32(packet + 0x18) || (r32(packet + 0x10) & 1u) == 0;
+    }
+    uint32_t bind(uint32_t pc, uint32_t client, uint32_t sid) {
+        const uint32_t packet = alloc_packet();
+        zero(client, 0x28);
+        w32(client + 0x00, packet);
+        w32(client + 0x04, r32(packet + 0x18));
+        w32(client + 0x08, 0xFFFFFFFFu);
+        w32(packet + 0x1C, client);
+        w32(packet + 0x20, sid);
+        send(pc, cid_rpc_bind, packet, 0x40, 0);
+        while (r32(client) != 0) {
+            back_edge(pc + 0x10);
+        }
+        return r32(client + 0x24);
+    }
+    void call(uint32_t pc, uint32_t client, uint32_t fno, uint32_t send_addr, uint32_t send_size,
+              uint32_t recv, uint32_t recv_size) {
+        const uint32_t packet = alloc_packet();
+        w32(client + 0x00, packet);
+        w32(client + 0x04, r32(packet + 0x18));
+        w32(packet + 0x1C, client);
+        w32(packet + 0x20, fno);
+        w32(packet + 0x24, send_size);
+        w32(packet + 0x28, recv);
+        w32(packet + 0x2C, recv_size);
+        w32(packet + 0x30, 1u); // rmode: wait for the end packet
+        w32(packet + 0x34, r32(client + 0x24));
+        send(pc, cid_rpc_call, packet, 0x40, 0, send_addr, r32(client + 0x14), send_size);
+        while (!call_done(client)) {
+            back_edge(pc + 0x10);
+        }
+    }
+    // One fileio request: the call ("accepted"), then the completion record; returns the result word.
+    std::optional<int32_t> fileio(uint32_t pc, uint32_t fno, uint32_t request, uint32_t size) {
+        w32(request + 0x00, 0);          // EE semaphore: we poll instead
+        w32(request + 0x04, fio_result); // result pointer
+        w32(request + 0x08, 4);          // result size
+        const uint32_t before = r32(var_completions);
+        call(pc, sif_client, fno, request, size, fio_reply, 4);
+        if (r32(fio_reply) == 0) {
+            return std::nullopt;
+        }
+        while (r32(var_completions) == before) {
+            back_edge(pc + 0x20);
+        }
+        return static_cast<int32_t>(r32(fio_result));
+    }
+};
+
+} // namespace
+
 // Function: read_file
 // Address: 0x200600 - 0x200700
-// PENDING (waits on M3 session C): the fileio read of disc_file through the SIF RPC client protocol
-// (sceSifInitRpc, bind 0x80000001, open/read/close into var_file_word's buffer), written against session C's
-// protocol layouts (tests/unit/support/sif_client.h, "Protocol notes" in Docs/milestones/M3-boots.md) once
-// they are on main. Until then the function returns without touching the disc.
 void read_file_0x200600(uint8_t* rdram, R5900Context* ctx, PS2Runtime* runtime) {
-    (void)rdram;
-    (void)runtime;
+    Guest g{rdram, ctx, runtime};
     ctx->pc = 0x200600u;
+    // The receive side: the SIF0 handler on DMAC channel 5.
+    g.sys(0x200600u, sys_add_dmac_handler, {5u, 0x200700u, 0u, 0u});
+    g.sys(0x200608u, sys_enable_dmac, {5u});
+    // Command-layer init.
+    if ((g.r32(0x1000E010u) & (1u << 5)) != 0) { // D_STAT CIS5
+        g.w32(0x1000E010u, 1u << 5);
+    }
+    if ((g.r32(0x1000C000u) & 0x100u) == 0) { // D5_CHCR STR
+        g.sys(0x200610u, sys_sif_set_dchain);
+    }
+    const uint32_t known = g.sys(0x200618u, sys_sif_get_reg, {0x80000000u});
+    if (known != 0) {
+        g.w32(var_iop_buffer, known);
+        g.send_word(0x200620u, cid_change_saddr, 0, sif_recv_slot);
+    } else {
+        while ((g.sys(0x200628u, sys_sif_get_reg, {4u}) & smflg_cmd_ready) == 0) {
+            g.back_edge(0x200628u);
+        }
+        g.w32(var_iop_buffer, g.sys(0x200630u, sys_sif_get_reg, {2u}));
+        g.sys(0x200638u, sys_sif_set_reg, {0x80000000u, g.r32(var_iop_buffer)});
+        g.sys(0x200640u, sys_sif_set_reg, {0x80000001u, sif_cmd_data});
+        g.send_word(0x200648u, cid_init, 0, sif_recv_slot);
+    }
+    // RPC-layer init: init with option 1, then wait for the IOP to set our software register 0.
+    if (g.sys(0x200650u, sys_sif_get_reg, {0x80000002u}) == 0) {
+        g.zero(sif_cmd_packet, 0x10);
+        g.send(0x200658u, cid_init, sif_cmd_packet, 0x10, 1);
+        while (g.r32(sreg_mirror) == 0) {
+            g.back_edge(0x200660u);
+        }
+        g.sys(0x200668u, sys_sif_set_reg, {0x80000002u, 1u});
+    }
+    // Bind fileio (every bind loop of the game retries until the server word is non-zero).
+    uint32_t server = 0;
+    for (int tries = 0; tries < 16 && server == 0; ++tries) {
+        server = g.bind(0x200670u, sif_client, sid_fileio);
+    }
+    if (server == 0) {
+        g.w32(var_file_status, static_cast<uint32_t>(file_status_bind));
+        jr_ra(ctx);
+        return;
+    }
+    // Setup: the two completion records; the reply's first word is the protocol version.
+    g.w32(fio_setup_args + 0, fio_records);
+    g.w32(fio_setup_args + 4, fio_records + 0x440);
+    g.call(0x200680u, sif_client, 0xFF, fio_setup_args, 8, fio_reply, 8);
+    if (g.r32(fio_reply) != fio_version) {
+        g.w32(var_file_status, static_cast<uint32_t>(file_status_setup));
+        jr_ra(ctx);
+        return;
+    }
+    // open (function 0): flags 1, the path at +0x14.
+    g.zero(fio_request, 0x418);
+    g.w32(fio_request + 0x0C, 1u);
+    for (uint32_t i = 0; disc_file_path[i] != '\0'; ++i) {
+        g.w8(fio_request + 0x14 + i, static_cast<uint8_t>(disc_file_path[i]));
+    }
+    const auto fd = g.fileio(0x200690u, 0, fio_request, 0x418);
+    if (!fd || *fd < 0) {
+        g.w32(var_file_status, static_cast<uint32_t>(fd ? *fd : file_status_call));
+        jr_ra(ctx);
+        return;
+    }
+    // read (function 2): fd, EE buffer, size; then close (function 1).
+    g.zero(fio_request, 0x20);
+    g.w32(fio_request + 0x0C, static_cast<uint32_t>(*fd));
+    g.w32(fio_request + 0x10, fio_buffer);
+    g.w32(fio_request + 0x14, fio_read_size);
+    const auto n = g.fileio(0x2006A0u, 2, fio_request, 0x20);
+    g.zero(fio_request, 0x14);
+    g.w32(fio_request + 0x0C, static_cast<uint32_t>(*fd));
+    (void)g.fileio(0x2006B0u, 1, fio_request, 0x14);
+    g.w32(var_file_word, g.r32(fio_buffer));
+    g.w32(var_file_status, static_cast<uint32_t>(n ? *n : file_status_call));
+    ctx->pc = 0x2006C0u;
+    jr_ra(ctx);
+}
+
+// Function: sif0_handler (DMAC channel 5)
+// Address: 0x200700 - 0x200800
+void sif0_handler_0x200700(uint8_t* rdram, R5900Context* ctx, PS2Runtime* runtime) {
+    Guest g{rdram, ctx, runtime};
+    ctx->pc = 0x200700u;
+    g.w32(var_sif0_irqs, g.r32(var_sif0_irqs) + 1u);
+    const uint8_t size = g.r8(sif_recv_slot);
+    if (size != 0) {
+        // Take the packet out of the slot, free the slot, re-arm SIF0, then act on the packet.
+        g.w8(sif_recv_slot, 0);
+        g.copy(sif_scratch, sif_recv_slot, 0x80);
+        g.sys(0x200710u, sys_isif_set_dchain);
+        const uint32_t cid = g.r32(sif_scratch + 0x08);
+        if (cid == cid_change_saddr) {
+            g.w32(var_iop_buffer, g.r32(sif_scratch + 0x10));
+        } else if (cid == cid_set_sreg) {
+            const uint32_t index = g.r32(sif_scratch + 0x10);
+            if (index < 32) {
+                g.w32(sreg_mirror + 4 * index, g.r32(sif_scratch + 0x14));
+            }
+        } else if (cid == cid_rpc_end) {
+            const uint32_t client = g.r32(sif_scratch + 0x1C);
+            if (g.r32(sif_scratch + 0x20) == cid_rpc_bind) {
+                g.w32(client + 0x24, g.r32(sif_scratch + 0x24)); // server
+                g.w32(client + 0x14, g.r32(sif_scratch + 0x28)); // server receive buffer
+            }
+            const uint32_t packet = g.r32(client) & 0x1FFFFFFFu;
+            if (packet != 0) {
+                g.w32(packet + 0x18, 0);
+                g.w32(packet + 0x10, g.r32(packet + 0x10) & ~1u);
+            }
+            g.w32(client, 0);
+        } else if (cid == cid_fileio_done) {
+            // The record the option word names: copy its result to the request's result pointer.
+            const uint32_t record = fio_records + 0x440u * (g.r32(sif_scratch + 0x0C) & 1u);
+            g.copy(g.r32(record + 0x08), record + 0x10, g.r32(record + 0x0C));
+            g.w32(var_completions, g.r32(var_completions) + 1u);
+        }
+    }
+    ctx->pc = 0x200740u;
+    SET_GPR_U32(ctx, reg_v0, 0u);
     jr_ra(ctx);
 }
 
@@ -260,6 +538,7 @@ struct GeneratedFunctionTableInitializer {
         dq8_unit_machine_table[slot(0x200500u)] = draw_frame_0x200500;
         dq8_unit_machine_table[slot(0x200580u)] = worker_0x200580;
         dq8_unit_machine_table[slot(0x200600u)] = read_file_0x200600;
+        dq8_unit_machine_table[slot(0x200700u)] = sif0_handler_0x200700;
     }
 };
 const GeneratedFunctionTableInitializer g_generatedFunctionTableInitializer;

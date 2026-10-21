@@ -19,6 +19,7 @@
 #include "runtime/ee/context.h"
 #include "runtime/ee/ee_runtime.h"
 #include "runtime/ee/game_module.h"
+#include "runtime/gs/gs_backends.h"
 #include "runtime/gs/gs_pipeline.h"
 #include "runtime/io/disc_source.h"
 #include "runtime/io/input_live.h"
@@ -27,17 +28,7 @@
 #include "runtime/iop/iop.h"
 #include "runtime/machine/ee_devices.h"
 #include "runtime/machine/machine.h"
-
-#if __has_include("runtime/gs/gs_backends.h")
-#include "runtime/gs/gs_backends.h"
-#else
-namespace dq8::gs {
-// PENDING CONTRACT (M3 session B; proposed to the coordinator on 2026-10-21): the null and trace backend
-// factories. Delete this block when B's header lands.
-std::unique_ptr<IGsBackend> make_null_gs_backend();
-std::unique_ptr<IGsBackend> make_trace_gs_backend(std::filesystem::path file);
-} // namespace dq8::gs
-#endif
+// The paraLLEl-GS backend (session D) when the tree has it.
 #if __has_include("runtime/gs/gs_parallel_backend.h")
 #include "runtime/gs/gs_parallel_backend.h"
 #define DQ8_HOST_HAVE_GS_PARALLEL 1
@@ -62,11 +53,6 @@ namespace dq8::host {
 namespace {
 
 using rt::hex32;
-
-// The reason a --stop-at-pc or --stop-at-rpc stop carries. Decision 4 of Docs/milestones/M3-boots.md adds
-// StopReason::requested with session A; until A's guest_stop.h is in, the host keeps its own `requested` flag
-// and reports "requested" from it, so only this constant changes at the merge.
-constexpr rt::StopReason requested_stop_reason = rt::StopReason::unsupported;
 
 // Developer mode without --disc: a drive with no disc in it.
 class NoDisc final : public rt::IDiscSource {
@@ -149,8 +135,7 @@ void write_ram(const rt::GuestMemory& memory, const fs::path& path) {
 
 // Overrides for --stop-at-pc: on the main unit when it has an entry there, else on every overlay unit with
 // one.
-std::vector<rt::OverrideSpec> stop_at_pc_overrides(const Options& o, const Session& s,
-                                                   std::atomic<bool>& requested) {
+std::vector<rt::OverrideSpec> stop_at_pc_overrides(const Options& o, const Session& s) {
     std::vector<rt::OverrideSpec> out;
     for (const std::uint32_t pc : o.stop_at_pc) {
         std::vector<std::string> units;
@@ -172,10 +157,9 @@ std::vector<rt::OverrideSpec> stop_at_pc_overrides(const Options& o, const Sessi
             spec.address = pc;
             spec.kind = rt::OverrideKind::hook_before;
             spec.name = "stop-at-pc";
-            spec.fn = [pc, unit, &requested](rt::OverrideCall& call) {
-                requested.store(true);
+            spec.fn = [pc, unit](rt::OverrideCall& call) {
                 rt::StopInfo info;
-                info.reason = requested_stop_reason;
+                info.reason = rt::StopReason::requested;
                 info.pc = pc;
                 info.address = pc;
                 info.message = "--stop-at-pc: entered " + unit + " " + hex32(pc) + " from " +
@@ -226,7 +210,7 @@ const RpcStop* matching_rpc_stop(const Options& o, const rt::MachineEvent& e) {
 // How the machine loop ended.
 struct Outcome {
     std::optional<rt::StopInfo> stop;
-    bool requested = false; // a --stop-at-* stop
+    bool requested = false; // a --stop-at-* stop (StopReason::requested)
     bool vblanks_reached = false;
     bool quit = false; // the window closed
     rt::SliceResult last;
@@ -329,7 +313,6 @@ int run_game(const Options& o, const char* argv0) {
             mode_watcher = std::make_unique<game::ModeWatcher>(profile->overlay_window.mode_variable);
         }
     }
-    std::atomic<bool> requested{false};
 
     // The machine, then the devices in the fixed attach order: EE devices, IOP, game layer.
     rt::MachineConfig config;
@@ -370,7 +353,7 @@ int run_game(const Options& o, const char* argv0) {
             s.dispatcher->install_override(std::move(spec), &s.memory);
         }
     }
-    for (rt::OverrideSpec& spec : stop_at_pc_overrides(o, s, requested)) {
+    for (rt::OverrideSpec& spec : stop_at_pc_overrides(o, s)) {
         s.dispatcher->install_override(std::move(spec), &s.memory);
     }
 
@@ -384,9 +367,8 @@ int run_game(const Options& o, const char* argv0) {
             until->observe(e, vblank);
         }
         if (const RpcStop* stop = o.stop_at_rpc.empty() ? nullptr : matching_rpc_stop(o, e)) {
-            requested.store(true);
             rt::StopInfo info;
-            info.reason = requested_stop_reason;
+            info.reason = rt::StopReason::requested;
             info.address = stop->sid;
             info.message = "--stop-at-rpc: " + e.type + " of server " + hex32(stop->sid) +
                            (stop->fno ? ", function " + std::to_string(*stop->fno) : std::string());
@@ -446,7 +428,7 @@ int run_game(const Options& o, const char* argv0) {
                 }
                 if (r.stopped) {
                     outcome.stop = r.stop;
-                    outcome.requested = requested.load();
+                    outcome.requested = r.stop && r.stop->reason == rt::StopReason::requested;
                     break;
                 }
                 if (until && until->met()) {
@@ -521,8 +503,7 @@ int run_game(const Options& o, const char* argv0) {
             .add("ram_sha1", ram)
             .add("exit_code", std::int64_t{code});
         if (outcome.stop) {
-            end.add("reason", outcome.requested ? std::string("requested")
-                                                : std::string(rt::to_string(outcome.stop->reason)));
+            end.add("reason", std::string(rt::to_string(outcome.stop->reason)));
         }
         log.write(end, outcome.last.vblank, outcome.last.cycles);
         log.flush();
@@ -578,7 +559,7 @@ int run_game(const Options& o, const char* argv0) {
             j.end_object();
         }
         if (outcome.stop) {
-            json_stop(j, *outcome.stop, outcome.requested ? "requested" : "");
+            json_stop(j, *outcome.stop);
         }
         j.member("dispatches", outcome.last.dispatches);
         json_context(j, ctx);

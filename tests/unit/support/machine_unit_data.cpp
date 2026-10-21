@@ -41,11 +41,13 @@ std::vector<std::uint8_t> data_segment() {
     put32(d, thread_param + 0x14, worker_priority);
     put32(d, thread_param + 0x18, worker_priority);
 
-    // GIF packet, PACKED mode. An A+D tag (NLOOP 4, NREG 1, REGS = A+D) with FRAME_1, SCISSOR_1, XYOFFSET_1
-    // and TEST_1, then a sprite tag (NLOOP 1, EOP, PRE, PRIM = sprite, NREG 3, REGS = RGBAQ, XYZ2, XYZ2).
+    // GIF packet, PACKED mode. An A+D tag (NLOOP 5, NREG 1, REGS = A+D) with FRAME_1, ZBUF_1, SCISSOR_1,
+    // XYOFFSET_1 and TEST_1, then a sprite tag (NLOOP 1, EOP, PRE, PRIM = sprite, NREG 3, REGS = RGBAQ, XYZ2,
+    // XYZ2). The Z buffer sits past the 640x448 frame buffer (page 140) with its writes masked.
     std::uint32_t q = gif_packet;
-    put128(d, q, 4u | (UINT64_C(1) << 60), 0xE);
+    put128(d, q, 5u | (UINT64_C(1) << 60), 0xE);
     put128(d, q += 16, UINT64_C(10) << 16, 0x4C);                            // FRAME_1: FBW 10
+    put128(d, q += 16, 140u | (UINT64_C(1) << 32), 0x4E);                    // ZBUF_1: ZBP 140, ZMSK
     put128(d, q += 16, (UINT64_C(639) << 16) | (UINT64_C(447) << 48), 0x40); // SCISSOR_1
     put128(d, q += 16, 0, 0x18);                                             // XYOFFSET_1
     put128(d, q += 16, UINT64_C(0x30000), 0x47);                             // TEST_1: ZTE, ZTST always

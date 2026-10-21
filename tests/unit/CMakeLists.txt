@@ -163,20 +163,24 @@ set(_machine_iso "${CMAKE_CURRENT_BINARY_DIR}/machine.iso")
 add_test(NAME host.machine_inputs COMMAND dq8_machine_inputs "${_machine_elf}" "${_machine_iso}")
 set_tests_properties(host.machine_inputs PROPERTIES FIXTURES_SETUP dq8_machine_inputs LABELS unit)
 
-# Golden values of the 10-vblank run, recorded when sessions A, B and C are merged (Docs/milestones/M3-boots.md).
-set(DQ8_MACHINE_SYNTHETIC_GS_HASH "pending-merge-of-sessions-a-b-c")
-set(DQ8_MACHINE_SYNTHETIC_RAM_SHA1 "pending-merge-of-sessions-a-b-c")
-if(DQ8_HOST_MACHINE)
-    add_test(NAME host.dq8_game_machine_synthetic
-        COMMAND "${CMAKE_COMMAND}"
-            "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
-            "-DARGS=--elf@@${_machine_elf}@@--module-dir@@$<TARGET_FILE_DIR:dq8_unit_machine>@@--disc@@${_machine_iso}@@--headless@@--gs@@trace@@--vblanks@@10@@--json"
-            -DEXPECT_EXIT=0
-            "-DEXPECT=\"ended\":\"vblanks\"@@\"vblanks\":10@@\"gs_hash\":\"${DQ8_MACHINE_SYNTHETIC_GS_HASH}\"@@\"ram_sha1\":\"${DQ8_MACHINE_SYNTHETIC_RAM_SHA1}\""
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
-    set_tests_properties(host.dq8_game_machine_synthetic PROPERTIES FIXTURES_REQUIRED dq8_machine_inputs LABELS unit)
-    add_dependencies(dq8_unit_tests dq8_unit_machine)
-endif()
+# Golden values of the 10-vblank run (cost model m3-v1), the same with --speed 1, --gs null and --gs parallel.
+# Re-record them, and say why in the commit, when the program, the cost model or guest-visible timing changes;
+# run_machine_synthetic.cmake checks what the program did before it compares them.
+set(DQ8_MACHINE_SYNTHETIC_GS_HASH "3028b8f27428c40b26a20ffa96f1351b8d04fd57")
+set(DQ8_MACHINE_SYNTHETIC_RAM_SHA1 "aac99550b063892347bf589d89af2742da8e2c72")
+add_test(NAME host.dq8_game_machine_synthetic
+    COMMAND "${CMAKE_COMMAND}"
+        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DELF=${_machine_elf}"
+        "-DMODULE_DIR=$<TARGET_FILE_DIR:dq8_unit_machine>"
+        "-DISO=${_machine_iso}"
+        "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/machine_synthetic"
+        -DVBLANKS=10
+        "-DGS_HASH=${DQ8_MACHINE_SYNTHETIC_GS_HASH}"
+        "-DRAM_SHA1=${DQ8_MACHINE_SYNTHETIC_RAM_SHA1}"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_machine_synthetic.cmake")
+set_tests_properties(host.dq8_game_machine_synthetic PROPERTIES FIXTURES_REQUIRED dq8_machine_inputs LABELS unit)
+add_dependencies(dq8_unit_tests dq8_unit_machine)
 
 # M3 session D. Separate executables: the paraLLEl-GS tests need the dq8-gs-parallel library file, the platform tests
 # link SDL3; neither belongs in dq8_unit_tests. Both run in CI (label "unit") without a GPU or a display.
