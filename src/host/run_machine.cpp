@@ -1,0 +1,569 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+// The M3 run of dq8-game (architecture §12, ADR-0005, ADR-0007): the machine thread runs Machine::run in
+// one-vblank slices with the limiter between them; the GS pipeline's render thread drives the backend; the
+// main thread runs the platform loop with --window (events, live input, presentation) or waits.
+#include "dq8/core/error.h"
+#include "dq8/core/hash.h"
+#include "dq8/core/iso9660.h"
+#include "game/iop_modules.h"
+#include "game/mode_watcher.h"
+#include "game/movies.h"
+#include "game/overlay_residency.h"
+#include "game/unit_specs.h"
+#include "game/until.h"
+#include "host/event_log.h"
+#include "host/limiter.h"
+#include "host/run.h"
+#include "host/session.h"
+#include "runtime/ee/context.h"
+#include "runtime/ee/ee_runtime.h"
+#include "runtime/ee/game_module.h"
+#include "runtime/gs/gs_pipeline.h"
+#include "runtime/io/disc_source.h"
+#include "runtime/io/input_live.h"
+#include "runtime/io/input_record.h"
+#include "runtime/io/input_script.h"
+#include "runtime/iop/iop.h"
+#include "runtime/machine/ee_devices.h"
+#include "runtime/machine/machine.h"
+
+#if __has_include("runtime/gs/gs_backends.h")
+#include "runtime/gs/gs_backends.h"
+#else
+namespace dq8::gs {
+// PENDING CONTRACT (M3 session B; proposed to the coordinator on 2026-10-21): the null and trace backend
+// factories. Delete this block when B's header lands.
+std::unique_ptr<IGsBackend> make_null_gs_backend();
+std::unique_ptr<IGsBackend> make_trace_gs_backend(std::filesystem::path file);
+} // namespace dq8::gs
+#endif
+#if __has_include("runtime/gs/gs_parallel_backend.h")
+#include "runtime/gs/gs_parallel_backend.h"
+#define DQ8_HOST_HAVE_GS_PARALLEL 1
+#endif
+#ifdef DQ8_HOST_HAVE_WINDOW
+#include "runtime/platform/platform.h"
+#endif
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <exception>
+#include <fstream>
+#include <memory>
+#include <optional>
+#include <thread>
+#include <vector>
+
+namespace dq8::host {
+
+namespace {
+
+using rt::hex32;
+
+// Developer mode without --disc: a drive with no disc in it.
+class NoDisc final : public rt::IDiscSource {
+  public:
+    std::uint32_t sector_count() const override { return 0; }
+    std::optional<rt::DiscFile> find(std::string_view) const override { return std::nullopt; }
+    void read_sectors(std::uint32_t lsn, std::uint32_t, std::span<std::uint8_t>) const override {
+        throw core::Error(core::ErrorCode::io_read, "read of sector " + std::to_string(lsn) +
+                                                        " with no disc (developer mode without --disc)");
+    }
+};
+
+std::string_view gs_name(GsKind k) noexcept {
+    switch (k) {
+    case GsKind::null:
+        return "null";
+    case GsKind::trace:
+        return "trace";
+    case GsKind::parallel:
+        return "parallel";
+    }
+    return "?";
+}
+
+std::unique_ptr<gs::IGsBackend> make_backend(const Options& o, const char* argv0) {
+    try {
+        switch (o.gs) {
+        case GsKind::null:
+            return gs::make_null_gs_backend();
+        case GsKind::trace:
+            return gs::make_trace_gs_backend(o.gs_trace.value_or(fs::path()));
+        case GsKind::parallel: {
+#ifdef DQ8_HOST_HAVE_GS_PARALLEL
+            gs::ParallelGsConfig config;
+            config.library = executable_dir(argv0) / rt::shared_library_file_name("dq8-gs-parallel");
+            config.super_sampling = o.ssaa;
+            return gs::make_parallel_gs_backend(config);
+#else
+            (void)argv0;
+            throw BackendError("--gs parallel: this build has no paraLLEl-GS backend");
+#endif
+        }
+        }
+    } catch (const BackendError&) {
+        throw;
+    } catch (const std::exception& e) {
+        throw BackendError("the " + std::string(gs_name(o.gs)) + " GS backend failed to start: " + e.what());
+    }
+    throw BackendError("unknown GS backend");
+}
+
+rt::VideoTiming video_for(const Session& s) {
+    const core::RegionProfile* p = s.profile();
+    return p != nullptr && p->video_mode == "PAL" ? rt::VideoTiming::pal() : rt::VideoTiming::ntsc();
+}
+
+double seconds_of(rt::Cycles cycles) {
+    return static_cast<double>(cycles) / static_cast<double>(rt::ee_clock_hz);
+}
+
+std::string ram_sha1(const rt::GuestMemory& memory) {
+    constexpr std::size_t ram_bytes = std::size_t{32} << 20;
+    return core::to_hex(core::Sha1::of(std::span<const std::uint8_t>(memory.rdram(), ram_bytes)));
+}
+
+void write_ram(const rt::GuestMemory& memory, const fs::path& path) {
+    constexpr std::size_t ram_bytes = std::size_t{32} << 20;
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(memory.rdram()), static_cast<std::streamsize>(ram_bytes));
+    if (!out) {
+        throw core::Error(core::ErrorCode::io_write, "cannot write the RAM dump " + path.string());
+    }
+}
+
+// Overrides for --stop-at-pc: on the main unit when it has an entry there, else on every overlay unit with
+// one.
+std::vector<rt::OverrideSpec> stop_at_pc_overrides(const Options& o, const Session& s,
+                                                   std::atomic<bool>& requested) {
+    std::vector<rt::OverrideSpec> out;
+    for (const std::uint32_t pc : o.stop_at_pc) {
+        std::vector<std::string> units;
+        if (s.dispatcher->main_table().is_function_entry(pc)) {
+            units.push_back(s.dispatcher->main_name());
+        } else {
+            for (const rt::OverlayUnit& u : s.overlays.units()) {
+                if (u.table.is_function_entry(pc)) {
+                    units.push_back(u.name);
+                }
+            }
+        }
+        if (units.empty()) {
+            throw UsageError("--stop-at-pc " + hex32(pc) + ": no unit has a function entry there");
+        }
+        for (const std::string& unit : units) {
+            rt::OverrideSpec spec;
+            spec.unit = unit;
+            spec.address = pc;
+            spec.kind = rt::OverrideKind::hook_before;
+            spec.name = "stop-at-pc";
+            spec.fn = [pc, unit, &requested](rt::OverrideCall& call) {
+                requested.store(true);
+                rt::StopInfo info;
+                info.reason = rt::StopReason::unsupported; // reported as "requested"
+                info.pc = pc;
+                info.address = pc;
+                info.message = "--stop-at-pc: entered " + unit + " " + hex32(pc) + " from " +
+                               hex32(rt::gpr_u32(*call.ctx, 31));
+                call.machine->stop(std::move(info));
+            };
+            out.push_back(std::move(spec));
+        }
+    }
+    return out;
+}
+
+std::optional<std::uint64_t> sid_of(const rt::MachineEvent& e) {
+    for (const auto& [k, v] : e.fields) {
+        if (k != "sid") {
+            continue;
+        }
+        if (const auto* u = std::get_if<std::uint64_t>(&v)) {
+            return *u;
+        }
+        if (const auto* i = std::get_if<std::int64_t>(&v)) {
+            return static_cast<std::uint64_t>(*i);
+        }
+        if (const auto* str = std::get_if<std::string>(&v)) {
+            if (const auto canonical = rt::canonical_trigger_value("rpc_bind", *str)) {
+                return std::stoull(*canonical, nullptr, 16);
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+// How the machine loop ended.
+struct Outcome {
+    std::optional<rt::StopInfo> stop;
+    bool requested = false; // a --stop-at-* stop
+    bool vblanks_reached = false;
+    bool quit = false; // the window closed
+    rt::SliceResult last;
+    std::string gs_hash;
+    std::exception_ptr error;
+};
+
+} // namespace
+
+int run_game(const Options& o, const char* argv0) {
+    Session s;
+    setup_session(o, argv0, s);
+    const core::RegionProfile* profile = s.profile();
+
+    // Everything that can fail on bad options or files, before any thread starts.
+    std::optional<game::UntilTracker> until;
+    if (o.until) {
+        try {
+            until.emplace(game::parse_until(*o.until, profile));
+        } catch (const std::invalid_argument& e) {
+            throw UsageError(e.what());
+        }
+    }
+    std::unique_ptr<rt::ScriptInput> script;
+    if (o.input_script) {
+        try {
+            script = std::make_unique<rt::ScriptInput>(rt::load_input_script(*o.input_script));
+        } catch (const std::invalid_argument& e) {
+            throw UsageError(std::string("--input-script: ") + e.what());
+        }
+    }
+    const auto movie_policy = game::parse_movie_policy(o.movies);
+    EventLog log(o.events, o.trace);
+
+    // Disc.
+    std::optional<core::iso::Image> image;
+    std::unique_ptr<rt::IDiscSource> disc;
+    if (o.iso) {
+        image.emplace(core::iso::Image::open(*o.iso));
+    } else if (o.disc) {
+        image.emplace(core::iso::Image::open(*o.disc));
+    }
+    if (image) {
+        disc = rt::make_iso_disc_source(*image);
+    } else {
+        disc = std::make_unique<NoDisc>();
+    }
+
+    // Input: a script, the window's live input, or nothing; optionally recorded.
+    rt::LiveInput live;
+    rt::IdleInput idle;
+    rt::IInputSource* input = script                         ? static_cast<rt::IInputSource*>(script.get())
+                              : o.display == Display::window ? static_cast<rt::IInputSource*>(&live)
+                                                             : static_cast<rt::IInputSource*>(&idle);
+    std::unique_ptr<rt::RecordingInput> recorder;
+    if (o.record_input) {
+        recorder = std::make_unique<rt::RecordingInput>(*input, *o.record_input);
+        input = recorder.get();
+    }
+
+    // The window first (main thread), then the GS backend: either failing is exit 3.
+#ifdef DQ8_HOST_HAVE_WINDOW
+    std::unique_ptr<rt::IPlatform> platform;
+    if (o.display == Display::window) {
+        try {
+            platform = rt::create_sdl_platform(rt::WindowConfig{});
+        } catch (const std::exception& e) {
+            throw BackendError(std::string("the window failed to open: ") + e.what());
+        }
+    }
+#else
+    if (o.display == Display::window) {
+        throw BackendError("--window: this build has no SDL3 window (DQ8_BUILD_WINDOW=OFF)");
+    }
+#endif
+    gs::GsPipelineConfig pipeline_config;
+    pipeline_config.backend = make_backend(o, argv0);
+    pipeline_config.inline_mode = o.gs == GsKind::null;
+    gs::GsPipeline pipeline(std::move(pipeline_config));
+    for (const AtVblank& d : o.dump_frames) {
+        pipeline.request_frame_dump(d.vblank, d.path.string());
+    }
+
+    // The machine and its devices, in the fixed attach order: EE devices, IOP, game layer.
+    rt::MachineConfig config;
+    config.video = video_for(s);
+    config.strict_kernel = o.strict_kernel;
+    config.stop_at_first_syscall = o.stop_at_first_syscall;
+    config.trace_dispatch = o.trace_dispatch;
+    s.memory.set_trap_mmio(o.trap_mmio);
+    if (!o.json) {
+        s.memory.set_mmio_sink([](const rt::MmioAccess& a) {
+            std::fprintf(stderr, "mmio: first %s at %s (%s), pc %s\n", mmio_access_name(a).c_str(),
+                         hex32(a.address).c_str(), std::string(rt::to_string(a.region)).c_str(),
+                         hex32(a.pc).c_str());
+        });
+    }
+    rt::Machine machine(s.memory, *s.dispatcher, config);
+    s.dispatcher->set_machine(&machine);
+    std::vector<std::unique_ptr<rt::IDevice>> devices = rt::make_ee_devices(rt::EeDevicesConfig{&pipeline});
+    for (const auto& d : devices) {
+        machine.attach(*d);
+    }
+    rt::IopConfig iop_config;
+    iop_config.disc = disc.get();
+    iop_config.input = input;
+    if (profile != nullptr) {
+        iop_config.modules = game::iop_module_specs(*profile);
+        iop_config.reset_image = game::iop_reset_image(*profile);
+    }
+    rt::Iop iop(std::move(iop_config));
+    machine.attach(iop);
+
+    std::unique_ptr<game::OverlayResidency> residency;
+    std::unique_ptr<game::ModeWatcher> mode_watcher;
+    std::atomic<bool> requested{false};
+    if (profile != nullptr) {
+        residency = std::make_unique<game::OverlayResidency>(
+            game::OverlayResidencyConfig{profile, &s.overlays, o.verify_overlays});
+        machine.attach(*residency);
+        s.dispatcher->install_override(residency->hook_override(), &s.memory);
+        if (profile->overlay_window.mode_variable != 0) {
+            mode_watcher = std::make_unique<game::ModeWatcher>(profile->overlay_window.mode_variable);
+            machine.attach(*mode_watcher);
+        }
+        for (rt::OverrideSpec& spec :
+             game::movie_overrides(*profile, movie_policy.value_or(game::MoviePolicy::skip))) {
+            s.dispatcher->install_override(std::move(spec), &s.memory);
+        }
+    }
+    for (rt::OverrideSpec& spec : stop_at_pc_overrides(o, s, requested)) {
+        s.dispatcher->install_override(std::move(spec), &s.memory);
+    }
+
+    machine.set_event_sink([&](const rt::MachineEvent& e) {
+        const std::uint64_t vblank = machine.vblank_count();
+        log.write(e, vblank, machine.clock().now());
+        if (const auto trigger = game::trigger_from_event(e); trigger && script) {
+            script->note_trigger(*trigger, vblank);
+        }
+        if (until) {
+            until->observe(e, vblank);
+        }
+        if (!o.stop_at_rpc.empty() && (e.type == "rpc_bind" || e.type == "rpc_call")) {
+            const auto sid = sid_of(e);
+            if (sid && std::find(o.stop_at_rpc.begin(), o.stop_at_rpc.end(), *sid) != o.stop_at_rpc.end()) {
+                requested.store(true);
+                rt::StopInfo info;
+                info.reason = rt::StopReason::unsupported; // reported as "requested"
+                info.address = static_cast<std::uint32_t>(*sid);
+                info.message =
+                    "--stop-at-rpc: " + e.type + " of server " + hex32(static_cast<std::uint32_t>(*sid));
+                machine.stop(std::move(info));
+            }
+        }
+    });
+
+    if (!o.json) {
+        print_setup(s);
+        std::fflush(stdout); // before the run's stderr diagnostics
+    }
+    {
+        rt::MachineEvent start{"start", {}};
+        start.add("mode", s.mode)
+            .add("entry", hex32(s.elf.entry))
+            .add("cost_model", std::string(config.cost.name));
+        if (profile != nullptr) {
+            start.add("profile", profile->id);
+        }
+        start.add("input", std::string(script ? "script" : o.display == Display::window ? "live" : "idle"));
+        log.write(start, 0, 0);
+    }
+
+    // The machine thread.
+    std::atomic<bool> quit{false};
+    std::atomic<bool> done{false};
+    Outcome outcome;
+    std::vector<AtVblank> ram_dumps = o.dump_ram_at;
+    const auto machine_loop = [&] {
+        try {
+            machine.boot(s.elf.entry);
+            Limiter limiter(o.speed);
+            std::uint64_t vblank = 0;
+            for (;;) {
+                rt::RunLimits limits;
+                limits.until_vblank = o.vblanks ? std::min(vblank + 1, *o.vblanks) : vblank + 1;
+                limits.max_dispatches = o.max_dispatches;
+                const rt::SliceResult r = machine.run(limits);
+                outcome.last = r;
+                if (r.vblank != vblank) {
+                    vblank = r.vblank;
+                    outcome.gs_hash = pipeline.stream_hash();
+                    log.write(rt::MachineEvent{"gs", {}}
+                                  .add("hash", outcome.gs_hash)
+                                  .add("vsyncs", pipeline.vsyncs()),
+                              vblank, r.cycles);
+                    for (const AtVblank& d : ram_dumps) {
+                        if (d.vblank == vblank) {
+                            write_ram(s.memory, d.path);
+                            log.write(rt::MachineEvent{"ram_dump", {}}.add("sha1", ram_sha1(s.memory)),
+                                      vblank, r.cycles);
+                        }
+                    }
+                }
+                if (until) {
+                    until->at_vblank(vblank);
+                }
+                if (r.stopped) {
+                    outcome.stop = r.stop;
+                    outcome.requested = requested.load();
+                    break;
+                }
+                if (until && until->met()) {
+                    break;
+                }
+                if (o.vblanks && vblank >= *o.vblanks) {
+                    outcome.vblanks_reached = true;
+                    break;
+                }
+                if (quit.load()) {
+                    outcome.quit = true;
+                    break;
+                }
+                limiter.wait(seconds_of(r.cycles));
+            }
+            outcome.gs_hash = pipeline.stream_hash();
+        } catch (...) {
+            outcome.error = std::current_exception();
+        }
+        done.store(true);
+    };
+
+    std::thread machine_thread(machine_loop);
+#ifdef DQ8_HOST_HAVE_WINDOW
+    if (platform) {
+        std::uint64_t presented = ~std::uint64_t{0};
+        while (!done.load()) {
+            if (!platform->pump_events()) {
+                quit.store(true);
+            }
+            live.publish(0, platform->pad(0));
+            live.publish(1, platform->pad(1));
+            gs::FrameImage frame;
+            if (pipeline.latest_frame(frame) && frame.field != presented) {
+                platform->present(frame, 4.0 / 3.0);
+                presented = frame.field;
+            } else {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+            }
+        }
+    }
+#endif
+    machine_thread.join();
+    if (recorder) {
+        recorder->flush();
+    }
+    if (outcome.error) {
+        std::rethrow_exception(outcome.error);
+    }
+
+    // Exit status and the report.
+    int code = exit_ok;
+    std::string ended;
+    if (outcome.stop) {
+        ended = outcome.requested ? "requested" : "stop";
+        code = outcome.requested || (o.stop_at_first_syscall && stopped_at_syscall(*outcome.stop))
+                   ? exit_ok
+                   : exit_guest_stop;
+    } else if (until && until->met()) {
+        ended = "until";
+    } else if (outcome.quit) {
+        ended = "window-closed";
+    } else {
+        ended = "vblanks";
+        code = until ? exit_until_not_met : exit_ok;
+    }
+    const std::string ram = ram_sha1(s.memory);
+    {
+        rt::MachineEvent end{"end", {}};
+        end.add("ended", ended)
+            .add("gs_hash", outcome.gs_hash)
+            .add("ram_sha1", ram)
+            .add("exit_code", std::int64_t{code});
+        if (outcome.stop) {
+            end.add("reason", outcome.requested ? std::string("requested")
+                                                : std::string(rt::to_string(outcome.stop->reason)));
+        }
+        log.write(end, outcome.last.vblank, outcome.last.cycles);
+        log.flush();
+    }
+
+    const R5900Context& ctx = machine.ee().context();
+    if (o.json) {
+        JsonWriter j;
+        j.begin_object();
+        j.member("ok", code == exit_ok);
+        json_setup(j, s);
+        j.key("machine");
+        j.begin_object();
+        j.member("gs", gs_name(o.gs));
+        j.member("cost_model", config.cost.name);
+        j.member("vblanks", outcome.last.vblank);
+        j.member("cycles", outcome.last.cycles);
+        j.member("gs_hash", outcome.gs_hash);
+        j.member("gs_vsyncs", pipeline.vsyncs());
+        j.member("ram_sha1", ram);
+        j.end_object();
+        j.member("ended", ended);
+        if (until) {
+            j.key("until");
+            j.begin_object();
+            j.member("condition", until->condition().text);
+            j.member("met", until->met());
+            if (until->met_at()) {
+                j.member("at", *until->met_at());
+            }
+            j.end_object();
+        }
+        j.key("overrides");
+        j.begin_array();
+        for (const rt::OverrideReport& r : s.dispatcher->overrides()) {
+            j.begin_object();
+            j.member("name", r.name);
+            j.member("unit", r.unit);
+            j.member("address", hex32(r.address));
+            j.member("kind", rt::to_string(r.kind));
+            j.member("calls", r.calls);
+            j.end_object();
+        }
+        j.end_array();
+        if (script) {
+            j.key("input_script");
+            j.begin_object();
+            j.member("lines_applied", script->applied());
+            j.member("finished", script->finished());
+            if (const auto w = script->waiting_line()) {
+                j.member("waiting_line", *w);
+            }
+            j.end_object();
+        }
+        if (outcome.stop) {
+            json_stop(j, *outcome.stop, outcome.requested ? "requested" : "");
+        }
+        j.member("dispatches", outcome.last.dispatches);
+        json_context(j, ctx);
+        json_mmio(j, s.memory);
+        j.member("exit_code", code);
+        j.end_object();
+        std::printf("%s\n", j.str().c_str());
+    } else if (outcome.stop) {
+        print_stop(*outcome.stop, outcome.last.dispatches, ctx, s.memory);
+        std::printf("vblanks %llu, gs %s, ram %s\n", static_cast<unsigned long long>(outcome.last.vblank),
+                    outcome.gs_hash.c_str(), ram.c_str());
+    } else {
+        std::printf("ran %llu vblanks (%s), %llu dispatches\ngs %s\nram %s\n",
+                    static_cast<unsigned long long>(outcome.last.vblank), ended.c_str(),
+                    static_cast<unsigned long long>(outcome.last.dispatches), outcome.gs_hash.c_str(),
+                    ram.c_str());
+        if (until && !until->met()) {
+            std::printf("--until %s was not met\n", until->condition().text.c_str());
+        }
+    }
+    return code;
+}
+
+} // namespace dq8::host

@@ -50,13 +50,15 @@ add_executable(dq8_unit_tests
     test_overrides.cpp
     test_game_layer.cpp
     test_input_script.cpp
+    test_host_options.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(dq8_unit_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")
 target_compile_definitions(dq8_unit_tests PRIVATE
     DQ8_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     DQ8_CONTRACT_MODULE_DIR="$<TARGET_FILE_DIR:dq8_unit_contract>")
-target_link_libraries(dq8_unit_tests PRIVATE dq8::core dq8::runtime dq8::game toml11::toml11 Catch2::Catch2WithMain)
+target_link_libraries(dq8_unit_tests PRIVATE dq8::core dq8::runtime dq8::game dq8_host toml11::toml11
+                                             Catch2::Catch2WithMain)
 add_dependencies(dq8_unit_tests dq8_unit_contract)
 dq8_set_warnings(dq8_unit_tests)
 dq8_enable_sanitizers(dq8_unit_tests)
