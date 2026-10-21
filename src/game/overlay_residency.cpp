@@ -83,7 +83,9 @@ void OverlayResidency::fail(rt::MachineServices& machine, std::uint32_t pc, std:
     s.pc = pc;
     s.address = config_.profile->overlay_window.base;
     s.message = "overlay residency hook: " + std::move(message);
-    machine.stop(std::move(s));
+    machine.stop(s);
+    throw rt::GuestStop(std::move(s)); // not reached: stop() does not return (GCC does not see that through
+                                       // the virtual call)
 }
 
 void OverlayResidency::on_hook(rt::OverrideCall& call) {
