@@ -20,6 +20,9 @@ add_library(dq8_runtime STATIC
     machine/events.cpp
     machine/interrupts.cpp
     machine/mmio.cpp
+    io/input_script.cpp
+    io/input_live.cpp
+    io/input_record.cpp
     platform/dynlib.cpp
 )
 add_library(dq8::runtime ALIAS dq8_runtime)

@@ -48,6 +48,7 @@ add_executable(dq8_unit_tests
     test_kernel_services.cpp
     test_m3_contracts.cpp
     test_overrides.cpp
+    test_input_script.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(dq8_unit_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")
