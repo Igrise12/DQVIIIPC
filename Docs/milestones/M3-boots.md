@@ -490,8 +490,284 @@ M3b: `--gs parallel` frames, the window, live input.
 
 ## Protocol notes
 
-*(Session C, in our own words: SIF register semantics, command packet header, system commands, RPC packets, the
-fileio and cdvdfsv request and reply layouts as the game uses them.)*
+Session C, 2026-10-21. These layouts were established from the game's own EE-side libraries, read in the local Ghidra
+project: libkernel's SIF command and RPC layers, the file, module, heap, CD/DVD, pad and memory-card clients. Raw
+output stayed under `work/m3c/`. Below are offsets, sizes, ids and behaviour, in our words. All words are
+little-endian. "+N" is a byte offset. The code's own tables are `src/runtime/iop/sif_protocol.h` and the constants at
+the top of each `src/runtime/iop/services/*.cpp`.
+
+**SIF registers.**
+- `sceSifGetReg` / `sceSifSetReg` numbers:
+  - 1 is MSCOM;
+  - 2 is SMCOM, the IOP's command-buffer address, which only the IOP writes;
+  - 3 is MSFLG, where an EE write ORs bits in;
+  - 4 is SMFLG, where an EE write clears bits;
+  - numbers with bit 31 set are the kernel's 32 software registers.
+- The game uses three software registers. An IOP reset clears 0 and 2:
+  - 0: the IOP command buffer as the EE last learned it;
+  - 1: the EE command layer's data block, which is not its receive buffer;
+  - 2: "RPC initialised".
+- SMFLG bits:
+  - 0x10000: SIF up;
+  - 0x20000: command layer ready;
+  - 0x40000: boot finished.
+- The same registers are mapped at `0x1000F200` + 0x00, 0x10, 0x20 and 0x30, with CTRL at +0x40 and BD6 at +0x60.
+  IOP RAM is visible at `0x1C000000`.
+- At power-on our IOP has booted: SMFLG = 0x70000, SMCOM = `0x001F0000`, and the software registers are 0.
+
+**Transfers.**
+- `sceSifSetDma(list, n)` takes 16-byte descriptors: +0 EE source (uncached aliases occur), +4 IOP destination, +8
+  bytes, +0xC attribute. It returns a non-zero id.
+- Attributes: 0 for data, and 0x44 for a command packet (interrupt the IOP, end of chain).
+- `sceSifDmaStat(id)` returns > 0 while queued, 0 while running and < 0 when done. Every game caller polls it until
+  it is negative.
+- Twelve call sites send raw data to IOP-heap addresses with attribute 0.
+- IOP destinations lose their segment bits and mirror every 2 MiB.
+- `sceSifSetDChain` arms SIF0, and `sceSifStopDma` disarms it. Only the IOP reset calls StopDma.
+
+**Command packets.**
+- Header, 16 bytes:
+  - +0: byte 0 is the packet size (0x10..0x70), bits 8-31 the size of extra data sent ahead of the packet;
+  - +4: the extra data's destination;
+  - +8: command id;
+  - +0xC: option word.
+- With extra data the sender issues two descriptors: the data (attribute 0), then the packet (0x44) to the peer's
+  command buffer.
+- The EE's SIF0 handler, once per DMAC channel 5 interrupt:
+  1. It reads byte 0 of its single 0x80-byte receive slot. If that byte is 0 it returns without re-arming.
+  2. It clears that byte and copies the packet out.
+  3. It re-arms with `isceSifSetDChain`.
+  4. It dispatches system ids (bit 31 set) through a 32-entry table. The user table is empty.
+- So the IOP sends one packet per arming, at most 0x70 bytes, and the header's extra-data fields are ignored by the
+  EE.
+- System commands:
+  - 0x80000000: change receive buffer, +0x10 the new address.
+  - 0x80000001: set software register, +0x10 index, +0x14 value.
+  - 0x80000002: init:
+    - option 0 comes from the command layer, with the EE receive slot at +0x10;
+    - option 1 comes from the RPC layer, which then spins until the IOP sets the EE library's software register 0
+      to a non-zero value with 0x80000001. We send index 0, value 1.
+  - 0x80000003: IOP reset.
+  - 0x80000008: RPC end.
+  - 0x80000009: RPC bind.
+  - 0x8000000A: RPC call.
+  - 0x8000000C: RPC other-data.
+  - 0x80000011: fileio completion (IOP to EE).
+- The libraries also register 0x80000012 (CD power-off notice), 0x80000013 (fileio) and 0x80000019 (pad); the IOP
+  never needs to send them.
+
+**Command-layer init (EE).**
+1. Read D_STAT and clear CIS5 if it is set.
+2. Read D5_CHCR. If STR is clear, call `sceSifSetDChain`.
+3. Install the channel 5 handler and enable it.
+4. Read software register 0:
+   - **Non-zero:** send 0x80000000 with the receive slot.
+   - **Zero:** poll SMFLG for 0x20000, read SMCOM, set software registers 0 and 1, then send init with option 0.
+- RPC init then sends init with option 1 unless software register 2 is set, waits as above, and sets software
+  register 2 to 1.
+
+**IOP reset.**
+- The packet is 0x68 bytes, sent straight to software register 0's address with attribute 0x44:
+  - +0x10: argument length, without a NUL terminator;
+  - +0x14: mode, which is 0;
+  - +0x18: up to 0x50 argument bytes, `rom0:UDNL ` followed by the image path.
+- EE order:
+  1. StopDma.
+  2. Clear SMFLG 0x40000.
+  3. SetDma.
+  4. Clear 0x10000 and 0x20000.
+  5. Software registers 2 and 0 = 0.
+  6. Loop until SMFLG 0x40000.
+  7. Run the full init again: command layer on the zero path, then RPC with option 1.
+- Because the EE clears flags after SetDma returns, our IOP raises all three bits from a later event:
+  `CostModel::cdvd_read` of the image's size after the packet lands.
+- The reboot drops every loaded module and its servers, resets IOP RAM, and brings the standard services back.
+
+**RPC packets.**
+- Bind and call packets are 0x40 bytes. Every one carries:
+  - +0x10: slot flags (bit 0 = allocated);
+  - +0x14: its own uncached EE address;
+  - +0x18: request number;
+  - +0x1C: client.
+- Bind: +0x20 server id.
+- Call:
+  - +0x20: function number;
+  - +0x24: send size;
+  - +0x28: receive address;
+  - +0x2C: receive size;
+  - +0x30: rmode;
+  - +0x34: server handle.
+  - The send data travels as extra data to the client's buffer word.
+  - rmode is 1 for a waiting call, or for a no-wait call with an end function. In this game it is always 1.
+- Other-data: +0x20 IOP source, +0x24 EE destination, +0x28 size.
+- End packet (ours is 0x30 bytes):
+  - echoes +0x10..+0x1C;
+  - +0x20: the ended command;
+  - +0x24: server handle;
+  - +0x28: server receive buffer.
+  - The EE copies +0x24 and +0x28 into the client after a bind, and calls the end function after a call. It ignores
+    +0x2C.
+- With rmode 0 there is no end packet. The reply data goes without an interrupt, followed by an end-format block
+  written over the request with its +0x10 and +0x18 cleared. That frees the EE's slot.
+- Client structure, 0x28 bytes:
+  - +0x00: packet;
+  - +0x04: request number;
+  - +0x08: semaphore;
+  - +0x14: server buffer;
+  - +0x18: saved $gp;
+  - +0x1C: end function;
+  - +0x20: end parameter;
+  - +0x24: server.
+- Every bind loop retries until +0x24 is non-zero, so an unknown server id makes the game bind forever.
+- `sceSifCheckStatRpc` reports busy while the client holds a packet that is still allocated and still its request.
+
+**fileio (0x80000001): asynchronous.**
+- Setup, function 0xFF:
+  - It sends the EE addresses of two 0x440-byte completion records.
+  - Reply word 0 must be 0x30303033 (or 0x2E2E2E2E), or every open fails.
+  - Reply word 1 = 2 means the completion packet's option word picks the record.
+- Requests start with +0 EE semaphore, +4 EE result pointer and +8 result size (4):
+
+  | Request | Function | Size | Fields |
+  |---|---|---|---|
+  | open | 0 | 0x418 | +0x0C flags (always 1 here), +0x14 path (0x400) |
+  | close | 1 | 0x14 | +0x0C IOP fd |
+  | read | 2 | 0x20 | +0x0C IOP fd, +0x10 EE buffer, +0x14 size |
+  | lseek | 4 | 0x1C | +0x0C IOP fd, +0x10 offset, +0x14 whence |
+
+- The 4-byte RPC reply only says "accepted" (non-zero). The result arrives later:
+  1. The IOP writes a record into EE memory.
+  2. It sends command 0x80000011 with the record index in the option word.
+- Record layout:
+  - +0: semaphore;
+  - +4: function;
+  - +8: result pointer;
+  - +0xC: result size;
+  - +0x10: result.
+  - For a read it adds +0x14/+0x18 unaligned head and tail counts, +0x1C/+0x20 their EE destinations, and +0x24/+0x64
+    0x40-byte areas.
+- Our server writes read data straight into the EE buffer and reports head = tail = 0. It alternates between the two
+  records.
+- Paths look like `cdrom0:\BIN\TITLE.BIN;1`. Only cdrom0: exists, and errors are negated IOP errno values.
+
+**loadfile (0x80000006).**
+- Function 0xFF: reply word 0 must be 0x30303033.
+- Function 0 sends 0x200 bytes:
+  - +0: argument length;
+  - +8: path (0xFC);
+  - +0x104: NUL-separated arguments.
+- The 8-byte reply holds +0 the module id (the game checks ≥ 0) and +4 the module's start result.
+- Our IOP maps the path's base name to the profile's `[iop]` row. A module the profile does not list, or a cdrom0:
+  module missing from the disc, stops the guest.
+
+**iopheap (0x80000003).**
+- Function 1: allocate {size}, reply {IOP address or 0}.
+- Function 2: free {address}, reply {0, or -1 when not allocated}.
+- The game uploads into allocations with raw SetDma.
+
+**cdvdfsv.**
+- 0x80000592, init:
+  - Function 0 sends the mode word and expects 0x10 bytes back.
+  - (+4 >> 8) and (+8 >> 8) must be ≥ 2 and +0xC must be 0. +0xC = 0xFE would turn on the library's debug output.
+- 0x80000593, S-commands, answered at once:
+
+  | Function | Command | Reply |
+  |---|---|---|
+  | 3 | disc type | 0x14 (PS2 DVD); 0 sends the game into disc recovery |
+  | 4 | last error | 0 = none; the IOP keeps it |
+  | 5 | tray request | {1, 0} |
+  | 0x22 | media mode | 1 |
+  | 0x23 | thread priority | 1 |
+
+  - There is no clock or status S-command.
+- 0x80000595, N-commands:
+  - Function 0x0E is disc ready: 2 = ready; 6 fails every read and seek.
+  - Function 1 is read. It sends 0x18 bytes:
+    - +0: LSN;
+    - +4: sector count;
+    - +8: EE buffer;
+    - +0xC..+0xE: try count, spindle control, sector pattern (0 = 2048 bytes);
+    - +0x10: EE address of a 0x90-byte head/tail block;
+    - +0x14: a position word the EE never reads.
+  - Read is a no-wait call with an end function and no receive buffer.
+    - The sectors go straight into the EE buffer.
+    - The head/tail block gets zero counts.
+    - The end packet waits for `CostModel::cdvd_read`.
+    - `sceCdSync` waits for that end packet.
+  - Function 5 is seek, sending the LSN.
+- 0x80000597, SearchFile:
+  - It sends 0x12C bytes: +0x24 the path (0x100, backslashes, no device), +0x124 the EE address the IOP writes the
+    0x24-byte file record to, +0x128 the layer.
+  - File record: +0 LSN, +4 size, +8 name (16), +0x18 date, +0x20 flags.
+  - The 4-byte reply is 0 for not found, otherwise found.
+- 0x8000059A and 0x8000059C: disc ready.
+  - Function 0 sends a mode word and gets 2 back.
+  - The library tries 0x8000059C first and falls back to 0x8000059A. Only the disc-recovery path calls either one.
+  - So 0x8000059C is identified as the newer disc-ready server (*inferred* from the client code) and is no longer a
+    stopping stub.
+
+**Pad (0x80000100; 0x80000101 binds but is never called).**
+- The catalogue name `padman.v1` names this pair. The protocol is the command-word one.
+- Every call is function 1 with one 0x80-byte block that comes back as the reply: +0 command, +4 port, +8 slot.
+
+  | Command | Name | Request | Reply |
+  |---|---|---|---|
+  | 0x12 | module version | – | +0xC: version, major 4 required |
+  | 0x10 | init | – | +0xC = 1 |
+  | 0x01 | port open | +0x10 EE pad area | +0xC = 1 required; +0x14 IOP address of a 0x40-byte actuator buffer |
+  | 0x06 | main mode | – | +0x14 = 1 |
+  | 0x08 | actuator alignment | – | +0x14 = 1 |
+
+  - The EE sends actuator settings to the actuator buffer with raw SetDma.
+- Pad area: two 0x80-byte frames. The library reads the frame with the larger signed counter at +0x58.
+- Frame fields:
+
+  | Offset | Content |
+  |---|---|
+  | +0x00 | 32 data bytes: 0, id 0x73, buttons active low (first byte SELECT..LEFT), sticks rx, ry, lx, ly |
+  | +0x30 | actuator descriptors |
+  | +0x50 | u16 mode table {4, 7} |
+  | +0x60 | data length (1..32) |
+  | +0x64 | mode-config ≥ 2 |
+  | +0x65 | mode id 0x73 |
+  | +0x68 | table count 2 |
+  | +0x69 | table index 1 |
+  | +0x6A | actuator count 2 |
+  | +0x70 | state: 6 stable, 0 no pad |
+  | +0x71 | request state: 0 complete |
+  | +0x72 | 1 |
+
+- Our server writes the next frame in the IOP vblank phase.
+
+**mcserv (0x80000400).**
+- It uses the 0xFE / 0x01.. function numbers.
+- Init (0xFE) replies {0, mcserv version ≥ 0x20A, mcman version ≥ 0x20E}.
+- The other calls are no-wait and answer one result word:
+  - Descriptor requests are 0x30 bytes: +4 port, +8 slot, +0x1C EE info address.
+  - Name requests are 0x414 bytes: +0 port, +0x14 path.
+- GetInfo (1) fills the EE info block: +0 type (2 = PS2 card), +4 free clusters, +0x90 format (0 = unformatted).
+- GetInfo results the game distinguishes:
+  - 0: same card;
+  - -1: new formatted card;
+  - -2: new unformatted card;
+  - < -10: no card.
+- The game's save code passes slot 1, so our server ignores the slot.
+- M3 model:
+  - port 0 always answers -2 with type 2 and format 0;
+  - port 1 answers -12;
+  - file calls answer -2 or -5;
+  - format stops the guest.
+
+**Events** the IOP emits, in addition to the stops:
+
+| Event | Fields | When |
+|---|---|---|
+| `rpc_bind` | `sid`, `server`, `bound=true` | The first successful bind to each server |
+| `rpc_bind` | `sid`, `bound=false` | The first failed bind to a server id |
+| `iop_module` | `name`, `id`, `services`, `args` | A module load |
+| `iop_reset` | `image`, `mode` | A reset packet |
+| `rpc_null` | `sid`, `fno`, `send`, `recv` | The first call of each function number on a null server |
+| `mc_info` | `port`, `present`, `formatted` | The first GetInfo for each port |
 
 ## Bring-up log
 
