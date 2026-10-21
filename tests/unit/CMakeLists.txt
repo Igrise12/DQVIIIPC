@@ -48,6 +48,7 @@ add_executable(dq8_unit_tests
     test_kernel_services.cpp
     test_m3_contracts.cpp
     test_overrides.cpp
+    test_game_layer.cpp
     test_input_script.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")

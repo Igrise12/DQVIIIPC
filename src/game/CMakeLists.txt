@@ -4,6 +4,11 @@
 # specs out). See src/game/README.md.
 add_library(dq8_game STATIC
     unit_specs.cpp
+    iop_modules.cpp
+    overlay_residency.cpp
+    movies.cpp
+    mode_watcher.cpp
+    until.cpp
 )
 add_library(dq8::game ALIAS dq8_game)
 target_link_libraries(dq8_game PUBLIC dq8::runtime dq8::core)
