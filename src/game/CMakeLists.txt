@@ -8,6 +8,7 @@ add_library(dq8_game STATIC
     overlay_residency.cpp
     movies.cpp
     mode_watcher.cpp
+    title_watcher.cpp
     until.cpp
 )
 add_library(dq8::game ALIAS dq8_game)

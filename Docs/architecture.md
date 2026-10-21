@@ -750,7 +750,7 @@ Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are acc
 | 0009 | GPL-3.0-or-later | **Accepted** (2026-10-19) | Follows from using PS2Recomp. |
 | 0010 | Launcher is a thin front end over `libdq8core`, Dear ImGui first | Proposed | One toolkit with the in-game overlay, replaceable later. |
 | 0011 | IOP as native RPC servers first (SIF protocol, file I/O, disc, modules, pad, memory card; null servers for the sound modules); interpreting the IRX modules deferred | **Accepted** (2026-10-21; `Docs/adr/0011-iop-native-servers-first.md`) | Every SDK library is recompiled game code, so the SIF protocol is needed either way; the title screen needs no audio. |
-| 0012 | Overlay residency through the loader hook, with the game's own loader over native file I/O | **Accepted** (2026-10-21; `Docs/adr/0012-overlay-residency-loader-hook.md`; to be confirmed in bring-up) | One file-I/O path for archives and overlays; the hook fires between "bytes in RAM" and "code live". |
+| 0012 | Overlay residency through the loader hook, with the game's own loader over native file I/O | **Accepted** (2026-10-21; `Docs/adr/0012-overlay-residency-loader-hook.md`; confirmed by the M3a bring-up on 2026-10-21) | One file-I/O path for archives and overlays; the hook fires between "bytes in RAM" and "code live". |
 
 ---
 

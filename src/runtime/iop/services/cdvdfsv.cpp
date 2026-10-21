@@ -164,6 +164,10 @@ class NCommandServer final : public CdvdServer {
                         "read of " + std::to_string(count) + " sectors at " + std::to_string(lsn) +
                             " outside the disc");
         }
+        if (call.machine.tracing(TraceCategory::rpc)) {
+            call.machine.trace(TraceCategory::rpc, "disc read lsn " + std::to_string(lsn) + " sectors " +
+                                                       std::to_string(count) + " (cdvdfsv)");
+        }
         std::vector<std::uint8_t> bytes(static_cast<std::size_t>(count) * IDiscSource::sector_size);
         disc_->read_sectors(lsn, count, bytes);
         drive_->last_error = error_none;

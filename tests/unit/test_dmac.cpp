@@ -349,6 +349,17 @@ TEST_CASE("dmac: SIF0 and SIF1 store their registers and move nothing", "[dmac]"
     CHECK(rig.r32(d_stat) == 0u);
 }
 
+TEST_CASE("dmac: SADR outside the scratchpad channels takes writes and reads 0", "[dmac]") {
+    EeRig rig;
+    for (const std::uint32_t ch : {0x10008000u, vif1_ch, gif_ch, 0x1000B000u, 0x1000B400u}) {
+        rig.w32(ch + sadr, 0x120); // the SDK's DMA reset writes 0 here; any value is dropped
+        CHECK(rig.r32(ch + sadr) == 0u);
+    }
+    rig.w32(spr_from + sadr, 0x120);
+    CHECK(rig.r32(spr_from + sadr) == 0x120u);
+    CHECK(rig.mem().mmio_log().empty());
+}
+
 TEST_CASE("dmac: unmodelled channels and bad chains stop with a diagnostic", "[dmac]") {
     SECTION("IPU") {
         EeRig rig;

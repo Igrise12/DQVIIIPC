@@ -46,12 +46,15 @@ UntilCondition parse_until(std::string_view text, const core::RegionProfile* pro
     c.text = std::string(text);
     const std::string usage = "--until " + c.text + ": expected vblank:N, overlay:NAME, mode:N or title";
     if (text == "title") {
-        // The [title] marker (which game state is "the title screen") is an M3 bring-up result; until the
-        // profile schema has it there is nothing to test against.
-        throw std::invalid_argument(
-            "--until title needs the region profile's [title] marker, which M3 bring-up adds" +
-            std::string(profile != nullptr ? " (" + profile->id + " has none yet)" : "") +
-            "; use overlay:NAME, mode:N or vblank:N");
+        // The profile's [title] marker says what the title screen is; TitleWatcher emits `title` there.
+        if (profile == nullptr || profile->title_screen.variable == 0) {
+            throw std::invalid_argument("--until title needs the region profile's [title] marker" +
+                                        std::string(profile != nullptr ? " (" + profile->id + " has none)"
+                                                                       : " (none in developer mode)") +
+                                        "; use overlay:NAME, mode:N or vblank:N");
+        }
+        c.kind = UntilCondition::Kind::title;
+        return c;
     }
     const std::size_t colon = text.find(':');
     if (colon == std::string_view::npos) {
@@ -121,7 +124,16 @@ std::optional<rt::InputTrigger> trigger_from_event(const rt::MachineEvent& event
 }
 
 void UntilTracker::observe(const rt::MachineEvent& event, std::uint64_t vblank) {
-    if (met_at_ || condition_.kind != UntilCondition::Kind::trigger) {
+    if (met_at_) {
+        return;
+    }
+    if (condition_.kind == UntilCondition::Kind::title) {
+        if (event.type == "title") {
+            met_at_ = vblank;
+        }
+        return;
+    }
+    if (condition_.kind != UntilCondition::Kind::trigger) {
         return;
     }
     if (const auto t = trigger_from_event(event); t && *t == condition_.trigger) {

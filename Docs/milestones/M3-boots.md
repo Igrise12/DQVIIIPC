@@ -852,12 +852,53 @@ State at the end of integration:
 | Bogus overlay entries split TITLE's stage code | TITLE stuck in stage 10000 (`0x003D4018`) while PCSX2 states 0.15 s apart show stage 0 → 499 → 500 with the memory-card object set; generated code of the branch at `0x004629AC` | Ghidra put function entries at branch delay slots (`0x00463580`, `0x004629B0`) and at window addresses main calls for other overlays; ps2_recomp emits no delay slot past a function's End, so the branch at `0x004629AC` lost `move $s4, $zero` (the next stage) and the stage never changed | `ExportFunctionMap.java`: an entry at a delay slot always joins the previous function, and no range ends between a branch and its slot (22 entries joined across the overlays). The memory-card check now runs: mcserv binds, card present and unformatted |
 | Controller mode at power-up | Kernel and RPC trace: the game sends SetMainMode(0, 0, analog, lock) until the pad reports it | A DualShock 2 powers up digital (id `0x41`) and turns analog on request; padman reported analog from the first frame | padman powers up digital, switches on SetMainMode after two busy fields, and only on a change of mode |
 | Main functions only overlays call | Stop at `0x0020F8E0`, a JAL from TITLE `0x00462ADC` into a gap of the main map | The main Ghidra project never sees overlay code | `export_maps.sh` scans the overlays' jal/j targets into main and passes them as `entries=`; main gains 54 functions (7 targets inside existing bodies are reported, not used) |
+| Movie-skip return values | Boot with the open and start overrides alone: after the logos the TITLE scene never left its movie wait; decompiled player API around `0x001A2450` | The scenes call open `0x001A2450` and start `0x001A1A00`, then poll the is-finished query `0x001A1380`, which returns the byte at `0x003D2A10`. With the player skipped nothing sets that byte | Open and start return 0 (`movie_skip_entry_result`); profile `[movie].finished_query = 0x001A1380`, overridden to return 1. Both movies are skipped at vblanks 935 and 937 |
+| Title-screen marker | `--until title` on the stage word (`0x003D4018` = 1000) met at vblank 756, right after the settings screen. Compared PCSX2 save states: four title-screen and title-menu states (one in 16:9) against the publisher-logo and settings-screen states | Stage 1000 covers the logos too. Five words agree across the title states and differ from the others: `0x003D4000` (128), `0x003D4004` (1), `0x003D4008` (1), `0x004670CC` (1), `0x004670D0` (128). TITLE `0x00465080` fades the title in: while `0x003D4004` is set it raises `0x003D4000` to `0x80`, then it sets `0x003D4008` = 1 | Profile `[title]`: overlay TITLE, byte `0x003D4008` = 1. Met at vblank 1200 with the title menu on screen |
+| Unhandled MMIO on the boot path | Run summary `mmio`: stores of 0 to `0x10008080`, `0x10009080`, `0x1000A080`, `0x1000B080` and `0x1000B480`, from pc `0x0010A008`, twice each | The SDK's DMA reset clears SADR (offset `0x80`) on channels 0 to 4 as well; only the scratchpad channels 8 and 9 have one | The DMAC takes those writes, drops them, and reads 0 there. The boot to the title has no unhandled MMIO left |
+| Disc-read order against PCSX2 | PCSX2 `--verbose-cdvd` boot with the same settings input, against our `--trace rpc` `disc read` lines (new in `fileio` and `cdvdfsv`). Reads below LSN 2119 are the IOP's own (directories, the ELF, IOPRP, the IRX modules) and are dropped; adjacent or overlapping reads are merged, since PCSX2's fileio reads overlap by one sector | The first 65 runs are identical and in the same order, through LSN 976910 (163 sectors, vblank 266), with `TITLE.BIN` (1135078, 11 sectors) at vblank 93. PCSX2 then streams `L5_CI_W.MVI` and `TAKA_W.MVI`, with `DATA2.DAT` reads at 977073 to 977858 between them; we skip those. Both runs then read LSN 976025 | Acceptance 4 holds up to the skipped movies. TITLE is loaded through fileio by path, so no LSN cache takes part in M3 |
 
 ## Kernel coverage
 
-*(Filled in at the end of M3a: every census name and number, its service or noop, its owner, and its call count on the
-boot-to-title run.)*
+Every kernel call in the census has a native service or a documented noop: the unit test "every kernel call session A
+owns has a service" lists them. The boot-to-title run (`--trace kernel`, 42,819 calls, 2026-10-21) reaches 40
+services. FlushCache is the only noop among them, so `--strict-kernel` stops at its first call. No call stops as
+unimplemented.
+
+| Calls | Services reached |
+|---|---|
+| Over 1,000 | WaitSema 13,213 · SignalSema 7,734 · iSignalSema 6,650 · CreateSema 2,377 · DeleteSema 2,349 · iPollSema 2,109 · sceSifSetDma 1,778 · isceSifSetDChain 1,674 · PollSema 1,358 · FlushCache 1,066 (noop) |
+| 10 to 1,000 | EnableIntc 470 · AddIntcHandler 470 · DisableIntc 468 · RemoveIntcHandler 467 · sceSifGetReg 266 · sceSifDmaStat 230 · GetThreadId 41 · SetVSyncFlag 14 · sceSifSetReg 11 · SetSyscall 10 · EndOfHeap 10 |
+| Under 10 | StartThread, ReferThreadStatus, CreateThread 8 each · GetEntryAddress 6 · SetOsdConfigParam, SetGsCrt, sceSifSetDChain, GsPutIMR, GetOsdConfigParam, FindAddress, EnableDmac, ChangeThreadPriority, AddDmacHandler 2 each · SetupThread, SetupHeap, sceSifStopDma, RemoveDmacHandler, DisableDmac, Copy 1 each |
 
 ## Results
 
-*(Filled in at acceptance: counts, vblanks, SSIM, timings; addresses only.)*
+**M3a: met on 2026-10-21** (Clang Debug build, `tests/local/input/boot-to-title.dq8in`):
+
+1. `--headless --gs trace --until title --vblanks 6000` exits 0 at vblank 1200 (5,899,218,124 cycles), with no stop.
+   On the way: IOP reset at vblank 1, 15 module loads and 15 binds, 13 distinct calls the two null sound servers answer,
+   mode 4 at vblank 16,
+   TITLE resident through the hook at vblank 93, the memory-card check at 268 (port 0 present and unformatted,
+   port 1 empty), and both movies skipped at 935 and 937.
+2. No unimplemented-service stops; kernel coverage is above. The run summary's unhandled-MMIO list is empty, so no
+   allowlist is needed.
+3. Determinism: two runs give identical event logs (1,265 events, a `gs_hash` at every vsync), GS-stream hash
+   `af2abbd8…` and RAM SHA-1 `bb194ddc…`. `--speed 1` gives the same event log; the `null` and `parallel` backends
+   give the same RAM hash.
+4. Disc-read order: identical to PCSX2's up to the movies we skip (bring-up log).
+5. GS privileged registers at the settings screen equal the PCSX2 dump's: SMODE2 INT=1 FFMD=0; PMODE MMOD=1 ALP=127;
+   both circuits on FBP `0x070`, FBW 512, PSMCT24, DBY 1 and 0; DISPLAY DW=2559, DH=446/447, MAGH=4, DX=636, DY=50.
+   The uploads per frame are the same (two 16×16, one 128×128, one 64×64). The kick counts differ, 1,013 against
+   563/575, because PCSX2's dump was taken while the text was still typing, before the Screen Size window opened.
+6. Title GS signature, read with `gsdump_stats.py` from a `--gs-trace` stream:
+   - the title menu alternates 0 and 562 kicks (30 Hz);
+   - per frame it uploads four 16×16, two 256×224, one 128×128 and one 64×64, as PCSX2's title-menu dump does;
+   - the CRTC is the settings screen's.
+
+   This run never shows the logo title screen (S7's 507 kicks), because the script's presses go straight to the
+   menu. One more Cross (vblank 1233) opens the memory-card slot window that PCSX2's `title-menu.gs` shows. There we
+   draw 1,131 kicks per frame against PCSX2's 1,579, with the same uploads and the same per-frame draw-state writes
+   (SCISSOR, TEX0, FRAME, PRIM). The difference is in sprite vertices only, and the map is panned elsewhere in the
+   two captures. Not yet explained; to be confirmed against a capture at the same frame.
+
+**Performance (recorded, not gated):** to the title in 9 s of wall time with the null backend at `--speed max`,
+about 133 vblanks per second, 5.7 million dispatches. With `--speed 1` it takes 20 s, the 1,200 fields at 59.94 Hz.

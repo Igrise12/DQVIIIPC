@@ -64,17 +64,26 @@ std::vector<rt::OverrideSpec> movie_overrides(const core::RegionProfile& profile
             };
         } else {
             spec.fn = [entry](rt::OverrideCall& call) {
-                // PLACEHOLDER (M3 bring-up): the return value the scene code reads as "movie done".
                 rt::set_gpr_lo(*call.ctx, reg_v0,
-                               static_cast<std::uint64_t>(std::int64_t{movie_skip_placeholder_result}));
+                               static_cast<std::uint64_t>(std::int64_t{movie_skip_entry_result}));
                 machine_of(call).emit(rt::MachineEvent{"movie_skip", {}}
                                           .add("entry", rt::hex32(entry))
-                                          .add("a0", rt::hex32(rt::gpr_u32(*call.ctx, 4)))
-                                          .add("result", std::int64_t{movie_skip_placeholder_result})
-                                          .add("placeholder", true));
+                                          .add("a0", rt::hex32(rt::gpr_u32(*call.ctx, 4))));
                 call.return_to_caller();
             };
         }
+        out.push_back(std::move(spec));
+    }
+    if (policy == MoviePolicy::skip && profile.movie.finished_query != 0) {
+        rt::OverrideSpec spec;
+        spec.unit = std::string(main_unit_name);
+        spec.address = profile.movie.finished_query;
+        spec.kind = rt::OverrideKind::replace;
+        spec.name = "movie-skip-finished";
+        spec.fn = [](rt::OverrideCall& call) {
+            rt::set_gpr_lo(*call.ctx, reg_v0, 1); // the movie is done
+            call.return_to_caller();
+        };
         out.push_back(std::move(spec));
     }
     return out;

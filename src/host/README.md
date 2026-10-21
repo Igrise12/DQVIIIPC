@@ -36,7 +36,7 @@ dq8-game --elf <file> --module-dir <dir> [--overlay-window BASE:END [--resident 
 | `--speed F\|max` | 1.0 is real time. Default: `max` headless, `1.0` with `--window`. |
 | `--input-script FILE` | `.dq8in` input (`Docs/formats/dq8-input-script.md`). Its `after` lines see `overlay_resident`, `mode` and `rpc_bind` events. |
 | `--record-input FILE` | Write the input the run read as a `.dq8in` file that replays it. |
-| `--movies skip\|stop` | Movie player entries return a placeholder at once (default), or stop the guest (`src/game/movies.h`). |
+| `--movies skip\|stop` | Movies end at once (default: the player entries return and the finished query reports done), or the first player call stops the guest (`src/game/movies.h`). |
 | `--dump-frame N:PATH` | PNG of the scanout of vblank N. Repeatable. |
 | `--dump-ram-at N:PATH` | The 32 MiB of RAM after N vblanks. Repeatable. |
 | `--events FILE\|-` | JSON-lines events (below). |

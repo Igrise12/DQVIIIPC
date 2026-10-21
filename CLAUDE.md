@@ -7,7 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 DQ8-Native: an open-source native PC port of *Dragon Quest VIII* (PS2, NTSC-U, boot file `SLUS_212.07`) by
 static recompilation of the game's EE code to C++, run on a purpose-built runtime. Not an emulator. GPL-3.0-or-later.
 
-**Current state: milestones M1 (disc intake) and M2 (first recompile) complete; no kernel service yet (M3).**
+**Current state: M1 (disc intake) and M2 (first recompile) complete; M3a (headless boot to the title) met on
+2026-10-21; M3b (pixels and window) next.**
 - `src/core` (`libdq8core`): ISO 9660 reader, SHA-1/CRC-32, ELF32 reader and writer, `MWo3` parser, region profiles
   (`data/regions/SLUS_21207.toml`: hashes, sizes, addresses and the S3 loader facts, never bytes), `verify_image()` /
   `extract()`, a portable process runner, and the recompile pipeline (`core/recomp/`: function maps, per-unit
@@ -15,10 +16,14 @@ static recompilation of the game's EE code to C++, run on a purpose-built runtim
 - `include/dq8/abi/`: the game-module ABI (`game_module.h`) and the include root generated code compiles against
   (`ps2recomp/`: `R5900Context`, the `PS2Runtime` adapter, the macros, the stub/syscall forwarders).
   `cmake/module/` builds one shared library per code unit (`dq8_unit_<name>`, one export).
-- `src/runtime`, `src/game`, `src/host`: guest memory, ELF loader, dispatch tables, overlay manager, the run loop;
-  `dq8-game` loads the seven modules and runs the main unit from `0x00100008` to its first syscall (`SetupThread`).
-- Tests: 127 unit tests (CI on GCC, Clang, MSVC, ASan), local disc tests, and a synthetic recompile end-to-end suite
-  (label `e2e`, CI job on GCC 13). M2's record: `Docs/milestones/M2-first-recompile.md`.
+- `src/runtime`: the machine (virtual clock, events, MMIO bus, interrupts), guest threads on fibers and the HLE
+  kernel, DMAC/VIF/GIF/VU1, the GS pipeline with null, trace and paraLLEl-GS backends, SIF and the native IOP servers,
+  guest memory, ELF loader, dispatch tables, overrides and the overlay manager. `src/game`: the profile-driven game
+  layer (residency hook, movie skip, title watcher, `--until`). `src/host`: `dq8-game`, headless or SDL3 window.
+- `dq8-game --until title` boots the disc to the title menu in 1,200 vblanks, deterministically (M3a, see
+  `Docs/milestones/M3-boots.md` §Results).
+- Tests: 434 unit tests (CI on GCC, Clang, MSVC, ASan), local disc tests, a synthetic machine run pinned to golden
+  hashes, and a synthetic recompile end-to-end suite (label `e2e`, CI job on GCC 13).
 
 The plan of record is the three documents in `Docs/`; read them before
 proposing or changing design:
@@ -34,8 +39,9 @@ proposing or changing design:
 - `Docs/formats/`: layouts of the game's file formats (no game-derived values).
 
 Decided in brief §14: D1 (name), D2 (license, ADR-0009), D3 (local game-module build, ADR-0008), D4 (PS2Recomp pinned
-plus patch queue, ADR-0003) and D5 (paraLLEl-GS first, ADR-0004). D6 to D9 and ADR-0001, 0002, 0005, 0006, 0007 and
-0010 are **proposals**; do not present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
+plus patch queue, ADR-0003) and D5 (paraLLEl-GS first, ADR-0004); with M3 (2026-10-21) ADR-0005 (SDL3), 0007 (machine
+thread and fibers), 0011 (native IOP servers first) and 0012 (overlay residency through the loader hook). D6 to D9 and
+ADR-0001, 0002, 0006 and 0010 are **proposals**; do not present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
 its row in architecture.md §18 and brief §14, and use absolute dates.
 
 ## Commands
@@ -144,7 +150,9 @@ All M0 spikes (S0–S7) are done; their findings live in `Docs/spikes/` and are 
 - day 0 (the shared contracts, submodules, ADR-0005/0007/0011/0012) and sessions A–E are merged on `main`: the
   execution core and kernel, the devices and GS pipeline, the SIF/IOP services, the paraLLEl-GS backend and SDL3
   platform, and the host and game layer;
-- next is the serial bring-up on the real disc (M3a headless boot to the title, then M3b pixels and window).
+- the M3a bring-up on the real disc is done: the headless boot reaches the title menu, deterministically, with no
+  unimplemented kernel call and no unhandled MMIO (acceptance results and the bring-up log in the milestone file);
+- next is M3b: `--gs parallel` frames against the PCSX2 references (SSIM) and the `--window` mode with live input.
 
 Everything is in `Docs/milestones/M3-boots.md`. M2's record is `Docs/milestones/M2-first-recompile.md`.
 Do not start implementation work the user has not asked for.

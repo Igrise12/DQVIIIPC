@@ -272,6 +272,11 @@ TEST_CASE("the shipped region profiles are valid", "[core][profile]") {
                 }
             }
             CHECK(p.boot.sha1 == "f24bfd21c21f6454c05934224ab52cde837bc90b");
+            CHECK(p.title_screen.overlay == "TITLE");
+            CHECK(p.title_screen.variable == 0x003D4008);
+            CHECK(p.title_screen.width == 1);
+            CHECK(p.title_screen.value == 1);
+            CHECK(p.movie.finished_query == 0x001A1380);
             CHECK(p.boot.ctor_table_start == 0x003CF910);
             CHECK(p.boot.ctor_table_end == 0x003CFB80);
             CHECK(p.iop.reset_image == "MODULES/IOPRP300.IMG");
@@ -334,4 +339,17 @@ TEST_CASE("the optional [iop] and [movie] tables are validated", "[core][profile
     fails(replace_line(minimal_profile, "main_memsz = 0x1000",
                        "main_memsz = 0x1000\nctor_table = [0x00100F00]"),
           "[start, end]");
+
+    const std::string title = "[title]\noverlay = \"A\"\nvariable = 0x00100F00\nwidth = 2\nvalue = 1000\n";
+    const auto titled =
+        dq8::core::load_region_profile(write(tmp.path(), "title.toml", std::string(minimal_profile) + title));
+    CHECK(titled.title_screen.overlay == "A");
+    CHECK(titled.title_screen.value == 1000);
+    CHECK(plain.title_screen.variable == 0);
+    fails(std::string(minimal_profile) + replace_line(title, "overlay = \"A\"", "overlay = \"B\""),
+          "not an overlay name");
+    fails(std::string(minimal_profile) + replace_line(title, "width = 2", "width = 3"), "1, 2 or 4");
+    fails(std::string(minimal_profile) + replace_line(title, "0x00100F00", "0x00100F01"),
+          "aligned to its width");
+    fails(base + iop + movie + "finished_query = 0x00300000\n", "finished_query");
 }

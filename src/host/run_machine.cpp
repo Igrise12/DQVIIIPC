@@ -10,6 +10,7 @@
 #include "game/mode_watcher.h"
 #include "game/movies.h"
 #include "game/overlay_residency.h"
+#include "game/title_watcher.h"
 #include "game/unit_specs.h"
 #include "game/until.h"
 #include "host/event_log.h"
@@ -314,11 +315,15 @@ int run_game(const Options& o, const char* argv0) {
     rt::Iop iop(std::move(iop_config));
     std::unique_ptr<game::OverlayResidency> residency;
     std::unique_ptr<game::ModeWatcher> mode_watcher;
+    std::unique_ptr<game::TitleWatcher> title_watcher;
     if (profile != nullptr) {
         residency = std::make_unique<game::OverlayResidency>(
             game::OverlayResidencyConfig{profile, &s.overlays, o.verify_overlays});
         if (profile->overlay_window.mode_variable != 0) {
             mode_watcher = std::make_unique<game::ModeWatcher>(profile->overlay_window.mode_variable);
+            if (profile->title_screen.variable != 0) {
+                title_watcher = std::make_unique<game::TitleWatcher>(*profile);
+            }
         }
     }
 
@@ -351,6 +356,9 @@ int run_game(const Options& o, const char* argv0) {
     if (residency) {
         machine.attach(*residency);
         s.dispatcher->install_override(residency->hook_override(), &s.memory);
+    }
+    if (title_watcher) {
+        machine.attach(*title_watcher);
     }
     if (mode_watcher) {
         machine.attach(*mode_watcher);

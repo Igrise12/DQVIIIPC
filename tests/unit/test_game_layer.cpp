@@ -8,6 +8,7 @@
 #include "game/mode_watcher.h"
 #include "game/movies.h"
 #include "game/overlay_residency.h"
+#include "game/title_watcher.h"
 #include "game/until.h"
 #include "runtime/ee/context.h"
 #include "runtime/ee/dispatcher.h"
@@ -228,7 +229,7 @@ TEST_CASE("residency hook: an overlay with no registered unit stops", "[game]") 
     }
 }
 
-TEST_CASE("movies: stop names the entry, skip returns with the placeholder", "[game]") {
+TEST_CASE("movies: stop names the entry, skip returns at once and reports the movie done", "[game]") {
     CHECK(game::parse_movie_policy("skip") == game::MoviePolicy::skip);
     CHECK(game::parse_movie_policy("stop") == game::MoviePolicy::stop);
     CHECK_FALSE(game::parse_movie_policy("play"));
@@ -253,13 +254,52 @@ TEST_CASE("movies: stop names the entry, skip returns with the placeholder", "[g
         f.call(movie_entry, 0);
         CHECK(f.ctx.pc == caller_ra);
         CHECK(movie_calls == 0); // replaced: the guest player never ran
-        CHECK(rt::gpr_lo(f.ctx, 2) == static_cast<std::uint64_t>(game::movie_skip_placeholder_result));
+        CHECK(rt::gpr_lo(f.ctx, 2) == static_cast<std::uint64_t>(game::movie_skip_entry_result));
         REQUIRE(f.machine.emitted.size() == 1);
         CHECK(f.machine.emitted[0].type == "movie_skip");
-        CHECK(std::get<bool>(*field(f.machine.emitted[0], "placeholder")));
+    }
+    {
+        // With finished_query recorded, skip also overrides it to report the movie done.
+        Fixture f;
+        f.profile.movie.finished_query = 0x00100F00;
+        const auto specs = game::movie_overrides(f.profile, game::MoviePolicy::skip);
+        REQUIRE(specs.size() == 2);
+        CHECK(specs[1].name == "movie-skip-finished");
+        CHECK(specs[1].address == 0x00100F00);
+        CHECK(game::movie_overrides(f.profile, game::MoviePolicy::stop).size() == 1);
     }
     core::RegionProfile none;
     CHECK(game::movie_overrides(none, game::MoviePolicy::skip).empty());
+}
+
+TEST_CASE("title watcher: one event when the [title] overlay is resident and the marker holds", "[game]") {
+    Fixture f;
+    CHECK_THROWS_AS(game::TitleWatcher(f.profile), std::invalid_argument); // no marker
+    f.profile.title_screen = {"BETA", 0x00100F00, 2, 1000};
+    test::FakeMachine machine;
+    game::TitleWatcher watcher(f.profile);
+    machine.attach(watcher);
+    const auto put = [&](std::uint32_t address, std::uint32_t value) {
+        const std::uint8_t b[4] = {static_cast<std::uint8_t>(value), static_cast<std::uint8_t>(value >> 8),
+                                   static_cast<std::uint8_t>(value >> 16),
+                                   static_cast<std::uint8_t>(value >> 24)};
+        machine.memory().write_bytes(address, b);
+    };
+    put(0x00100F00, 1000); // the marker holds, but BETA is not resident yet
+    put(window_base + 4, f.profile.overlays[0].id);
+    machine.fire_vblank_start();
+    CHECK(machine.emitted.empty());
+    put(window_base + 4, f.profile.overlays[1].id); // BETA resident
+    put(0x00100F00, 999);
+    machine.fire_vblank_start();
+    CHECK(machine.emitted.empty());
+    put(0x00100F00, 1000 | 0x10000); // only the low 2 bytes count
+    machine.fire_vblank_start();
+    REQUIRE(machine.emitted.size() == 1);
+    CHECK(machine.emitted[0].type == "title");
+    CHECK(watcher.seen());
+    machine.fire_vblank_start();
+    CHECK(machine.emitted.size() == 1); // once
 }
 
 TEST_CASE("mode watcher: one event per change of the mode word, read at vblank start", "[game]") {
@@ -315,6 +355,14 @@ TEST_CASE("until: conditions parse against the profile and track events", "[game
     } catch (const std::invalid_argument& e) {
         CHECK(std::string(e.what()).find("[title] marker") != std::string::npos);
     }
+    CHECK_THROWS_AS(game::parse_until("title", nullptr), std::invalid_argument);
+    f.profile.title_screen = {"BETA", 0x00100F00, 2, 1000};
+    game::UntilTracker title(game::parse_until("title", &f.profile));
+    CHECK(title.condition().kind == game::UntilCondition::Kind::title);
+    title.observe(rt::MachineEvent{"mode", {}}.add("mode", std::int64_t{4}), 7);
+    CHECK_FALSE(title.met());
+    title.observe(rt::MachineEvent{"title", {}}.add("field", std::uint64_t{30}), 30);
+    CHECK(title.met_at() == 30u);
 
     game::UntilTracker mode(game::parse_until("mode:4", nullptr));
     mode.observe(rt::MachineEvent{"mode", {}}.add("mode", std::int64_t{1}), 10);

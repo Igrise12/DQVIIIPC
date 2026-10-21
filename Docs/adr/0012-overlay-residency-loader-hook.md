@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Accepted** 2026-10-21 with the M3 plan; to be confirmed by M3 bring-up |
+| **Status** | **Accepted** 2026-10-21 with the M3 plan; confirmed by the M3a bring-up on 2026-10-21 (TITLE made resident through the hook at vblank 93 of the boot to the title) |
 | **Related** | architecture.md §4.3, §4.5, spike S3, Docs/milestones/M3-boots.md |
 
 ## Context

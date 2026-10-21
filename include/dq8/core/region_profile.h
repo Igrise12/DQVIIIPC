@@ -104,10 +104,21 @@ struct RegionProfile {
     // The movie player entry points the runtime overrides to skip movies (M3: playback is M4). Optional and
     // marked "to be confirmed" in the profile until bring-up proves them.
     struct Movie {
-        std::vector<std::uint32_t> player_entries;  // main-program functions the scenes call to play a movie
-        std::string scene_unit;                     // the overlay holding the scene functions, e.g. "TITLE"
+        std::vector<std::uint32_t> player_entries; // main-program functions the scenes call to play a movie
+        std::uint32_t finished_query = 0; // the player's "movie finished?" function (0: not recorded)
+        std::string scene_unit;           // the overlay holding the scene functions, e.g. "TITLE"
         std::vector<std::uint32_t> scene_functions; // fallback override targets inside the overlay window
     } movie;
+
+    // What "the title screen" is (dq8-game --until title; M3 bring-up): the overlay that must be resident and
+    // a guest variable that holds `value` on that screen. Optional: variable 0 when the profile has no
+    // [title].
+    struct Title {
+        std::string overlay; // an overlay name
+        std::uint32_t variable = 0;
+        std::uint32_t width = 0; // bytes: 1, 2 or 4 (little-endian, unsigned)
+        std::uint32_t value = 0;
+    } title_screen;
 
     std::vector<ProfileOverlay> overlays; // in the file's order; every overlay has a unique id and index
     std::vector<ProfileFile> files;

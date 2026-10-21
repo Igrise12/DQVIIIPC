@@ -115,13 +115,24 @@ services = []
 name = "PCMPLAY"
 services = ["null:0x123456"]
 
-# The movie player (spike S6, M3 boot-path evidence; to be confirmed in M3 bring-up): the main-program entry
-# points the TITLE scenes call to play a movie, which --movies skip overrides, and the scene functions in the
-# TITLE overlay as the fallback override targets. Movie playback itself is M4.
+# The movie player (spike S6; confirmed in M3 bring-up): a scene opens the player (0x001A2450), starts it
+# (0x001A1A00), then loops on the per-frame call until finished_query (0x001A1380) reports the movie done.
+# --movies skip makes open and start return at once and finished_query report "done", so the scene goes on.
+# The scene functions in the TITLE overlay are the fallback override targets. Movie playback itself is M4.
 [movie]
 player_entries = [0x001A2450, 0x001A1A00]
+finished_query = 0x001A1380
 scene_unit = "TITLE"
 scene_functions = [0x00461E40, 0x00462110, 0x00463C50]
+
+# The title screen (dq8-game --until title; M3 bring-up): TITLE resident and the byte at 0x003D4008 equal to 1,
+# which TITLE's sequence sets once the title has faded in fully. In PCSX2 save states it is 1 on the title screen
+# and its menu and 0 on the settings screen and during the logos (the stage word at 0x003D4018 is 1000 for both).
+[title]
+overlay = "TITLE"
+variable = 0x003D4008
+width = 1
+value = 1
 
 # One row per overlay. `id` is the header's overlay_id, `index` its position in name_table_order (the loader's
 # argument), `segment_index` the matching zero-filesize PT_LOAD of the boot ELF counting load segments from 0

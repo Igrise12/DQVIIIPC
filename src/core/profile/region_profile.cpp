@@ -531,6 +531,32 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
         }
     }
 
+    if (const toml::value* title = r.optional(root, "title")) {
+        if (!title->is_table()) {
+            r.fail(*title, "[title] must be a table");
+        }
+        p.title_screen.overlay = r.string(*title, "overlay", "title");
+        bool known = false;
+        for (const ProfileOverlay& o : p.overlays) {
+            known = known || o.name == p.title_screen.overlay;
+        }
+        if (!known) {
+            r.fail(title->at("overlay"),
+                   "[title].overlay '" + p.title_screen.overlay + "' is not an overlay name");
+        }
+        p.title_screen.width = r.u32(*title, "width", "title");
+        if (p.title_screen.width != 1 && p.title_screen.width != 2 && p.title_screen.width != 4) {
+            r.fail(title->at("width"), "[title].width must be 1, 2 or 4");
+        }
+        p.title_screen.variable = r.u32(*title, "variable", "title");
+        if (p.title_screen.variable % p.title_screen.width != 0 || p.title_screen.variable < main_begin ||
+            p.title_screen.variable + p.title_screen.width > main_end) {
+            r.fail(title->at("variable"),
+                   "[title].variable must be aligned to its width and inside the main program");
+        }
+        p.title_screen.value = r.u32(*title, "value", "title");
+    }
+
     if (const toml::value* movie = r.optional(root, "movie")) {
         if (!movie->is_table()) {
             r.fail(*movie, "[movie] must be a table");
@@ -557,6 +583,15 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
             }
         }
         p.movie.player_entries = players;
+        if (const toml::value* fq = r.optional(*movie, "finished_query")) {
+            if (!fq->is_integer() || fq->as_integer() % 4 != 0 ||
+                fq->as_integer() < static_cast<std::int64_t>(main_begin) ||
+                fq->as_integer() >= static_cast<std::int64_t>(main_end)) {
+                r.fail(*fq,
+                       "[movie].finished_query must be a 4-byte aligned address inside the main program");
+            }
+            p.movie.finished_query = static_cast<std::uint32_t>(fq->as_integer());
+        }
         p.movie.scene_unit = r.string(*movie, "scene_unit", "movie");
         bool known = false;
         for (const ProfileOverlay& o : p.overlays) {

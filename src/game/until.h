@@ -17,7 +17,7 @@
 //   vblank:N      N vblanks have started
 //   overlay:NAME  the residency hook made overlay NAME resident (a profile overlay name, any case)
 //   mode:N        the mode watcher saw the game mode become N
-//   title         the title screen; needs the profile's [title] marker, which M3 bring-up adds
+//   title         the title screen: the profile's [title] marker held (TitleWatcher's `title` event)
 // Machine events become the same triggers the input scripts wait for (trigger_from_event).
 namespace dq8::game {
 

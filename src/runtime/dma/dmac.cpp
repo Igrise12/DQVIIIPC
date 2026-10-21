@@ -124,10 +124,8 @@ bool Dmac::read32(std::uint32_t offset, std::uint32_t& value, const MmioContext&
             value = c.asr1;
             return true;
         case reg_sadr:
-            if (*ch != ch_spr_from && *ch != ch_spr_to) {
-                return false;
-            }
-            value = c.sadr;
+            // Only the scratchpad channels have a SADR; the others read 0 (see the write side).
+            value = (*ch == ch_spr_from || *ch == ch_spr_to) ? c.sadr : 0u;
             return true;
         default:
             return false;
@@ -201,10 +199,10 @@ bool Dmac::write32(std::uint32_t offset, std::uint32_t value, std::uint32_t mask
             c.asr1 = merge_masked(c.asr1, value, mask);
             break;
         case reg_sadr:
-            if (*ch != ch_spr_from && *ch != ch_spr_to) {
-                return false;
+            // The SDK's DMA reset clears SADR on channels 0-4 too; those writes are accepted and dropped.
+            if (*ch == ch_spr_from || *ch == ch_spr_to) {
+                c.sadr = merge_masked(c.sadr, value, mask) & 0x3FF0u;
             }
-            c.sadr = merge_masked(c.sadr, value, mask) & 0x3FF0u;
             break;
         default:
             return false;

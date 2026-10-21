@@ -109,7 +109,7 @@ class FileioServer final : public IopRpcServer {
         }
         case fn_read: {
             record.resize(rec_read_size, 0);
-            const std::int32_t n = read(args, data);
+            const std::int32_t n = read(call, args, data);
             put32(record, rec_result, static_cast<std::uint32_t>(n));
             put32(record, rec_head_count, 0);
             put32(record, rec_tail_count, 0);
@@ -166,7 +166,7 @@ class FileioServer final : public IopRpcServer {
     }
 
     // Reads into `data` (one write into the EE buffer); returns the byte count or a negative error.
-    std::int32_t read(std::span<const std::uint8_t> args, std::vector<EeWrite>& data) {
+    std::int32_t read(IopCallContext& call, std::span<const std::uint8_t> args, std::vector<EeWrite>& data) {
         const auto it = files_.find(static_cast<std::int32_t>(arg32(args, req_fd)));
         if (it == files_.end()) {
             return -err_badf;
@@ -185,7 +185,12 @@ class FileioServer final : public IopRpcServer {
             const std::uint64_t last = (f.position + n - 1) / IDiscSource::sector_size;
             const auto count = static_cast<std::uint32_t>(last - first + 1);
             std::vector<std::uint8_t> sectors(static_cast<std::size_t>(count) * IDiscSource::sector_size);
-            disc_->read_sectors(f.file.lsn + static_cast<std::uint32_t>(first), count, sectors);
+            const std::uint32_t lsn = f.file.lsn + static_cast<std::uint32_t>(first);
+            if (call.machine.tracing(TraceCategory::rpc)) {
+                call.machine.trace(TraceCategory::rpc, "disc read lsn " + std::to_string(lsn) + " sectors " +
+                                                           std::to_string(count) + " (fileio)");
+            }
+            disc_->read_sectors(lsn, count, sectors);
             const std::size_t skip = f.position % IDiscSource::sector_size;
             std::copy_n(sectors.begin() + static_cast<std::ptrdiff_t>(skip), n, bytes.begin());
             data.push_back(EeWrite{arg32(args, read_buffer), std::move(bytes)});
