@@ -14,15 +14,13 @@ dq8_enable_sanitizers(dq8_local_tests)
 include(Catch)
 catch_discover_tests(dq8_local_tests PROPERTIES LABELS local)
 
-# M3a acceptance 1: the boot to the title screen on the user's disc (needs the M3 machine in dq8-game and the
-# game modules: DQ8_TEST_MODULE_DIR, default work/recomp/modules/SLUS_21207).
-if(DQ8_HOST_MACHINE)
-    add_test(NAME local.boot_to_title
-        COMMAND "${CMAKE_COMMAND}"
-            "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
-            "-DSCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/input/boot-to-title.dq8in"
-            "-DMODULE_DIR=${PROJECT_SOURCE_DIR}/work/recomp/modules/SLUS_21207"
-            "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/work"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/run_boot_to_title.cmake")
-    set_tests_properties(local.boot_to_title PROPERTIES LABELS local TIMEOUT 3600 SKIP_REGULAR_EXPRESSION "SKIPPED:")
-endif()
+# M3a acceptance 1: the boot to the title screen on the user's disc. Needs the game modules:
+# DQ8_TEST_MODULE_DIR, by default work/recomp/modules/SLUS_21207.
+add_test(NAME local.boot_to_title
+    COMMAND "${CMAKE_COMMAND}"
+        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DSCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/input/boot-to-title.dq8in"
+        "-DMODULE_DIR=${PROJECT_SOURCE_DIR}/work/recomp/modules/SLUS_21207"
+        "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/work"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_boot_to_title.cmake")
+set_tests_properties(local.boot_to_title PROPERTIES LABELS local TIMEOUT 3600 SKIP_REGULAR_EXPRESSION "SKIPPED:")

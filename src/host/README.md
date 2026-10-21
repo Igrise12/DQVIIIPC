@@ -8,7 +8,6 @@ The game executable (dq8-game). It wires the platform, the runtime, the locally 
 | `options.*` | The command line: `Options`, `parse_options`, the usage text, the exit codes. |
 | `session.*` | Start-up shared by every run: disc verification or a developer ELF, module loading and validation, the dispatcher and overlay manager, the set-up and stop parts of the report. |
 | `run_machine.cpp` | The M3 run: machine, devices, IOP, game layer, threads, limiter, events, report. The window and the paraLLEl-GS backend are used when the build has them (`DQ8_HAVE_WINDOW` when `dq8_platform_sdl` is linked; `runtime/gs/gs_parallel_backend.h`, which loads `dq8-gs-parallel` from beside the executable). |
-| `run_m2.cpp` | **Temporary.** M2's single-thread run, linked only while the M3 implementations of sessions A, B and C are missing from `dq8_runtime`. While they are missing, `run_machine.cpp` is compiled (object library `dq8_host_machine_check`) against the day-0 contracts but not linked. |
 | `event_log.*` | The JSON-lines event stream, and the `--trace` echo. |
 | `limiter.*` | Wall-clock pacing between slices. |
 | `json_writer.h` | The JSON writer. |
@@ -61,7 +60,7 @@ dq8-game --elf <file> --module-dir <dir> [--overlay-window BASE:END [--resident 
 - `machine`: `gs`, `cost_model`, `vblanks`, `cycles`, `gs_hash`, `gs_vsyncs` and `ram_sha1`;
 - `ended`: `stop`, `requested`, `until`, `vblanks` or `window-closed`;
 - `until`, `overrides` (name, unit, address, kind, calls) and `input_script`;
-- `stop`, which keeps M2's members; `reason` is `requested` for a `--stop-at-*` stop;
+- `stop`, which keeps M2's members and adds `thread_id` (0 = the scheduler, negative = the interrupt handler fiber); `reason` is `requested` for a `--stop-at-*` stop;
 - `dispatches`, `context`, `mmio` and `exit_code`.
 
 A failure prints `{"ok": false, "error": {"code", "message"}, "problems": [...], "exit_code"}`. Its codes are `usage`, `module-validation`, `backend` (exit 3), or a `core::Error` code.

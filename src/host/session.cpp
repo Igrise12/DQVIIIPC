@@ -283,13 +283,15 @@ void json_setup(JsonWriter& j, const Session& s) {
     json_modules(j, s);
 }
 
-void json_stop(JsonWriter& j, const rt::StopInfo& stop, std::string_view reason_override) {
+void json_stop(JsonWriter& j, const rt::StopInfo& stop) {
     j.key("stop");
     j.begin_object();
-    j.member("reason", reason_override.empty() ? rt::to_string(stop.reason) : reason_override);
+    j.member("reason", rt::to_string(stop.reason));
     j.member("message", stop.message);
     j.member("pc", hex32(stop.pc));
     j.member("address", hex32(stop.address));
+    // The thread that was running: its id, 0 for the scheduler, negative for the interrupt handler fiber.
+    j.member("thread_id", stop.thread_id);
     if (stop.source != 0) {
         j.member("source", hex32(stop.source));
     }

@@ -40,12 +40,7 @@ foreach(_row IN LISTS _e2e_fixtures)
     list(GET _row 3 _resident)
     list(GET _row 4 _run_mode)
     set(_previous e2e_fixtures)
-    set(_steps generate build exports run)
-    # The machine fixtures run only once dq8-game has the M3 machine (src/host/CMakeLists.txt).
-    if(_run_mode STREQUAL "machine" AND NOT DQ8_HOST_MACHINE)
-        list(REMOVE_ITEM _steps run)
-    endif()
-    foreach(_step IN LISTS _steps)
+    foreach(_step generate build exports run)
         set(_name e2e.${_fixture}.${_step})
         add_test(NAME ${_name}
                  COMMAND "${CMAKE_COMMAND}"

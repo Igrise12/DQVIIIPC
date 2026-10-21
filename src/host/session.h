@@ -63,7 +63,7 @@ std::string hex64(std::uint64_t v);
 
 // --json members.
 void json_setup(JsonWriter& j, const Session& s);
-void json_stop(JsonWriter& j, const rt::StopInfo& stop, std::string_view reason_override = {});
+void json_stop(JsonWriter& j, const rt::StopInfo& stop);
 void json_context(JsonWriter& j, const R5900Context& ctx);
 void json_mmio(JsonWriter& j, const rt::GuestMemory& memory);
 
