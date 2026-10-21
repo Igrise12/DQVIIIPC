@@ -16,6 +16,11 @@
 //   bgezal   main unit only; the helper is reached by bgezal a0 (taken), whose return address is listed in
 //            link_return_entries because the recompiler makes no resume entry for it
 //   overlay  the helper lives in a second unit, an overlay at a synthetic window; main reaches it by jal
+//
+// One fixture runs on the M3 machine instead (no helper, no syscall at the end):
+//   irq      main installs a vblank-start INTC handler (AddIntcHandler 2, EnableIntc 2, ei) and spins on a
+//            word the handler sets, a back-edge loop the recompiler gives an eeCheckpointDue; when the word
+//            is set it puts it in v0, sets a0 = 0x12345678 and calls e2e_finish, where --stop-at-pc stops it
 
 #include "dq8/core/elf_writer.h"
 #include "dq8/core/error.h"
@@ -149,6 +154,61 @@ void write_call_fixture(const fs::path& dir) {
                Unit{"main", {{"e2e_start", main_base, helper}, {"e2e_helper", helper, p.here()}}, {}});
 }
 
+// The irq fixture's flag: a RAM word outside every section, zero at boot. The handler stores flag_value.
+constexpr std::uint32_t irq_flag = 0x00180000;
+constexpr std::uint32_t irq_flag_hi = 0x0018;
+static_assert(irq_flag == irq_flag_hi << 16, "the flag is addressed with lui alone");
+constexpr std::uint32_t flag_value_hi = 0x1234;
+constexpr std::uint32_t flag_value_lo = 0x5679;
+constexpr std::uint32_t ei_word = 0x42000038; // ei (COP0, function 0x38)
+
+void write_irq_fixture(const fs::path& dir) {
+    mips::Program p(main_base);
+    p.emit(mips::addiu(Reg::a0, Reg::zero, 2));           // INTC line 2: vblank start
+    const std::uint32_t handler_hi = p.emit(mips::nop()); // lui a1, %hi(handler), patched below
+    const std::uint32_t handler_lo = p.emit(mips::nop()); // ori a1, a1, %lo(handler)
+    p.emit(mips::addiu(Reg::a2, Reg::zero, 0));
+    p.emit(mips::addiu(Reg::v1, Reg::zero, 0x10)); // AddIntcHandler
+    p.emit(mips::syscall());
+    p.emit(mips::addiu(Reg::a0, Reg::zero, 2));
+    p.emit(mips::addiu(Reg::v1, Reg::zero, 0x14)); // EnableIntc
+    p.emit(mips::syscall());
+    p.emit(ei_word);
+    p.emit(mips::lui(Reg::t0, irq_flag_hi));
+    const std::uint32_t loop = p.emit(mips::lw(Reg::t1, 0, Reg::t0));
+    const std::uint32_t branch = p.emit(mips::nop()); // beq t1, zero, loop
+    p.emit(mips::nop());
+    p.patch(branch, mips::beq(Reg::t1, Reg::zero, mips::branch_offset(branch, loop)));
+    p.emit(mips::move(Reg::v0, Reg::t1));
+    emit_prologue(p);                               // a0 = 0x12345678
+    const std::uint32_t call = p.emit(mips::nop()); // jal e2e_finish
+    p.emit(mips::nop());
+    p.emit(mips::jr(Reg::ra));
+    p.emit(mips::nop());
+    const std::uint32_t finish = p.here();
+    p.emit(mips::jr(Reg::ra));
+    p.emit(mips::nop());
+    const std::uint32_t handler = p.here();
+    p.emit(mips::lui(Reg::t0, irq_flag_hi));
+    p.emit(mips::lui(Reg::t1, flag_value_hi));
+    p.emit(mips::ori(Reg::t1, Reg::t1, flag_value_lo));
+    p.emit(mips::sw(Reg::t1, 0, Reg::t0));
+    p.emit(mips::jr(Reg::ra));
+    p.emit(mips::nop());
+    const std::uint32_t end = p.here();
+    p.patch(handler_hi, mips::lui(Reg::a1, handler >> 16));
+    p.patch(handler_lo, mips::ori(Reg::a1, Reg::a1, handler & 0xFFFFu));
+    p.patch(call, mips::jal(finish));
+
+    write_bytes(dir / "units/main.elf", main_elf(p));
+    write_maps(dir / "maps", Unit{"main",
+                                  {{"e2e_start", main_base, finish},
+                                   {"e2e_finish", finish, handler},
+                                   {"e2e_vblank_handler", handler, end}},
+                                  {}});
+    write_text(dir / "stop_pc.txt", hex32(finish) + "\n");
+}
+
 void write_bgezal_fixture(const fs::path& dir) {
     mips::Program p(main_base);
     emit_prologue(p);
@@ -228,6 +288,7 @@ int main(int argc, char** argv) {
         write_call_fixture(out / "call");
         write_bgezal_fixture(out / "bgezal");
         write_overlay_fixture(out / "overlay");
+        write_irq_fixture(out / "irq");
         std::printf("fixtures written to %s (window %s..%s, overlay id %u)\n", out.string().c_str(),
                     hex32(window_base).c_str(), hex32(window_end).c_str(), overlay_id);
         return 0;
