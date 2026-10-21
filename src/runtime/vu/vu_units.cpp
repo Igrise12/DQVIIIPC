@@ -93,14 +93,14 @@ void VuUnits::run(unsigned unit, bool fresh, std::uint32_t start_pc, std::uint32
     const std::uint64_t before = u.interp.state().cycles;
     const auto code_size = static_cast<std::uint32_t>(u.micro.size());
     const auto data_size = static_cast<std::uint32_t>(u.data.size());
-    constexpr std::uint32_t slice = 1u << 20;
+    const auto slice = static_cast<std::uint32_t>(std::min<std::uint64_t>(1u << 20, max_program_cycles_));
     if (fresh) {
         u.interp.execute(u.micro.data(), code_size, u.data.data(), data_size, u.host, start_pc, top, itop,
                          slice);
     } else {
         u.interp.resume(u.micro.data(), code_size, u.data.data(), data_size, u.host, top, itop, slice);
     }
-    while (u.interp.running() && u.interp.state().cycles - before < max_program_cycles) {
+    while (u.interp.running() && u.interp.state().cycles - before < max_program_cycles_) {
         u.interp.resume(u.micro.data(), code_size, u.data.data(), data_size, u.host, top, itop, slice);
     }
     ++u.stats.programs;
@@ -122,7 +122,7 @@ void VuUnits::run(unsigned unit, bool fresh, std::uint32_t start_pc, std::uint32
         info.reason = StopReason::unsupported;
         info.address = u.interp.state().pc;
         info.message = "VU" + std::to_string(unit) + " micro program started at " + hex32(start_pc) +
-                       " did not end within " + std::to_string(max_program_cycles) + " cycles (pc " +
+                       " did not end within " + std::to_string(max_program_cycles_) + " cycles (pc " +
                        hex32(u.interp.state().pc) + ")";
         machine_->stop(std::move(info));
     }

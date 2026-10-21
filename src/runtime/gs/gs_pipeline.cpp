@@ -188,6 +188,8 @@ struct GsPipeline::Impl {
         cv.wait(lock,
                 [&] { return queue.empty() || queued_bytes + batch_bytes <= limit || error != nullptr; });
         if (error != nullptr) {
+            batch.clear(); // nothing more reaches a failed backend, and no read request is left dangling
+            batch_bytes = 0;
             std::rethrow_exception(error);
         }
         queued_bytes += batch_bytes;

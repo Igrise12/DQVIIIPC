@@ -15,7 +15,7 @@
 // 0x11000000 (VU0 micro 4 KiB and data 4 KiB, each mirrored over 16 KiB; VU1 micro and data 16 KiB each),
 // and one interpreter per unit. A VIF starts a micro program (MSCAL, MSCNT) and it runs to its end before the
 // VIF goes on: there is no VU timing in the machine, only in the interpreter's own pipeline model. VU1's
-// XGKICK packets go to the GIF's PATH1. A program that does not end within `max_program_cycles`, or a
+// XGKICK packets go to the GIF's PATH1. A program that does not end within max_program_cycles(), or a
 // reserved instruction, stops the machine with a diagnostic.
 namespace dq8::rt {
 
@@ -25,7 +25,8 @@ class VuUnits final : public IDevice, public IMmioDevice {
   public:
     static constexpr std::uint32_t base = 0x11000000u;
     static constexpr std::uint32_t size = 0x10000u;
-    static constexpr std::uint64_t max_program_cycles = 64ull << 20;
+    // A micro program that runs longer than this is taken as a hang (about three NTSC fields of VU time).
+    static constexpr std::uint64_t default_max_program_cycles = 16ull << 20;
 
     struct UnitStats {
         std::uint64_t programs = 0; // MSCAL/MSCNT runs
@@ -55,6 +56,9 @@ class VuUnits final : public IDevice, public IMmioDevice {
     // program ended.
     void start(unsigned unit, std::uint32_t start_pc, std::uint32_t top, std::uint32_t itop);
     void resume(unsigned unit, std::uint32_t top, std::uint32_t itop);
+
+    void set_max_program_cycles(std::uint64_t cycles) noexcept { max_program_cycles_ = cycles; }
+    std::uint64_t max_program_cycles() const noexcept { return max_program_cycles_; }
 
     VuInterpreter& interpreter(unsigned unit) noexcept { return units_[unit].interp; }
     // The unit's host (XGKICK to PATH1, the micro-memory generation), for driving the interpreter directly.
@@ -103,6 +107,7 @@ class VuUnits final : public IDevice, public IMmioDevice {
 
     Gif& gif_;
     MachineServices* machine_ = nullptr;
+    std::uint64_t max_program_cycles_ = default_max_program_cycles;
     std::array<Unit, 2> units_;
 };
 
