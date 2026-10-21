@@ -31,6 +31,18 @@ rest of the contracts listed there:
 | machine | `machine/machine.cpp` | `Machine`: the clock, events, interrupts, MMIO bus and kernel registry, the vblank events in `VblankPhase` order, spin skipping, and resumable `run()` slices. |
 | declared | `machine/ee_devices.h`, `iop/*.h`, `io/*.h`, `gs/*.h`, `ee/overrides.h`, `platform/platform.h` | Interfaces the other M3 sessions implement: the EE devices, the IOP services, disc and pad input, the GS pipeline and backends, overrides, the SDL3 platform. |
 
+M3 session B, the EE devices and the GS front end (`make_ee_devices`, in attach order):
+
+| Area | Files | Purpose |
+|---|---|---|
+| bus | `ee/guest_memory.*`, `dma/register_block.h` | `GuestMemory::set_mmio_bus`: device addresses below kseg2 go to the `MmioBus` by physical address and cost `mmio_access`; unhandled ones keep M2's log and trap. `RegisterWindow` turns 8- to 128-bit guest accesses into a block's 32-bit register accesses. |
+| timers, INTC | `machine/ee_timers.*`, `machine/intc_regs.*` | The four EE timers counted lazily from the virtual clock (bus, /16, /256, hblank), compare and overflow as events, INTC 9-12; I_STAT/I_MASK forwarded to `InterruptController`, INTC 2/3 in the intc vblank phase. |
+| DMA | `dma/dmac.*`, `dma/vif.*`, `dma/gif.*` | DMAC channels 0-2 and 8-9 (normal, chains with every tag, SPR destination chains, interleave) with synchronous delivery and completion events; SIF0/SIF1 registers stored for the IOP link. VIF0/VIF1 as a streaming VIFcode interpreter. The GIF cuts packets at EOP per path, masks PATH3, and acts on SIGNAL/FINISH/LABEL/TRXDIR. |
+| VU | `vu/vu_interpreter.h`, `vu/vu_{core,lower,upper}.cpp`, `vu/vu_host.h`, `vu/vu_units.*` | PS2Recomp's VU interpreter behind `IVuHost` (XGKICK, decode-cache generation, reserved instructions); VU0/VU1 memory at 0x11000000; MSCAL runs a program to its end. |
+| GS | `gs/gs_priv_device.*`, `gs/gs_pipeline.cpp`, `gs/gs_backends.*`, `gs/gs_trace_format.h`, `gs/png_writer.cpp` | The privileged page with the gs and kernel vblank phases and the GS kernel calls; `GsPipeline` (hash chain, render thread, mailbox, PNG dumps, inline mode); the `null` and `trace` backends. |
+
+Adapted upstream code (PS2Recomp eb8688b) is tagged `GPL-3.0-only`; register behaviour taken from PCSX2 says so where it is used. The device tests run on `tests/unit/support/ee_rig.h`.
+
 The dispatch contract (PS2Recomp `PS2Runtime::dispatchGuestBranch` at eb8688b, and the milestone doc):
 
 - `dispatch_guest_branch` sets `ctx->pc = target`, counts a dispatch and charges its cost. A jump (`J`, `JR`) sets the fiber's `unwinding` flag and returns `false`: the generated callers return and the run loop continues at `ctx->pc`. A call (`JAL`, `JALR`) is a safe point, then runs the target on the fiber's stack. Afterwards it returns `false` while `unwinding` is set; it returns `true` when `ctx->pc == fallthrough` (a plain return); anything else (pc 0, a changed `$ra`, a `jr` to the callee's own entry) sets `unwinding` and returns `false`. When it is `false` the caller returns too, and the run loop re-enters through the resume entry at `jal+8` (a table slot pointing at the owning function, whose `switch (ctx->pc)` jumps to the label). The flag replaces M2's "pc unchanged means returned" rule, which mistook a `jr` to the callee's own entry for a return.

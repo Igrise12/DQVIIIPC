@@ -27,6 +27,20 @@ add_library(dq8_runtime STATIC
     machine/machine.cpp
     machine/machine_services.cpp
     machine/mmio.cpp
+    machine/intc_regs.cpp
+    machine/ee_timers.cpp
+    machine/ee_devices.cpp
+    dma/gif.cpp
+    dma/vif.cpp
+    dma/dmac.cpp
+    gs/gs_priv_device.cpp
+    gs/gs_pipeline.cpp
+    gs/gs_backends.cpp
+    gs/png_writer.cpp
+    vu/vu_core.cpp
+    vu/vu_lower.cpp
+    vu/vu_upper.cpp
+    vu/vu_units.cpp
     platform/dynlib.cpp
 )
 # Exactly one fiber backend (ADR-0007, DQ8_FIBER_BACKEND in cmake/Dq8Options.cmake).
@@ -60,6 +74,7 @@ add_library(dq8::runtime ALIAS dq8_runtime)
 # Headers are included as "runtime/<area>/<file>.h"; the module ABI comes from include/ through dq8::core.
 target_include_directories(dq8_runtime PUBLIC "${PROJECT_SOURCE_DIR}/src")
 target_compile_features(dq8_runtime PUBLIC cxx_std_20)
-target_link_libraries(dq8_runtime PUBLIC dq8::core PRIVATE ${CMAKE_DL_LIBS})
+find_package(Threads REQUIRED)
+target_link_libraries(dq8_runtime PUBLIC dq8::core PRIVATE dq8::stb Threads::Threads ${CMAKE_DL_LIBS})
 dq8_set_warnings(dq8_runtime)
 dq8_enable_sanitizers(dq8_runtime)

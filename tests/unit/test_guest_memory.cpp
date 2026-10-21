@@ -5,6 +5,8 @@
 #include "runtime/ee/elf_loader.h"
 #include "runtime/ee/guest_memory.h"
 #include "runtime/ee/guest_stop.h"
+#include "runtime/machine/clock.h"
+#include "runtime/machine/mmio.h"
 #include "support/elf_image.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -100,6 +102,76 @@ TEST_CASE("guest memory: trap-mmio stops at the first device access", "[memory]"
         CHECK(stop.info().message.find("store32 at 0x1000F000 (io)") != std::string::npos);
     }
     CHECK(m.mmio_log().size() == 1); // recorded before the stop
+}
+
+namespace {
+
+// A 16-byte register file that handles offsets 0-7 and declines 8-15.
+class HalfDevice final : public IMmioDevice {
+  public:
+    std::string_view name() const override { return "half"; }
+    bool read(std::uint32_t offset, std::uint32_t width, std::uint8_t* out, const MmioContext& at) override {
+        if (offset + width > 8) {
+            return false;
+        }
+        last_pc = at.pc;
+        std::memcpy(out, regs + offset, width);
+        return true;
+    }
+    bool write(std::uint32_t offset, std::uint32_t width, const std::uint8_t* in,
+               const MmioContext& at) override {
+        if (offset + width > 8) {
+            return false;
+        }
+        last_pc = at.pc;
+        std::memcpy(regs + offset, in, width);
+        return true;
+    }
+    std::uint8_t regs[8] = {};
+    std::uint32_t last_pc = 0;
+};
+
+} // namespace
+
+TEST_CASE("guest memory: device addresses go to the MMIO bus and cost virtual time", "[memory][mmio]") {
+    GuestMemory m;
+    MmioBus bus;
+    VirtualClock clock;
+    HalfDevice dev;
+    bus.map(0x1000F100u, 0x10u, dev);
+    m.set_mmio_bus(&bus, &clock, 8);
+    CHECK(m.mmio_bus() == &bus);
+
+    m.store32(0xB000F100u, 0xCAFEF00Du, 0x00100100u); // kseg1 view of the physical register
+    CHECK(dev.last_pc == 0x00100100u);
+    CHECK(m.load32(0x1000F100u) == 0xCAFEF00Du);
+    CHECK(m.load16(0x9000F102u) == 0xCAFEu); // kseg0
+    CHECK(clock.now() == 3 * 8);
+    CHECK(m.mmio_handled_count() == 3);
+    CHECK(m.mmio_log().empty()); // handled accesses are not logged
+
+    // Declined by the device, or with no device at all: M2's log, no cost.
+    CHECK(m.load32(0x1000F108u) == 0u);
+    m.store32(0x1000F110u, 1u);
+    CHECK(clock.now() == 3 * 8);
+    REQUIRE(m.mmio_log().size() == 2);
+    CHECK(m.mmio_log()[0].address == 0x1000F108u);
+    CHECK(m.mmio_log()[1].address == 0x1000F110u);
+
+    // RAM and the scratchpad never reach the bus.
+    m.store32(0x00100000u, 5u);
+    m.store32(0x70000000u, 6u);
+    CHECK(m.mmio_handled_count() == 3);
+
+    // trap-mmio applies to unhandled accesses only.
+    m.set_trap_mmio(true);
+    CHECK(m.load32(0x1000F100u) == 0xCAFEF00Du);
+    CHECK_THROWS_AS(m.load32(0x1000F10Cu), GuestStop);
+
+    // Detached: everything is a logged hole again.
+    m.set_trap_mmio(false);
+    m.set_mmio_bus(nullptr, nullptr, 0);
+    CHECK(m.load32(0x1000F100u) == 0u);
 }
 
 TEST_CASE("guest memory: host byte copies refuse device ranges", "[memory]") {

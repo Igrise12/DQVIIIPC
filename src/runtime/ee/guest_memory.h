@@ -2,6 +2,8 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #pragma once
 
+#include "runtime/machine/clock.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -14,10 +16,13 @@
 
 // Guest memory (architecture.md §4.1): 32 MiB of RDRAM and the 16 KiB scratchpad. Generated code reads and
 // writes RDRAM directly (rdram[addr & PS2_RAM_MASK]) and calls the host only for addresses
-// ps2_is_special_address() accepts; those land here. In M2 every device range is a logged hole: loads return
-// 0, stores are dropped, and the first access to each address is recorded (or stops the guest with
-// trap-mmio).
+// ps2_is_special_address() accepts; those land here. Device addresses go to the MMIO bus when one is set
+// (M3): an access a device handles costs `access_cost` cycles of virtual time. Everything else in a device
+// range is a logged hole as in M2: loads return 0, stores are dropped, and the first access to each address
+// is recorded (or stops the guest with trap-mmio).
 namespace dq8::rt {
+
+class MmioBus;
 
 // Where a special address points. Spellings from to_string() appear in dq8-game's output.
 enum class MmioRegion {
@@ -60,8 +65,9 @@ class GuestMemory {
     const std::uint8_t* scratchpad() const noexcept { return scratchpad_.get(); }
 
     // The host side of the generated code's slow path. Any address works: RAM and its mirrors go to RDRAM,
-    // the scratchpad to the scratchpad, everything else to the MMIO log. `pc` is recorded with MMIO accesses.
-    // With trap-mmio set, an MMIO access throws GuestStop(mmio_trap) after it is recorded.
+    // the scratchpad to the scratchpad, device addresses to the MMIO bus and, when no device handles them,
+    // to the MMIO log. `pc` is passed to the device and recorded with unhandled accesses. With trap-mmio set,
+    // an unhandled MMIO access throws GuestStop(mmio_trap) after it is recorded.
     std::uint8_t load8(std::uint32_t vaddr, std::uint32_t pc = 0);
     std::uint16_t load16(std::uint32_t vaddr, std::uint32_t pc = 0);
     std::uint32_t load32(std::uint32_t vaddr, std::uint32_t pc = 0);
@@ -79,11 +85,22 @@ class GuestMemory {
     void fill(std::uint32_t vaddr, std::uint32_t size, std::uint8_t value);
     void read_bytes(std::uint32_t vaddr, std::span<std::uint8_t> out) const;
 
+    // Routes device addresses below kseg2 to `bus` by physical address (the machine calls this once; null
+    // detaches). Each access a device handles charges `access_cost` to `clock` (when it is not null).
+    void set_mmio_bus(const MmioBus* bus, VirtualClock* clock, Cycles access_cost) noexcept {
+        bus_ = bus;
+        clock_ = clock;
+        access_cost_ = access_cost;
+    }
+    const MmioBus* mmio_bus() const noexcept { return bus_; }
+    // Accesses a device handled (they are not in mmio_log()).
+    std::uint64_t mmio_handled_count() const noexcept { return mmio_handled_; }
+
     void set_trap_mmio(bool trap) noexcept { trap_mmio_ = trap; }
     bool trap_mmio() const noexcept { return trap_mmio_; }
     // Called once per address, on its first access. Not called again for repeated accesses.
     void set_mmio_sink(MmioSink sink) { mmio_sink_ = std::move(sink); }
-    // Every device address touched so far, in first-touch order, with counts.
+    // Every unhandled device address touched so far, in first-touch order, with counts.
     const std::vector<MmioAccess>& mmio_log() const noexcept { return mmio_log_; }
     std::uint64_t mmio_access_count() const noexcept { return mmio_accesses_; }
 
@@ -97,6 +114,10 @@ class GuestMemory {
 
     std::unique_ptr<std::uint8_t[]> rdram_;
     std::unique_ptr<std::uint8_t[]> scratchpad_;
+    const MmioBus* bus_ = nullptr;
+    VirtualClock* clock_ = nullptr;
+    Cycles access_cost_ = 0;
+    std::uint64_t mmio_handled_ = 0;
     bool trap_mmio_ = false;
     MmioSink mmio_sink_;
     std::vector<MmioAccess> mmio_log_;

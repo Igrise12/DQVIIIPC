@@ -4,6 +4,7 @@
 
 #include "dq8/abi/ps2recomp/ps2_address.h"
 #include "runtime/ee/guest_stop.h"
+#include "runtime/machine/mmio.h"
 
 #include <cstring>
 #include <stdexcept>
@@ -70,6 +71,18 @@ void GuestMemory::access(std::uint32_t vaddr, std::uint32_t width, bool store, s
         mask = PS2_RAM_MASK;
         offset = vaddr & PS2_RAM_MASK;
     } else {
+        // kseg2/kseg3 are TLB-mapped and never device space here; everything else goes to the bus first.
+        if (bus_ != nullptr && vaddr < 0xC0000000u) {
+            const std::uint32_t phys = ps2_physical_address(vaddr);
+            const MmioContext at{pc, nullptr};
+            if (store ? bus_->write(phys, width, bytes, at) : bus_->read(phys, width, bytes, at)) {
+                ++mmio_handled_;
+                if (clock_ != nullptr) {
+                    clock_->charge(access_cost_);
+                }
+                return;
+            }
+        }
         if (!store) {
             std::memset(bytes, 0, width);
         }
