@@ -9,10 +9,14 @@ add_library(dq8_gs_parallel SHARED gs_parallel.cpp)
 target_include_directories(dq8_gs_parallel PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_compile_features(dq8_gs_parallel PRIVATE cxx_std_20)
 target_link_libraries(dq8_gs_parallel PRIVATE parallel-gs)
+# Built next to dq8-game, where the host looks by default (decision 1): LIBRARY for .so/.dylib, RUNTIME for the
+# .dll. The generator expression follows the executable wherever the host puts it, per configuration.
 set_target_properties(dq8_gs_parallel PROPERTIES
     OUTPUT_NAME dq8-gs-parallel
     CXX_VISIBILITY_PRESET hidden
-    VISIBILITY_INLINES_HIDDEN ON)
+    VISIBILITY_INLINES_HIDDEN ON
+    LIBRARY_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:dq8-game>"
+    RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:dq8-game>")
 dq8_set_warnings(dq8_gs_parallel)
 dq8_enable_sanitizers(dq8_gs_parallel)
 if(NOT MSVC)

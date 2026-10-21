@@ -24,7 +24,7 @@ own version of paraLLEl-GS:
 1. Get the DQ8-Native source of your release and run `scripts/init_submodules.sh`.
 2. Change `third_party/parallel-gs` as you like (or point the submodule at your fork).
 3. Build only this library: `cmake --preset release && cmake --build --preset release --target dq8_gs_parallel`.
-4. Replace the installed `dq8-gs-parallel` file with `build/release/src/runtime/gs/parallel/libdq8-gs-parallel.so`
+4. Replace the installed `dq8-gs-parallel` file with `build/release/src/host/libdq8-gs-parallel.so` (built next to `dq8-game`)
    (`.dll` on Windows), or set `DQ8_GS_PARALLEL` to its path.
 
 `dq8-game` checks the library's `dq8_gsp_abi_version()` and refuses a library of another ABI version.
