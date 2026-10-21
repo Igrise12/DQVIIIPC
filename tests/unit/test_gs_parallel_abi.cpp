@@ -208,15 +208,15 @@ TEST_CASE("dq8_gsp_create fails cleanly without a Vulkan device", "[gs_parallel]
     CHECK(message.find("Vulkan") != std::string::npos);
 }
 
-TEST_CASE("create_parallel_gs_backend reports a missing library and a missing device", "[gs_parallel]") {
-    dq8::gs::ParallelGsOptions options;
-    options.library = "/nonexistent/dq8-gs-parallel.so";
-    CHECK_THROWS_AS(dq8::gs::create_parallel_gs_backend(options), dq8::gs::ParallelGsError);
+TEST_CASE("make_parallel_gs_backend reports a missing library and a missing device", "[gs_parallel]") {
+    dq8::gs::ParallelGsConfig options;
+    options.library = "/nonexistent/libdq8-gs-parallel.so";
+    CHECK_THROWS_AS(dq8::gs::make_parallel_gs_backend(options), dq8::gs::ParallelGsError);
 
     const NoVulkanDriver no_driver;
     options.library = library_file;
     try {
-        (void)dq8::gs::create_parallel_gs_backend(options);
+        (void)dq8::gs::make_parallel_gs_backend(options);
         FAIL("a backend was created without a Vulkan driver");
     } catch (const dq8::gs::ParallelGsError& e) {
         INFO(e.what());
@@ -226,13 +226,14 @@ TEST_CASE("create_parallel_gs_backend reports a missing library and a missing de
 
 TEST_CASE("default_parallel_gs_library honours DQ8_GS_PARALLEL", "[gs_parallel]") {
     {
-        const ScopedEnv env("DQ8_GS_PARALLEL", "/opt/somewhere/dq8-gs-parallel.so");
-        CHECK(dq8::gs::default_parallel_gs_library() == fs::path("/opt/somewhere/dq8-gs-parallel.so"));
+        const ScopedEnv env("DQ8_GS_PARALLEL", "/opt/somewhere/libdq8-gs-parallel.so");
+        CHECK(dq8::gs::default_parallel_gs_library() == fs::path("/opt/somewhere/libdq8-gs-parallel.so"));
     }
     // Without it, a test executable (not next to the library) finds this build's copy.
     const ScopedEnv env("DQ8_GS_PARALLEL", nullptr);
     const fs::path found = dq8::gs::default_parallel_gs_library();
-    CHECK(found.filename() == fs::path(dq8::rt::shared_library_file_name("dq8-gs-parallel")));
+    CHECK(found.filename() == dq8::gs::parallel_gs_library_file_name());
+    CHECK(library_file.filename() == dq8::gs::parallel_gs_library_file_name()); // the name CMake gives it
     CHECK(fs::equivalent(found, library_file));
 }
 
@@ -273,11 +274,11 @@ dq8::gs::PrivRegs ntsc_640x448() {
 } // namespace
 
 TEST_CASE("the parallel backend draws sprites and scans them out", "[.gpu][gs_parallel]") {
-    dq8::gs::ParallelGsOptions options;
+    dq8::gs::ParallelGsConfig options;
     options.library = library_file;
     std::unique_ptr<dq8::gs::IGsBackend> backend;
     try {
-        backend = dq8::gs::create_parallel_gs_backend(options);
+        backend = dq8::gs::make_parallel_gs_backend(options);
     } catch (const dq8::gs::ParallelGsError& e) {
         SKIP(e.what());
     }

@@ -28,8 +28,6 @@ namespace {
 
 namespace fs = std::filesystem;
 
-constexpr const char* library_name = "dq8-gs-parallel";
-
 // The directory of the running executable, or empty when the platform does not say.
 fs::path executable_directory() {
 #if defined(_WIN32)
@@ -145,11 +143,21 @@ class ParallelGsBackend final : public IGsBackend {
 
 } // namespace
 
+fs::path parallel_gs_library_file_name() {
+#if defined(_WIN32)
+    return "dq8-gs-parallel.dll";
+#elif defined(__APPLE__)
+    return "libdq8-gs-parallel.dylib";
+#else
+    return "libdq8-gs-parallel.so";
+#endif
+}
+
 fs::path default_parallel_gs_library() {
     if (const char* env = std::getenv("DQ8_GS_PARALLEL"); env != nullptr && env[0] != '\0') {
         return fs::path(env);
     }
-    const fs::path file = rt::shared_library_file_name(library_name);
+    const fs::path file = parallel_gs_library_file_name();
     std::error_code ec;
     if (const fs::path dir = executable_directory(); !dir.empty()) {
         for (const fs::path& candidate : {dir / file, dir.parent_path() / "lib" / file}) {
@@ -166,7 +174,7 @@ fs::path default_parallel_gs_library() {
     return file;
 }
 
-std::unique_ptr<IGsBackend> create_parallel_gs_backend(const ParallelGsOptions& options) {
+std::unique_ptr<IGsBackend> make_parallel_gs_backend(const ParallelGsConfig& options) {
     const fs::path file = options.library.empty() ? default_parallel_gs_library() : options.library;
     rt::DynamicLibrary library;
     try {

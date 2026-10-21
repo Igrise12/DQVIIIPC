@@ -37,7 +37,7 @@ if(DQ8_BUILD_GS_PARALLEL)
     add_subdirectory(gs/parallel)
     # The build tree's copy: the backend's last place to look, so development builds need no DQ8_GS_PARALLEL.
     set_source_files_properties(gs/gs_parallel_backend.cpp PROPERTIES
-        COMPILE_DEFINITIONS "DQ8_GS_PARALLEL_BUILD_PATH=\"$<TARGET_FILE:dq8-gs-parallel>\"")
+        COMPILE_DEFINITIONS "DQ8_GS_PARALLEL_BUILD_PATH=\"$<TARGET_FILE:dq8_gs_parallel>\"")
 endif()
 if(DQ8_BUILD_WINDOW)
     add_subdirectory(platform/sdl)

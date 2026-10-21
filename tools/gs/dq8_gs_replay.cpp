@@ -78,7 +78,7 @@ struct Options {
     bool loop = false;
     bool hold = false;
     fs::path window_capture;
-    dq8::gs::ParallelGsOptions backend;
+    dq8::gs::ParallelGsConfig backend;
 };
 
 [[noreturn]] void usage_error(const std::string& message) {
@@ -251,7 +251,7 @@ int run(const Options& o) {
     }
 
     const auto t_create = Clock::now();
-    std::unique_ptr<dq8::gs::IGsBackend> backend = dq8::gs::create_parallel_gs_backend(o.backend);
+    std::unique_ptr<dq8::gs::IGsBackend> backend = dq8::gs::make_parallel_gs_backend(o.backend);
     std::printf("backend: %s from %s, created in %.0f ms\n", std::string(backend->caps().name).c_str(),
                 o.backend.library.string().c_str(),
                 std::chrono::duration<double, std::milli>(Clock::now() - t_create).count());
