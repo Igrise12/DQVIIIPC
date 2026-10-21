@@ -28,6 +28,7 @@ struct MachineConfig {
     bool strict_kernel = false;          // noop kernel services stop (KernelServices::set_strict)
     bool stop_at_first_syscall = false;  // M2 behaviour: stop at the first kernel call, implemented or not
     bool trace_dispatch = false;
+    std::uint32_t trace_mask = 0; // trace_bit(TraceCategory) bits (machine_services.h)
 };
 
 struct RunLimits {
@@ -79,6 +80,7 @@ class Machine final : public MachineServices {
     void note_poll(std::uint32_t pc, std::uint32_t address, std::uint64_t value) override;
     void note_activity() override;
     void emit(MachineEvent event) override;
+    bool tracing(TraceCategory category) const override;
     [[noreturn]] void stop(StopInfo info) override;
 
   private:

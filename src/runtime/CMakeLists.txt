@@ -18,6 +18,7 @@ add_library(dq8_runtime STATIC
     machine/clock.cpp
     machine/events.cpp
     machine/interrupts.cpp
+    machine/machine_services.cpp
     machine/mmio.cpp
     platform/dynlib.cpp
 )

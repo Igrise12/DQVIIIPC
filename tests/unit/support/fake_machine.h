@@ -91,6 +91,9 @@ class FakeMachine final : public rt::MachineServices {
     }
     void note_activity() override { spin_.reset(); }
     void emit(rt::MachineEvent event) override { emitted.push_back(std::move(event)); }
+    bool tracing(rt::TraceCategory category) const override {
+        return (trace_mask & rt::trace_bit(category)) != 0;
+    }
     [[noreturn]] void stop(rt::StopInfo info) override { throw rt::GuestStop(std::move(info)); }
 
     rt::CostModel& mutable_cost() noexcept { return cost_; }
@@ -99,6 +102,7 @@ class FakeMachine final : public rt::MachineServices {
     std::uint64_t raises = 0; // interrupt raises that left something pending
     std::uint64_t polls = 0;
     std::uint64_t spins = 0;
+    std::uint32_t trace_mask = 0; // trace_bit() bits; tracing is off by default
 
   private:
     rt::GuestMemory memory_;
