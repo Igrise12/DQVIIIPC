@@ -240,6 +240,10 @@ void SifLink::svc_set_dma(KernelCallContext& call) {
             fail("sceSifSetDma: source " + hex32(src) + " + " + std::to_string(bytes) + " is not in RAM");
         }
         const Cycles end = start + transfer_cost(cost, bytes);
+        if (machine_->tracing(TraceCategory::sif)) {
+            machine_->trace(TraceCategory::sif, "SetDma " + hex32(src) + " -> IOP " + hex32(iop_addr) + " +" +
+                                                    std::to_string(size) + " attr " + hex32(attr));
+        }
         const std::uint64_t key = ++landing_sequence_;
         landing.event = machine_->events().schedule(end, "sif1_land", [this, key](Cycles) {
             const auto it = landings_.find(key);
@@ -276,6 +280,7 @@ void SifLink::svc_dma_stat(KernelCallContext& call) {
 // sceSifSetDChain: the EE (re)arms SIF0 to receive the next IOP packet.
 void SifLink::svc_set_dchain(KernelCallContext& call) {
     if (!sif0_armed_) {
+        machine_->trace(TraceCategory::sif, "SIF0 armed");
         sif0_armed_ = true;
         sif0_armed_at_ = machine_->clock().now();
         schedule_sif0();
@@ -286,6 +291,7 @@ void SifLink::svc_set_dchain(KernelCallContext& call) {
 
 // sceSifStopDma: the EE stops SIF0 (before an IOP reset). Queued deliveries wait for the next arming.
 void SifLink::svc_stop_dma(KernelCallContext& call) {
+    machine_->trace(TraceCategory::sif, "SIF0 stopped");
     sif0_armed_ = false;
     schedule_sif0();
     machine_->note_activity();
@@ -295,6 +301,9 @@ void SifLink::svc_stop_dma(KernelCallContext& call) {
 void SifLink::svc_set_reg(KernelCallContext& call) {
     const std::uint32_t reg = call.arg(0);
     const std::uint32_t value = call.arg(1);
+    if (machine_->tracing(TraceCategory::sif)) {
+        machine_->trace(TraceCategory::sif, "SetReg " + hex32(reg) + " = " + hex32(value));
+    }
     if ((reg & sif::reg_software) != 0) {
         const std::uint32_t index = reg & ~sif::reg_software;
         if (index >= sregs_.size()) {
@@ -383,7 +392,13 @@ void SifLink::land(Landing& landing) {
                  "-byte transfer to the IOP command buffer is "
                  "shorter than a command header");
         }
-        sink_->on_command(std::span<const std::uint8_t>(landing.bytes).first(n));
+        const auto packet = std::span<const std::uint8_t>(landing.bytes).first(n);
+        if (machine_->tracing(TraceCategory::sif)) {
+            const std::uint32_t cid = sif::load32(packet, sif::hdr_cid);
+            machine_->trace(TraceCategory::sif,
+                            "IOP receives " + hex32(cid) + " (" + std::string(sif::command_name(cid)) + ")");
+        }
+        sink_->on_command(packet);
     }
 }
 
@@ -446,6 +461,12 @@ void SifLink::deliver_sif0(Cycles) {
         } catch (const std::out_of_range&) {
             fail("the EE receive buffer " + hex32(*receive) + " is not RAM");
         }
+        if (machine_->tracing(TraceCategory::sif)) {
+            const std::uint32_t cid = sif::load32(d.packet, sif::hdr_cid);
+            machine_->trace(TraceCategory::sif, "EE receives " + hex32(cid) + " (" +
+                                                    std::string(sif::command_name(cid)) + ") after " +
+                                                    std::to_string(d.writes.size()) + " data writes");
+        }
         sif0_armed_ = false;
         machine_->interrupts().raise_dmac(DmaChannel::sif0);
     }
@@ -480,6 +501,8 @@ std::string_view sif::command_name(std::uint32_t cid) noexcept {
         return "rpc call";
     case cid_rpc_rdata:
         return "rpc rdata";
+    case cid_fileio_done:
+        return "fileio completion";
     default:
         return "unknown command";
     }

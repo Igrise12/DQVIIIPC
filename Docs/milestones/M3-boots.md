@@ -805,16 +805,20 @@ the top of each `src/runtime/iop/services/*.cpp`.
   - file calls answer -2 or -5;
   - format stops the guest.
 
-**Events** the IOP emits, in addition to the stops:
+**Events** the IOP emits, in addition to the stops (decision 5 above):
 
 | Event | Fields | When |
 |---|---|---|
-| `rpc_bind` | `sid`, `server`, `bound=true` | The first successful bind to each server |
-| `rpc_bind` | `sid`, `bound=false` | The first failed bind to a server id |
-| `iop_module` | `name`, `id`, `services`, `args` | A module load |
+| `rpc_bind` | `sid` (u64), `server` (u64, the handle) | Every successful bind. A bind that answers server 0 is no event |
+| `rpc_call` | `sid` (u64), `fno` (u64) | Every call, only while `tracing(TraceCategory::rpc)` is on |
+| `iop_module` | `name`, `id` (u64), then `services` and `args` (strings) | A module load |
 | `iop_reset` | `image`, `mode` | A reset packet |
 | `rpc_null` | `sid`, `fno`, `send`, `recv` | The first call of each function number on a null server |
 | `mc_info` | `port`, `present`, `formatted` | The first GetInfo for each port |
+
+- Trace lines (`TraceCategory::sif`) cover transfers, register writes, SIF0 arming and every packet in either
+  direction.
+- `rpc` traces cover binds.
 
 ## Bring-up log
 

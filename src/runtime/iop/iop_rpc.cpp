@@ -52,7 +52,6 @@ IopRpcLayer::Server& IopRpcLayer::add(std::unique_ptr<IopRpcServer> server, std:
     entry.buffer = *buffer;
     entry.buffer_size = size + receive_slack;
     by_handle_[*handle] = sid;
-    reported_misses_.erase(sid);
     return by_sid_.emplace(sid, std::move(entry)).first->second;
 }
 
@@ -73,7 +72,6 @@ std::vector<const IopRpcLayer::Server*> IopRpcLayer::servers() const {
 void IopRpcLayer::clear() {
     by_sid_.clear();
     by_handle_.clear();
-    reported_misses_.clear();
 }
 
 void IopRpcLayer::bind(std::span<const std::uint8_t> packet) {
@@ -82,20 +80,13 @@ void IopRpcLayer::bind(std::span<const std::uint8_t> packet) {
     std::uint32_t handle = 0;
     std::uint32_t buffer = 0;
     if (const auto it = by_sid_.find(sid); it != by_sid_.end()) {
-        Server& s = it->second;
-        handle = s.handle;
-        buffer = s.buffer;
-        if (!s.bound) {
-            s.bound = true;
-            machine_.emit(MachineEvent{"rpc_bind", {}}
-                              .add("sid", std::uint64_t{sid})
-                              .add("server", std::string(s.impl->name()))
-                              .add("bound", true));
-        }
-    } else if (reported_misses_.insert(sid).second) {
-        // Reported once: the EE's library binds again until the server appears.
-        machine_.emit(MachineEvent{"rpc_bind", {}}.add("sid", std::uint64_t{sid}).add("bound", false));
+        handle = it->second.handle;
+        buffer = it->second.buffer;
+        machine_.emit(
+            MachineEvent{"rpc_bind", {}}.add("sid", std::uint64_t{sid}).add("server", std::uint64_t{handle}));
     }
+    machine_.trace(TraceCategory::rpc,
+                   "bind " + hex32(sid) + (handle != 0 ? " -> " + hex32(handle) : " -> no server"));
     const Cycles ready = machine_.clock().now() + machine_.cost().rpc_reply(sif::end_size);
     link_.send_to_ee(end_packet(packet, sif::cid_rpc_bind, handle, buffer, 0, 0), {}, ready);
 }
@@ -120,6 +111,11 @@ void IopRpcLayer::call(std::span<const std::uint8_t> packet) {
     std::vector<std::uint8_t> args(send_size);
     iop_.read(s.buffer, args);
 
+    if (machine_.tracing(TraceCategory::rpc)) {
+        machine_.emit(MachineEvent{"rpc_call", {}}
+                          .add("sid", std::uint64_t{hit->second})
+                          .add("fno", std::uint64_t{fno}));
+    }
     IopCallContext ctx{machine_, iop_, disc_, hit->second, fno, recv_addr, recv_size};
     RpcReply reply;
     try {

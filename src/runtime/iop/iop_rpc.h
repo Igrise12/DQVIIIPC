@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -36,7 +35,6 @@ class IopRpcLayer {
         std::uint32_t buffer_size = 0; // usable bytes at `buffer`
         Cycles busy_until = 0;         // when its last reply is ready
         std::uint64_t calls = 0;
-        bool bound = false; // a bind has succeeded since it was registered
     };
 
     IopRpcLayer(MachineServices& machine, SifLink& link, IopMemory& iop, const IDiscSource* disc);
@@ -72,7 +70,6 @@ class IopRpcLayer {
     const IDiscSource* disc_;
     std::map<std::uint32_t, Server> by_sid_;
     std::map<std::uint32_t, std::uint32_t> by_handle_; // handle -> sid
-    std::set<std::uint32_t> reported_misses_;          // server ids whose failed bind was reported
     std::uint64_t binds_ = 0;
     std::uint64_t calls_ = 0;
 };

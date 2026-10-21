@@ -274,7 +274,7 @@ struct Iop::Impl final : public ISifCommandSink, public IVblankListener {
         const std::int32_t id = registry.note_loaded(name);
         machine->emit(MachineEvent{"iop_module", {}}
                           .add("name", name)
-                          .add("id", std::int64_t{id})
+                          .add("id", static_cast<std::uint64_t>(id))
                           .add("services", services)
                           .add("args", printable(args)));
         return id;

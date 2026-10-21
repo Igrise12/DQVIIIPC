@@ -42,24 +42,55 @@ void load(SifClient& c, std::string_view path, std::string_view args = {}) {
 
 } // namespace
 
-TEST_CASE("iop rpc: an unregistered server id binds as server 0, reported once", "[iop][rpc]") {
+TEST_CASE("iop rpc: an unregistered server id binds as server 0 and is no event", "[iop][rpc]") {
     IopRig rig;
     SifClient& c = rig.client;
     c.init_rpc();
     CHECK(c.bind(0x00012000, 0x80000701u) == 0);
     CHECK(c.bind(0x00012000, 0x80000701u) == 0);
     CHECK(c.read32(0x00012000 + 0x14) == 0);
-    REQUIRE(count_events(rig.m, "rpc_bind") == 1);
-    const auto& e = rig.m.emitted.back();
-    CHECK(e.type == "rpc_bind");
-    CHECK(std::get<bool>(e.fields.back().second) == false);
+    CHECK(count_events(rig.m, "rpc_bind") == 0);
 
-    // Once the module is loaded the same id binds.
+    // Once the module is loaded the same id binds, and each successful bind is an event with the handle.
     load(c, "cdrom0:\\MODULES\\SDRDRV.IRX;1");
+    const auto before = count_events(rig.m, "rpc_bind");
     const std::uint32_t server = c.bind(0x00012000, 0x80000701u);
     CHECK(server != 0);
     CHECK(c.read32(0x00012000 + 0x14) != 0);
     CHECK(c.read32(0x00012000 + 0x14) != server);
+    REQUIRE(count_events(rig.m, "rpc_bind") == before + 1);
+    const auto& e = rig.m.emitted.back();
+    REQUIRE(e.fields.size() == 2);
+    CHECK(e.fields[0].first == "sid");
+    CHECK(std::get<std::uint64_t>(e.fields[0].second) == 0x80000701u);
+    CHECK(e.fields[1].first == "server");
+    CHECK(std::get<std::uint64_t>(e.fields[1].second) == server);
+}
+
+TEST_CASE("iop rpc: calls are events only while rpc tracing is on", "[iop][rpc]") {
+    IopRig rig;
+    SifClient& c = rig.client;
+    c.init_rpc();
+    const std::uint32_t client = 0x00012000;
+    REQUIRE(c.bind(client, 0x80000003u) != 0);
+    c.write32(0x00030000, 0x40);
+    REQUIRE(c.call(client, 1, 0x00030000, 4, 0x00032000, 4));
+    CHECK(count_events(rig.m, "rpc_call") == 0);
+    CHECK(count_events(rig.m, "trace") == 0);
+
+    rig.m.trace_mask = rt::trace_bit(rt::TraceCategory::rpc) | rt::trace_bit(rt::TraceCategory::sif);
+    REQUIRE(c.call(client, 1, 0x00030000, 4, 0x00032000, 4));
+    REQUIRE(count_events(rig.m, "rpc_call") == 1);
+    const rt::MachineEvent* call = nullptr;
+    for (const auto& e : rig.m.emitted) {
+        if (e.type == "rpc_call") {
+            call = &e;
+        }
+    }
+    REQUIRE(call != nullptr);
+    CHECK(std::get<std::uint64_t>(call->fields[0].second) == 0x80000003u);
+    CHECK(std::get<std::uint64_t>(call->fields[1].second) == 1);
+    CHECK(count_events(rig.m, "trace") >= 2); // the transfer and the packet landing at least
 }
 
 TEST_CASE("iop rpc: the standard servers bind with distinct handles and buffers", "[iop][rpc]") {
