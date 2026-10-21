@@ -74,28 +74,35 @@ struct FileCloser {
 
 } // namespace
 
-std::unique_ptr<IGsBackend> make_null_backend() {
+std::unique_ptr<IGsBackend> make_null_gs_backend() {
     return std::make_unique<NullBackend>();
 }
 
-std::unique_ptr<IGsBackend> make_trace_backend(std::function<void(std::span<const std::uint8_t>)> sink) {
+std::unique_ptr<IGsBackend> make_trace_gs_backend_sink(TraceSink sink) {
     if (!sink) {
         throw std::invalid_argument("trace backend: no sink");
     }
     return std::make_unique<TraceBackend>(std::move(sink));
 }
 
-std::unique_ptr<IGsBackend> make_trace_backend(const std::string& path) {
-    std::shared_ptr<std::FILE> file(std::fopen(path.c_str(), "wb"), FileCloser{});
-    if (!file) {
-        throw std::runtime_error("trace backend: cannot open " + path + " for writing");
+std::unique_ptr<IGsBackend> make_trace_gs_backend(std::filesystem::path file) {
+    if (file.empty()) {
+        return make_trace_gs_backend_sink([](std::span<const std::uint8_t>) {});
     }
-    return make_trace_backend([file](std::span<const std::uint8_t> bytes) {
+#if defined(_WIN32)
+    std::shared_ptr<std::FILE> handle(_wfopen(file.c_str(), L"wb"), FileCloser{});
+#else
+    std::shared_ptr<std::FILE> handle(std::fopen(file.c_str(), "wb"), FileCloser{});
+#endif
+    if (!handle) {
+        throw std::runtime_error("trace backend: cannot open " + file.string() + " for writing");
+    }
+    return make_trace_gs_backend_sink([handle](std::span<const std::uint8_t> bytes) {
         if (bytes.empty()) {
-            std::fflush(file.get()); // flush() passes an empty chunk
+            std::fflush(handle.get()); // flush() passes an empty chunk
             return;
         }
-        if (std::fwrite(bytes.data(), 1, bytes.size(), file.get()) != bytes.size()) {
+        if (std::fwrite(bytes.data(), 1, bytes.size(), handle.get()) != bytes.size()) {
             throw std::runtime_error("trace backend: write failed");
         }
     });

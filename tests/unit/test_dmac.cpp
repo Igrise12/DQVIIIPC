@@ -8,6 +8,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
+#include <string>
+#include <variant>
 #include <vector>
 
 using namespace dq8::rt;
@@ -390,4 +392,23 @@ TEST_CASE("dmac: VIF1 to memory reads GS data through the sink", "[dmac][gif]") 
         CHECK(ram[0x6000 + i] == static_cast<std::uint8_t>(i));
     }
     CHECK(rig.sink.reads == 1u);
+}
+
+TEST_CASE("dmac: DMA starts and GIF packets are traced when their categories are on", "[dmac][gif]") {
+    EeRig rig;
+    rig.machine.trace_mask = trace_bit(TraceCategory::dma) | trace_bit(TraceCategory::gs);
+    write_qword(rig.mem().rdram() + 0x1000, gif_tag(0, 0, 1));
+    rig.w32(gif_ch + madr, 0x1000);
+    rig.w32(gif_ch + qwc, 1);
+    rig.w32(gif_ch + chcr, str);
+    std::vector<std::string> lines;
+    for (const MachineEvent& e : rig.machine.emitted) {
+        if (e.type == "trace") {
+            lines.push_back(std::get<std::string>(e.fields[0].second) + ": " +
+                            std::get<std::string>(e.fields[1].second));
+        }
+    }
+    REQUIRE(lines.size() == 2u);
+    CHECK(lines[0] == "gs: path3 packet 16 bytes");
+    CHECK(lines[1] == "dma: gif mode 0 chcr 0x00000100 tadr 0x00000000: 1 qwords, 0 tags");
 }

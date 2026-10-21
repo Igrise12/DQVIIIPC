@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <string>
 
 namespace dq8::rt {
 
@@ -201,6 +202,10 @@ void Gif::packet_complete(gs::GifPath path, std::vector<std::uint8_t> packet) {
 }
 
 void Gif::deliver(gs::GifPath path, std::span<const std::uint8_t> packet) {
+    if (machine_->tracing(TraceCategory::gs)) {
+        machine_->trace(TraceCategory::gs, "path" + std::to_string(static_cast<unsigned>(path)) + " packet " +
+                                               std::to_string(packet.size()) + " bytes");
+    }
     sink_.gif_transfer(path, packet);
     scan(packet);
 }

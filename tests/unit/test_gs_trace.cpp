@@ -108,7 +108,7 @@ std::string hex(const core::Sha1::Digest& d) {
 
 gs::GsPipelineConfig capture_config(std::vector<std::uint8_t>& out) {
     gs::GsPipelineConfig cfg;
-    cfg.backend = gs::make_trace_backend(
+    cfg.backend = gs::make_trace_gs_backend_sink(
         [&out](std::span<const std::uint8_t> bytes) { out.insert(out.end(), bytes.begin(), bytes.end()); });
     cfg.inline_mode = true;
     return cfg;
@@ -118,7 +118,7 @@ gs::GsPipelineConfig capture_config(std::vector<std::uint8_t>& out) {
 
 TEST_CASE("gs trace: records are PCSX2 dump packet bodies with no header", "[gs][trace]") {
     std::vector<std::uint8_t> out;
-    auto backend = gs::make_trace_backend(
+    auto backend = gs::make_trace_gs_backend_sink(
         [&](std::span<const std::uint8_t> b) { out.insert(out.end(), b.begin(), b.end()); });
     CHECK(backend->caps().name == "trace");
     CHECK_FALSE(backend->caps().produces_pixels);
@@ -191,7 +191,7 @@ TEST_CASE("gs trace: a stream round-trips through the trace and a file", "[gs][t
                                        ("dq8_gs_trace_test_" + std::to_string(captured.size()) + ".gs");
     {
         gs::GsPipelineConfig cfg;
-        cfg.backend = gs::make_trace_backend(file.string());
+        cfg.backend = gs::make_trace_gs_backend(file);
         gs::GsPipeline pipe(std::move(cfg)); // threaded this time
         for (const Record& r : sent) {
             if (const auto* t = std::get_if<Transfer>(&r)) {
@@ -214,7 +214,7 @@ TEST_CASE("gs trace: a stream round-trips through the trace and a file", "[gs][t
     in.close();
     std::filesystem::remove(file);
     CHECK(from_file == captured);
-    CHECK_THROWS(gs::make_trace_backend("/nonexistent-dir-dq8/trace.gs"));
+    CHECK_THROWS(gs::make_trace_gs_backend("/nonexistent-dir-dq8/trace.gs"));
 }
 
 TEST_CASE("gs trace: MPG + MSCAL of a VU1 program XGKICKs a packet matching the golden trace hash",

@@ -102,7 +102,7 @@ std::string hex(const core::Sha1::Digest& d) {
 
 TEST_CASE("gs pipeline: the stream hash chains SHA-1 over the trace bytes of each field", "[gs][pipeline]") {
     gs::GsPipelineConfig cfg;
-    cfg.backend = gs::make_null_backend();
+    cfg.backend = gs::make_null_gs_backend();
     cfg.inline_mode = true;
     gs::GsPipeline pipe(std::move(cfg));
     CHECK(pipe.stream_hash() == std::string(40, '0'));

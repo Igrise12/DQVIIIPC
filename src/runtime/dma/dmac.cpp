@@ -316,6 +316,12 @@ void Dmac::start(unsigned ch) {
     ++s.transfers;
     s.qwords += run.qwords;
     s.tags += run.tags;
+    if (machine_->tracing(TraceCategory::dma)) {
+        machine_->trace(TraceCategory::dma, std::string(to_string(static_cast<DmaChannel>(ch))) + " mode " +
+                                                std::to_string(mode) + " chcr " + hex32(c.chcr) + " tadr " +
+                                                hex32(c.tadr) + ": " + std::to_string(run.qwords) +
+                                                " qwords, " + std::to_string(run.tags) + " tags");
+    }
 
     c.busy = true;
     const Cycles duration = std::max<Cycles>(1, (run.qwords + run.tags) * machine_->cost().dma_per_qword);
