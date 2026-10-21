@@ -125,6 +125,20 @@ finished_query = 0x001A1380
 scene_unit = "TITLE"
 scene_functions = [0x00461E40, 0x00462110, 0x00463C50]
 
+# The title's flyover (M3 bring-up, Docs/milestones/M3-boots.md): TITLE stage 10 (the halfword at 0x003D2630)
+# zeroes the word at 0x004670C0, then steps it once per 30 Hz frame, whether or not its movie plays; the title
+# fades in from step 638 and is complete at 648. A button press before 648 makes the game set the word to 648.
+# --movies skip writes 648 there after the first step, so the skipped movie leaves no black (ADR-0013, proposed).
+# The halfword holds 10 from power-on, before the title sequence runs; the word is 0 then, so nothing is written.
+[[movie.timelines]]
+name = "title-flyover"
+overlay = "TITLE"
+stage_variable = 0x003D2630
+stage_width = 2
+stage_value = 10
+counter = 0x004670C0
+skip_to = 648
+
 # The title screen (dq8-game --until title; M3 bring-up): TITLE resident and the byte at 0x003D4008 equal to 1,
 # which TITLE's sequence sets once the title has faded in fully. In PCSX2 save states it is 1 on the title screen
 # and its menu and 0 on the settings screen and during the logos (the stage word at 0x003D4018 is 1000 for both).

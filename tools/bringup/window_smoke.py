@@ -12,11 +12,12 @@ close.
     python3 -I tools/bringup/window_smoke.py --iso "$DQ8_ISO" [--input keyboard|gamepad] [--out DIR]
         [--module-dir work/recomp/modules/SLUS_21207] [--dq8-game build/dev-clang/src/host/dq8-game]
 
-Steps: settings screen; Down (Wide Screen); confirm (Sound); confirm; wait for the second movie skip; confirm (the
-title fades in at once instead of after the 648-frame flyover timeline); Start (the menu); confirm (the
-memory-card slot window). Prints each step's time, the input dq8-game recorded (--record-input) and its exit
-code. Screenshots and logs are game-derived: keep them under work/ (the default), never in the repository.
-Contributor tool only; Python 3 standard library, Xvfb, ffmpeg, and libX11/libXtst for the keyboard.
+Steps: settings screen; Down (Wide Screen); confirm (Sound); confirm; wait for the movie skips and the flyover
+timeline skip (--movies skip, the default: the title fades in at once instead of after the 648-frame flyover);
+Start (the menu); confirm (the memory-card slot window). Prints each step's time, the input dq8-game recorded
+(--record-input) and its exit code. Screenshots and logs are game-derived: keep them under work/ (the default),
+never in the repository. Contributor tool only; Python 3 standard library, Xvfb, ffmpeg, and libX11/libXtst for
+the keyboard.
 """
 from __future__ import annotations
 
@@ -160,12 +161,11 @@ def main(argv: list[str]) -> int:
         shot("sound")
         press("confirm")
         deadline = time.monotonic() + 90
-        while count_events(events, "movie_skip") < 4 and time.monotonic() < deadline and game.poll() is None:
+        while count_events(events, "movie_timeline_skip") < 1 and time.monotonic() < deadline and game.poll() is None:
             time.sleep(0.5)
         note("movies skipped" if count_events(events, "movie_skip") >= 4 else "movie skip not seen")
-        time.sleep(1.0)
-        press("confirm")
-        time.sleep(4.0)
+        note("flyover skipped" if count_events(events, "movie_timeline_skip") >= 1 else "flyover skip not seen")
+        time.sleep(5.0)
         shot("title")
         press("start")
         time.sleep(3.0)

@@ -7,6 +7,7 @@ add_library(dq8_game STATIC
     iop_modules.cpp
     overlay_residency.cpp
     movies.cpp
+    movie_timelines.cpp
     mode_watcher.cpp
     title_watcher.cpp
     until.cpp

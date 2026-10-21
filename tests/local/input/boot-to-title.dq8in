@@ -1,16 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 dq8in 1
-# SLUS-21207 (the only region profile so far): boot to the title screen.
+# SLUS-21207 (the only region profile so far): boot to the title screen, M3a acceptance 1, with --movies blank.
 # Our own input, authored for DQ8-Native M3 (no game data).
 # Every screen before the title runs in mode 4 with the TITLE overlay resident:
 #   1. the memory-card check, which passes without input on an unformatted card;
 #   2. the first-run settings: Down (Wide Screen 16:9), Cross, Cross (sound settings as they are);
-#   3. the publisher logo, which Cross shortens; the two movies, which --movies skip returns at once;
-#   4. the flyover timeline (648 frames, black while its movie is skipped), which Cross ends;
+#   3. the publisher logo, which Cross shortens; the two movies, which --movies blank returns at once;
+#   4. the flyover timeline (648 frames, black while its movie is blanked), which Cross ends;
 #   5. the title, where Cross opens the menu; dq8-game --until title meets there (vblank 1200).
 # The last press opens the memory-card slot window, after --until title has ended the run. Offsets were checked
-# in the M3 bring-up (Docs/milestones/M3-boots.md, "Bring-up log").
+# in the M3 bring-up (Docs/milestones/M3-boots.md, "Bring-up log"). Under --movies skip (the default) the flyover
+# is skipped at once, so the press in step 4 opens the menu and the title marker comes at vblank 1080;
+# boot-to-title-settings-only.dq8in is the input for that policy.
 
 # The first-run settings screen comes after TITLE is resident and the memory-card check.
 after overlay:TITLE +600 press down 4

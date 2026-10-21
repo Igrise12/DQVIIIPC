@@ -8,6 +8,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -240,7 +241,7 @@ TEST_CASE("record input: the recording replays the same states", "[input]") {
           std::vector<std::string>{"2 disconnect"});
 }
 
-TEST_CASE("input script: the authored boot-to-title script parses", "[input]") {
+TEST_CASE("input script: the authored boot-to-title scripts parse", "[input]") {
     const InputScript s = load_input_script(std::filesystem::path(DQ8_SOURCE_DIR) / "tests" / "local" /
                                             "input" / "boot-to-title.dq8in");
     REQUIRE(s.lines.size() == 7);
@@ -249,4 +250,11 @@ TEST_CASE("input script: the authored boot-to-title script parses", "[input]") {
     CHECK(s.lines[0].buttons == pad_down);
     CHECK(s.lines[1].buttons == pad_cross);
     CHECK(s.lines[2].buttons == pad_cross);
+    const InputScript settings_only =
+        load_input_script(std::filesystem::path(DQ8_SOURCE_DIR) / "tests" / "local" / "input" /
+                          "boot-to-title-settings-only.dq8in");
+    REQUIRE(settings_only.lines.size() == 3);
+    for (std::size_t i = 0; i < 3; ++i) {
+        CHECK(settings_only.lines[i].buttons == s.lines[i].buttons);
+    }
 }

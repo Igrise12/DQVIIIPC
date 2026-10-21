@@ -287,6 +287,14 @@ TEST_CASE("the shipped region profiles are valid", "[core][profile]") {
             REQUIRE(p.movie.player_entries.size() == 2);
             CHECK(p.movie.scene_unit == "TITLE");
             CHECK(p.movie.scene_functions.size() == 3);
+            REQUIRE(p.movie.timelines.size() == 1);
+            CHECK(p.movie.timelines[0].name == "title-flyover");
+            CHECK(p.movie.timelines[0].overlay == "TITLE");
+            CHECK(p.movie.timelines[0].stage_variable == 0x003D2630);
+            CHECK(p.movie.timelines[0].stage_width == 2);
+            CHECK(p.movie.timelines[0].stage_value == 10);
+            CHECK(p.movie.timelines[0].counter == 0x004670C0);
+            CHECK(p.movie.timelines[0].skip_to == 648);
         }
     }
     CHECK(found);
@@ -352,4 +360,50 @@ TEST_CASE("the optional [iop] and [movie] tables are validated", "[core][profile
     fails(std::string(minimal_profile) + replace_line(title, "0x00100F00", "0x00100F01"),
           "aligned to its width");
     fails(base + iop + movie + "finished_query = 0x00300000\n", "finished_query");
+}
+
+TEST_CASE("[[movie.timelines]] rows are validated", "[core][profile]") {
+    dq8::test::TempDir tmp;
+    // Overlay A: header 64 + text 0x200, so its data and bss are [0x00200240, 0x00200300).
+    const std::string movie = std::string(minimal_profile) +
+                              "[movie]\nplayer_entries = [0x00100020]\nscene_unit = \"A\"\n"
+                              "scene_functions = [0x00200040]\n";
+    const std::string row = "[[movie.timelines]]\nname = \"intro-pan\"\noverlay = \"A\"\n"
+                            "stage_variable = 0x00100900\nstage_width = 2\nstage_value = 10\n"
+                            "counter = 0x00200280\nskip_to = 300\n";
+
+    const auto none = dq8::core::load_region_profile(write(tmp.path(), "none.toml", movie));
+    CHECK(none.movie.timelines.empty());
+    const auto good = dq8::core::load_region_profile(write(tmp.path(), "good.toml", movie + row));
+    REQUIRE(good.movie.timelines.size() == 1);
+    const auto& t = good.movie.timelines[0];
+    CHECK(t.name == "intro-pan");
+    CHECK(t.overlay == "A");
+    CHECK(t.stage_variable == 0x00100900);
+    CHECK(t.stage_width == 2);
+    CHECK(t.stage_value == 10);
+    CHECK(t.counter == 0x00200280);
+    CHECK(t.skip_to == 300);
+    // The stage variable may also be the overlay's own data.
+    const auto in_overlay = dq8::core::load_region_profile(
+        write(tmp.path(), "in_overlay.toml", movie + replace_line(row, "0x00100900", "0x002002FE")));
+    CHECK(in_overlay.movie.timelines[0].stage_variable == 0x002002FE);
+
+    auto fails = [&](const std::string& text, const std::string& what) {
+        const auto file = write(tmp.path(), "bad.toml", text);
+        CHECK_THROWS_WITH(dq8::core::load_region_profile(file), ContainsSubstring(what));
+    };
+    fails(movie + row + replace_line(row, "skip_to = 300", "skip_to = 301"), "listed twice");
+    fails(movie + replace_line(row, "intro-pan", "Intro_Pan"), "a-z, 0-9 and '-'");
+    fails(movie + replace_line(row, "overlay = \"A\"", "overlay = \"B\""), "not an overlay name");
+    fails(movie + replace_line(row, "stage_width = 2", "stage_width = 3"), "1, 2 or 4");
+    fails(movie + replace_line(row, "0x00100900", "0x00100901"), "aligned to stage_width");
+    fails(movie + replace_line(row, "0x00100900", "0x00200040"), "data or bss"); // the overlay's text
+    fails(movie + replace_line(row, "0x00100900", "0x00300000"), "data or bss"); // outside both
+    fails(movie + replace_line(row, "stage_value = 10", "stage_value = 0x10000"), "does not fit");
+    fails(movie + replace_line(row, "0x00200280", "0x00200282"), "4-byte aligned");
+    fails(movie + replace_line(row, "0x00200280", "0x00200300"), "data or bss"); // past the segment
+    fails(movie + replace_line(row, "skip_to = 300", "skip_to = 0"), "out of range");
+    fails(movie + replace_line(row, "skip_to = 300", "skip_to = 0x80000000"), "out of range");
+    fails(movie + "timelines = 1\n", "array of [[movie.timelines]]");
 }

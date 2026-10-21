@@ -146,6 +146,8 @@ TEST_CASE("host options: M3 run options", "[host]") {
     CHECK(parse({"--iso", "g", "--module-dir", "m", "--gs-trace", "t.gs"}).gs == GsKind::trace);
     CHECK(parse({"--iso", "g", "--module-dir", "m", "--gs", "parallel", "--ssaa", "4"}).ssaa == 4);
     CHECK(parse({"--elf", "e", "--module-dir", "m", "--disc", "d.iso"}).disc == fs::path("d.iso"));
+    CHECK(parse({"--iso", "g", "--module-dir", "m"}).movies == "skip");
+    CHECK(parse({"--iso", "g", "--module-dir", "m", "--movies", "blank"}).movies == "blank");
 }
 
 TEST_CASE("host options: problems are usage errors", "[host]") {
@@ -178,7 +180,7 @@ TEST_CASE("host options: problems are usage errors", "[host]") {
     CHECK(error_of({"--iso", "g", "--module-dir", "m", "--speed", "0"}).find("--speed") != std::string::npos);
     CHECK(error_of({"--iso", "g", "--module-dir", "m", "--speed", "fast"}).find("--speed") !=
           std::string::npos);
-    CHECK(error_of({"--iso", "g", "--module-dir", "m", "--movies", "play"}).find("skip or stop") !=
+    CHECK(error_of({"--iso", "g", "--module-dir", "m", "--movies", "play"}).find("skip, blank or stop") !=
           std::string::npos);
     CHECK(
         error_of({"--iso", "g", "--module-dir", "m", "--trace", "kernel,vu"}).find("unknown category 'vu'") !=

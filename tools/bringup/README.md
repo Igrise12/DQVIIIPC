@@ -12,7 +12,7 @@ dumps and logs stay under `work/`.
 
 ```bash
 build/dev-clang/src/host/dq8-game --iso "$DQ8_ISO" --module-dir work/recomp/modules/SLUS_21207 --headless \
-    --gs trace --input-script tests/local/input/boot-to-title.dq8in --until title --vblanks 6000 \
+    --gs trace --input-script tests/local/input/boot-to-title.dq8in --movies blank --until title --vblanks 6000 \
     --events work/bringup/run.jsonl --dump-frame 1200:work/bringup/settings.png
 python3 -I tools/bringup/rpc_trace.py work/bringup/run.jsonl --summary
 tools/bringup/ssim.sh work/bringup/settings.png work/pcsx2/<probe>/settings.png --min 0.98

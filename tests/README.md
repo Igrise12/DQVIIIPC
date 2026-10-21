@@ -14,7 +14,7 @@
 
 `local/` checks the disc only against facts the region profile already records (names, sizes, hashes, header values); `test_real_overlays.cpp` parses the six overlays from the image and checks `64 + text + data + bss == segment memsz` and the profile rows.
 
-`local.boot_to_title` is M3a's acceptance 1. It runs `dq8-game` on your disc with our authored input, `local/input/boot-to-title.dq8in`, until the title screen. The game modules come from `DQ8_TEST_MODULE_DIR`, by default `work/recomp/modules/SLUS_21207`. The test checks the exit code and the events: TITLE resident through the hook, mode 4, no stop. The events file stays in the build tree.
+`local.boot_to_title` is M3a's acceptance 1. It runs `dq8-game` on your disc with our authored input, `local/input/boot-to-title.dq8in`, and `--movies blank`, until the title screen. The game modules come from `DQ8_TEST_MODULE_DIR`, by default `work/recomp/modules/SLUS_21207`. The test checks the exit code and the events: TITLE resident through the hook, mode 4, no stop, no `movie_timeline_skip`. `local.boot_to_title_skip` runs `local/input/boot-to-title-settings-only.dq8in` (the first-run settings, then no press) under the default `--movies skip`. It needs a `movie_timeline_skip` event and the title within 1,600 vblanks; with the flyover on black the title comes at 2,640 (ADR-0013, proposed). The events files stay in the build tree.
 
 ```bash
 ctest --preset unit-dev-clang                                   # CI's suite

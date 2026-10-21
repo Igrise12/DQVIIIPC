@@ -36,7 +36,7 @@ dq8-game --elf <file> --module-dir <dir> [--overlay-window BASE:END [--resident 
 | `--speed F\|max` | 1.0 is real time. Default: `max` headless, `1.0` with `--window`. |
 | `--input-script FILE` | `.dq8in` input (`Docs/formats/dq8-input-script.md`). Its `after` lines see `overlay_resident`, `mode` and `rpc_bind` events. |
 | `--record-input FILE` | Write the input the run read as a `.dq8in` file that replays it. |
-| `--movies skip\|stop` | Movies end at once (default: the player entries return and the finished query reports done), or the first player call stops the guest (`src/game/movies.h`). |
+| `--movies skip\|blank\|stop` | `skip` (default): movies end at once, with their scene timelines: the player entries return, the finished query reports done, and each `[[movie.timelines]]` row jumps to its skip point (`src/game/movie_timelines.h`, ADR-0013, proposed). `blank`: the same without the timeline skip, so the scene's own clock runs on black for the movie's length, as in M3 and as on a console that plays it. `stop`: the first player call stops the guest (`src/game/movies.h`). |
 | `--dump-frame N:PATH` | PNG of the scanout of vblank N. Repeatable. |
 | `--dump-ram-at N:PATH` | The 32 MiB of RAM after N vblanks. Repeatable. |
 | `--events FILE\|-` | JSON-lines events (below). |
@@ -67,5 +67,5 @@ A failure prints `{"ok": false, "error": {"code", "message"}, "problems": [...],
 
 **Events (`--events`).** One JSON object per line: `{"ev", "vblank", "cycles", ...}`. Every field is deterministic, so two runs of the same disc, build and input give identical streams, and so do `--speed 1` and `--speed max`.
 - The host emits `start` (mode, entry, cost model, profile, input kind), `gs` after every vblank (stream hash and vsyncs), `ram_dump`, and `end` (ended, gs_hash, ram_sha1, exit_code, reason). The GS backend appears only in the `--json` report, so the `null` and `trace` streams compare equal.
-- The game layer emits `overlay_resident`, `overlay_verify`, `mode` and `movie_skip`.
+- The game layer emits `overlay_resident`, `overlay_verify`, `mode`, `movie_skip` and `movie_timeline_skip`.
 - The devices emit their own events, such as `thread`, `iop_module` and `rpc_bind`.

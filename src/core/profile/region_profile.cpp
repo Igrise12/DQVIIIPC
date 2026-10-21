@@ -608,6 +608,71 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
             }
         }
         p.movie.scene_functions = scenes;
+
+        if (const toml::value* timelines = r.optional(*movie, "timelines")) {
+            if (!timelines->is_array()) {
+                r.fail(*timelines, "[movie].timelines must be an array of [[movie.timelines]] tables");
+            }
+            const std::string label = "movie.timelines";
+            std::set<std::string> names;
+            for (const toml::value& t : timelines->as_array()) {
+                if (!t.is_table()) {
+                    r.fail(t, "[[movie.timelines]] entries must be tables");
+                }
+                RegionProfile::MovieTimeline tl;
+                tl.name = r.string(t, "name", label);
+                for (const char c : tl.name) {
+                    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-')) {
+                        r.fail(t.at("name"), "[[movie.timelines]].name may only contain a-z, 0-9 and '-'");
+                    }
+                }
+                if (!names.insert(tl.name).second) {
+                    r.fail(t.at("name"), "[[movie.timelines]].name '" + tl.name + "' is listed twice");
+                }
+                tl.overlay = r.string(t, "overlay", label);
+                const ProfileOverlay* overlay = nullptr;
+                for (const ProfileOverlay& o : p.overlays) {
+                    if (o.name == tl.overlay) {
+                        overlay = &o;
+                    }
+                }
+                if (overlay == nullptr) {
+                    r.fail(t.at("overlay"),
+                           "[[movie.timelines]].overlay '" + tl.overlay + "' is not an overlay name");
+                }
+                // A timeline variable is main-program data or the overlay's own data or bss, never its text.
+                const std::uint64_t data_begin = std::uint64_t{w.base} + w.header_size + overlay->text_size;
+                const std::uint64_t segment_end = std::uint64_t{w.base} + overlay->segment_memsz;
+                auto variable_ok = [&](std::uint64_t address, std::uint64_t width) {
+                    return (address >= main_begin && address + width <= main_end) ||
+                           (address >= data_begin && address + width <= segment_end);
+                };
+                tl.stage_width = r.u32(t, "stage_width", label);
+                if (tl.stage_width != 1 && tl.stage_width != 2 && tl.stage_width != 4) {
+                    r.fail(t.at("stage_width"), "[[movie.timelines]].stage_width must be 1, 2 or 4");
+                }
+                tl.stage_variable = r.u32(t, "stage_variable", label);
+                if (tl.stage_variable % tl.stage_width != 0 ||
+                    !variable_ok(tl.stage_variable, tl.stage_width)) {
+                    r.fail(t.at("stage_variable"), "[[movie.timelines]].stage_variable must be aligned to "
+                                                   "stage_width and inside the main "
+                                                   "program or the overlay's data or bss");
+                }
+                tl.stage_value = r.u32(t, "stage_value", label);
+                if (tl.stage_width < 4 && tl.stage_value >> (8 * tl.stage_width) != 0) {
+                    r.fail(t.at("stage_value"), "[[movie.timelines]].stage_value does not fit stage_width");
+                }
+                tl.counter = r.u32(t, "counter", label);
+                if (tl.counter % 4 != 0 || !variable_ok(tl.counter, 4)) {
+                    r.fail(t.at("counter"),
+                           "[[movie.timelines]].counter must be 4-byte aligned and inside the "
+                           "main program or the overlay's data or bss");
+                }
+                tl.skip_to = static_cast<std::int32_t>(
+                    r.integer(t, "skip_to", label, 1, std::numeric_limits<std::int32_t>::max()));
+                p.movie.timelines.push_back(std::move(tl));
+            }
+        }
     }
     return p;
 }
