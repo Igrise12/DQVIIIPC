@@ -48,6 +48,11 @@ add_executable(dq8_unit_tests
     test_kernel_services.cpp
     test_m3_contracts.cpp
     test_fiber.cpp
+    test_scheduler.cpp
+    test_kernel_threads.cpp
+    test_kernel_sync.cpp
+    test_kernel_interrupts.cpp
+    test_kernel_system.cpp
 )
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(dq8_unit_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")
