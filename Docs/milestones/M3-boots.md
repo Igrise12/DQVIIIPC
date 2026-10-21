@@ -246,11 +246,12 @@ Recorded in the order they were made. Each names the owner who implements it.
    - The SDL3 platform is the static library `dq8_platform_sdl`, built when `DQ8_BUILD_WINDOW` is on. The host
      defines `DQ8_HAVE_WINDOW` when it links it.
 2. **Stale-return check (2026-10-21).**
-   - E adds `Dispatcher::window_generation()` and `Dispatcher::check_return(std::uint32_t caller_pc,
-     std::uint64_t generation_at_call) const`, which stops when `caller_pc` is in the window and the generation has
-     moved.
-   - A calls them in `dispatch_guest_branch` in debug builds (`!NDEBUG`): read the generation before each dispatched
-     call whose `source_pc` is in the window, and call `check_return` after it.
+   - A implements it in `dispatch_guest_branch` in debug builds (`!NDEBUG`), with the API already on `main`.
+   - Around each dispatched call whose `source_pc` is in the window (`dispatcher.overlays().in_window(source_pc)`),
+     A reads `dispatcher.overlays().generation()` before the call. If it has moved afterwards, A stops with a new
+     `StopReason::stale_return` (spelled `"stale_return"`), reporting the caller and both generations.
+   - E needs no new `Dispatcher` API for it. (E first proposed `Dispatcher::check_return`; that is dropped because A
+     merges before E.)
 3. **Trace categories (2026-10-21, on `main`).**
    - `machine_services.h` has `TraceCategory {kernel, sif, rpc, dma, gs}`, `trace_bit()`, the pure virtual
      `tracing(category)` and the helper `trace(category, message)`, which emits a `"trace"` event with fields `cat`
