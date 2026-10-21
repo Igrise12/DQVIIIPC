@@ -30,7 +30,7 @@ constexpr std::uint32_t vif1_ch = 0x10009000u;
 constexpr std::uint32_t d_stat = 0x1000E010u;
 constexpr std::uint32_t chcr = 0x00u, madr = 0x10u, qwc = 0x20u, tadr = 0x30u, asr0 = 0x40u, asr1 = 0x50u,
                         sadr = 0x80u;
-constexpr std::uint32_t str = 0x100u;
+constexpr std::uint32_t chcr_str = 0x100u;
 constexpr std::uint32_t chain = 0x4u;
 
 void fill_qword(std::uint8_t* at, std::uint8_t value) {
@@ -77,7 +77,7 @@ TEST_CASE("dmac: a source chain through every tag id, two levels of call and ret
 
     rig.w32(spr_to + sadr, 0);
     rig.w32(spr_to + tadr, 0x10000);
-    rig.w32(spr_to + chcr, str | chain);
+    rig.w32(spr_to + chcr, chcr_str | chain);
     const std::uint8_t* spr = rig.mem().scratchpad();
     for (std::uint8_t i = 0; i < 8; ++i) {
         INFO("quadword " << int{i});
@@ -91,11 +91,11 @@ TEST_CASE("dmac: a source chain through every tag id, two levels of call and ret
     const std::uint32_t c = rig.r32(spr_to + chcr);
     CHECK(((c >> 4) & 3u) == 0u);  // ASP back to 0
     CHECK(((c >> 28) & 7u) == 0u); // TAG: the last tag was refe
-    CHECK((c & str) != 0u);        // busy until the completion event
+    CHECK((c & chcr_str) != 0u);   // busy until the completion event
     CHECK(rig.dmac().stats(DmaChannel::spr_to).tags == 9u);
     CHECK(rig.dmac().stats(DmaChannel::spr_to).qwords == 8u);
     drain(rig);
-    CHECK((rig.r32(spr_to + chcr) & str) == 0u);
+    CHECK((rig.r32(spr_to + chcr) & chcr_str) == 0u);
     CHECK((rig.r32(d_stat) & (1u << 9)) != 0u);
 }
 
@@ -107,7 +107,7 @@ TEST_CASE("dmac: end, ret on an empty stack, IRQ with TIE, and a QWC left over f
         fill_qword(ram + 0x1010, 0x31);
         fill_qword(ram + 0x1020, 0xEE);
         rig.w32(spr_to + tadr, 0x1000);
-        rig.w32(spr_to + chcr, str | chain);
+        rig.w32(spr_to + chcr, chcr_str | chain);
         CHECK(qword_is(rig.mem().scratchpad(), 0x31));
         CHECK(qword_is(rig.mem().scratchpad() + 16, 0x00));
         CHECK(((rig.r32(spr_to + chcr) >> 28) & 7u) == 7u);
@@ -120,7 +120,7 @@ TEST_CASE("dmac: end, ret on an empty stack, IRQ with TIE, and a QWC left over f
         write_qword(ram + 0x1020, dma_tag(1, 1));
         fill_qword(ram + 0x1030, 0xEE);
         rig.w32(spr_to + tadr, 0x1000);
-        rig.w32(spr_to + chcr, str | chain);
+        rig.w32(spr_to + chcr, chcr_str | chain);
         CHECK(qword_is(rig.mem().scratchpad(), 0x32));
         CHECK(qword_is(rig.mem().scratchpad() + 16, 0x00));
     }
@@ -133,7 +133,7 @@ TEST_CASE("dmac: end, ret on an empty stack, IRQ with TIE, and a QWC left over f
             write_qword(ram + 0x1020, dma_tag(1, 7));
             fill_qword(ram + 0x1030, 0x34);
             rig.w32(spr_to + tadr, 0x1000);
-            rig.w32(spr_to + chcr, str | chain | (tie ? 0x80u : 0u));
+            rig.w32(spr_to + chcr, chcr_str | chain | (tie ? 0x80u : 0u));
             CHECK(qword_is(rig.mem().scratchpad(), 0x33));
             CHECK(qword_is(rig.mem().scratchpad() + 16, tie ? 0x00 : 0x34));
             CHECK(((rig.r32(spr_to + chcr) >> 31) & 1u) == (tie ? 1u : 0u)); // TAG.IRQ of the last tag
@@ -149,7 +149,7 @@ TEST_CASE("dmac: end, ret on an empty stack, IRQ with TIE, and a QWC left over f
             rig.w32(spr_to + madr, 0x3000);
             rig.w32(spr_to + qwc, 1);
             rig.w32(spr_to + tadr, 0x1000);
-            rig.w32(spr_to + chcr, str | chain | (last_id << 28));
+            rig.w32(spr_to + chcr, chcr_str | chain | (last_id << 28));
             CHECK(qword_is(rig.mem().scratchpad(), 0x35));
             CHECK(qword_is(rig.mem().scratchpad() + 16, last_id == 1 ? 0x36 : 0x00));
             CHECK(rig.r32(spr_to + qwc) == 0u);
@@ -163,7 +163,7 @@ TEST_CASE("dmac: TTE sends the whole tag to the scratchpad and the upper half to
     write_qword(ram + 0x1000, dma_tag(1, 7), 0x1122334455667788ull);
     fill_qword(ram + 0x1010, 0x41);
     rig.w32(spr_to + tadr, 0x1000);
-    rig.w32(spr_to + chcr, str | chain | 0x40u);
+    rig.w32(spr_to + chcr, chcr_str | chain | 0x40u);
     std::uint64_t hi = 0;
     std::memcpy(&hi, rig.mem().scratchpad() + 8, 8);
     CHECK(hi == 0x1122334455667788ull);
@@ -173,7 +173,7 @@ TEST_CASE("dmac: TTE sends the whole tag to the scratchpad and the upper half to
     write_qword(ram + 0x2000, dma_tag(0, 7),
                 std::uint64_t{vif_code(0x05, 0, 2)} | (std::uint64_t{vif_code(0x04, 0, 0x12)} << 32));
     rig.w32(vif1_ch + tadr, 0x2000);
-    rig.w32(vif1_ch + chcr, str | chain | 0x40u | 1u);
+    rig.w32(vif1_ch + chcr, chcr_str | chain | 0x40u | 1u);
     CHECK(rig.vif1().registers().mode == 2u);
     CHECK(rig.vif1().registers().itops == 0x12u);
 }
@@ -187,29 +187,29 @@ TEST_CASE("dmac: completion is an event dma_per_qword cycles per quadword after 
     rig.w32(spr_to + madr, 0x1000);
     rig.w32(spr_to + qwc, 4);
     const Cycles start = rig.machine.clock().now();
-    rig.w32(spr_to + chcr, str);
+    rig.w32(spr_to + chcr, chcr_str);
     CHECK(qword_is(rig.mem().scratchpad() + 48, 0x53)); // delivered at once
     const Cycles done = start + 4 * rig.machine.cost().dma_per_qword;
     rig.machine.advance(done - 1);
-    CHECK((rig.r32(spr_to + chcr) & str) != 0u);
+    CHECK((rig.r32(spr_to + chcr) & chcr_str) != 0u);
     CHECK((rig.machine.interrupts().dmac_stat() & (1u << 9)) == 0u);
     rig.machine.advance(done);
-    CHECK((rig.r32(spr_to + chcr) & str) == 0u);
+    CHECK((rig.r32(spr_to + chcr) & chcr_str) == 0u);
     CHECK((rig.machine.interrupts().dmac_stat() & (1u << 9)) != 0u);
     CHECK(rig.r32(spr_to + madr) == 0x1040u);
 
     SECTION("an empty transfer still completes later, never at once") {
         rig.w32(spr_to + qwc, 0);
         rig.machine.interrupts().write_dmac_stat(1u << 9);
-        rig.w32(spr_to + chcr, str);
-        CHECK((rig.r32(spr_to + chcr) & str) != 0u);
+        rig.w32(spr_to + chcr, chcr_str);
+        CHECK((rig.r32(spr_to + chcr) & chcr_str) != 0u);
         drain(rig);
-        CHECK((rig.r32(spr_to + chcr) & str) == 0u);
+        CHECK((rig.r32(spr_to + chcr) & chcr_str) == 0u);
     }
     SECTION("clearing STR cancels the completion") {
         rig.machine.interrupts().write_dmac_stat(1u << 9);
         rig.w32(spr_to + qwc, 1);
-        rig.w32(spr_to + chcr, str);
+        rig.w32(spr_to + chcr, chcr_str);
         rig.w32(spr_to + chcr, 0);
         drain(rig);
         CHECK((rig.machine.interrupts().dmac_stat() & (1u << 9)) == 0u);
@@ -227,18 +227,18 @@ TEST_CASE("dmac: a stalled VIF holds the channel's completion until FBRST.STC", 
     std::memcpy(ram + 0x1000, data.data(), data.size());
     rig.w32(vif1_ch + madr, 0x1000);
     rig.w32(vif1_ch + qwc, 1);
-    rig.w32(vif1_ch + chcr, str | 1u);
+    rig.w32(vif1_ch + chcr, chcr_str | 1u);
     CHECK(rig.vif1().stalled());
     CHECK(rig.vif1().holding_input());
     CHECK(rig.vif1().registers().mode == 0u);
     drain(rig);
-    CHECK((rig.r32(vif1_ch + chcr) & str) != 0u); // held
+    CHECK((rig.r32(vif1_ch + chcr) & chcr_str) != 0u); // held
     CHECK((rig.machine.interrupts().intc_stat() & (1u << static_cast<unsigned>(IntcLine::vif1))) != 0u);
     rig.w32(0x10003C10u, 0x8u); // FBRST.STC
     CHECK(rig.vif1().registers().mode == 1u);
     CHECK_FALSE(rig.vif1().holding_input());
     drain(rig);
-    CHECK((rig.r32(vif1_ch + chcr) & str) == 0u);
+    CHECK((rig.r32(vif1_ch + chcr) & chcr_str) == 0u);
     CHECK((rig.r32(d_stat) & 2u) != 0u);
 }
 
@@ -248,14 +248,14 @@ TEST_CASE("dmac: a masked PATH3 holds the GIF channel's completion until the mas
     write_qword(rig.mem().rdram() + 0x1000, gif_tag(0, 0, 1));
     rig.w32(gif_ch + madr, 0x1000);
     rig.w32(gif_ch + qwc, 1);
-    rig.w32(gif_ch + chcr, str);
+    rig.w32(gif_ch + chcr, chcr_str);
     drain(rig);
     CHECK(rig.sink.transfers.empty());
-    CHECK((rig.r32(gif_ch + chcr) & str) != 0u);
+    CHECK((rig.r32(gif_ch + chcr) & chcr_str) != 0u);
     rig.vif1().push(std::vector<std::uint8_t>{0x00, 0x00, 0x00, 0x06}); // MSKPATH3 off
     CHECK(rig.sink.transfers.size() == 1u);
     drain(rig);
-    CHECK((rig.r32(gif_ch + chcr) & str) == 0u);
+    CHECK((rig.r32(gif_ch + chcr) & chcr_str) == 0u);
 }
 
 TEST_CASE("dmac: SPR_FROM destination chains with cnt, cnts and end", "[dmac]") {
@@ -271,7 +271,7 @@ TEST_CASE("dmac: SPR_FROM destination chains with cnt, cnts and end", "[dmac]") 
     write_qword(spr + 0x70, dma_tag(1, 1, 0x30300));
     fill_qword(spr + 0x80, 0xEE);
     rig.w32(spr_from + sadr, 0);
-    rig.w32(spr_from + chcr, str | chain);
+    rig.w32(spr_from + chcr, chcr_str | chain);
     const std::uint8_t* ram = rig.mem().rdram();
     CHECK(qword_is(ram + 0x30000, 0x61));
     CHECK(qword_is(ram + 0x30100, 0x62));
@@ -286,7 +286,7 @@ TEST_CASE("dmac: SPR_FROM destination chains with cnt, cnts and end", "[dmac]") 
     SECTION("a source id in a destination chain stops") {
         EeRig bad;
         write_qword(bad.mem().scratchpad(), dma_tag(1, 3, 0x30000));
-        CHECK_THROWS_AS(bad.w32(spr_from + chcr, str | chain), GuestStop);
+        CHECK_THROWS_AS(bad.w32(spr_from + chcr, chcr_str | chain), GuestStop);
     }
 }
 
@@ -299,7 +299,7 @@ TEST_CASE("dmac: scratchpad interleave transfers TQWC and skips SQWC in memory",
     }
     rig.w32(spr_from + madr, 0x40000);
     rig.w32(spr_from + qwc, 3);
-    rig.w32(spr_from + chcr, str | 0x8u); // MOD 2
+    rig.w32(spr_from + chcr, chcr_str | 0x8u); // MOD 2
     const std::uint8_t* ram = rig.mem().rdram();
     CHECK(qword_is(ram + 0x40000, 0x71));
     CHECK(qword_is(ram + 0x40010, 0x00));
@@ -313,7 +313,7 @@ TEST_CASE("dmac: scratchpad interleave transfers TQWC and skips SQWC in memory",
     rig.w32(spr_to + madr, 0x50000);
     rig.w32(spr_to + qwc, 2);
     rig.w32(spr_to + sadr, 0x100);
-    rig.w32(spr_to + chcr, str | 0x8u);
+    rig.w32(spr_to + chcr, chcr_str | 0x8u);
     CHECK(qword_is(spr + 0x100, 0x81));
     CHECK(qword_is(spr + 0x110, 0x83));
 }
@@ -326,7 +326,7 @@ TEST_CASE("dmac: DMAE and D_ENABLEW.CPND hold a start until they allow it", "[dm
     rig.w32(0x1000F590u, 0x1201u | 0x10000u); // suspend
     rig.w32(spr_to + madr, 0x1000);
     rig.w32(spr_to + qwc, 1);
-    rig.w32(spr_to + chcr, str);
+    rig.w32(spr_to + chcr, chcr_str);
     CHECK(qword_is(rig.mem().scratchpad(), 0x00));
     CHECK(rig.r32(0x1000F520u) == 0x11201u);
     rig.w32(0x1000F590u, 0x1201u);
@@ -339,12 +339,12 @@ TEST_CASE("dmac: SIF0 and SIF1 store their registers and move nothing", "[dmac]"
         rig.w32(ch + madr, 0x2000);
         rig.w32(ch + qwc, 3);
         rig.w32(ch + tadr, 0x3000);
-        rig.w32(ch + chcr, str | chain);
+        rig.w32(ch + chcr, chcr_str | chain);
         drain(rig);
         CHECK(rig.r32(ch + madr) == 0x2000u);
         CHECK(rig.r32(ch + qwc) == 3u);
         CHECK(rig.r32(ch + tadr) == 0x3000u);
-        CHECK((rig.r32(ch + chcr) & str) != 0u); // the IOP link completes SIF transfers
+        CHECK((rig.r32(ch + chcr) & chcr_str) != 0u); // the IOP link completes SIF transfers
     }
     CHECK(rig.r32(d_stat) == 0u);
 }
@@ -354,7 +354,7 @@ TEST_CASE("dmac: unmodelled channels and bad chains stop with a diagnostic", "[d
         EeRig rig;
         rig.w32(0x1000B400u + qwc, 1);
         try {
-            rig.w32(0x1000B400u + chcr, str);
+            rig.w32(0x1000B400u + chcr, chcr_str);
             FAIL("no stop");
         } catch (const GuestStop& stop) {
             CHECK(stop.info().reason == StopReason::unsupported);
@@ -365,13 +365,13 @@ TEST_CASE("dmac: unmodelled channels and bad chains stop with a diagnostic", "[d
         EeRig rig;
         rig.w32(spr_to + madr, 0x0A000000u);
         rig.w32(spr_to + qwc, 1);
-        CHECK_THROWS_AS(rig.w32(spr_to + chcr, str), GuestStop);
+        CHECK_THROWS_AS(rig.w32(spr_to + chcr, chcr_str), GuestStop);
     }
     SECTION("a chain that never ends") {
         EeRig rig;
         write_qword(rig.mem().rdram() + 0x1000, dma_tag(0, 2, 0x1000)); // next -> itself
         rig.w32(spr_to + tadr, 0x1000);
-        CHECK_THROWS_AS(rig.w32(spr_to + chcr, str | chain), GuestStop);
+        CHECK_THROWS_AS(rig.w32(spr_to + chcr, chcr_str | chain), GuestStop);
     }
     SECTION("a third call") {
         EeRig rig;
@@ -380,7 +380,7 @@ TEST_CASE("dmac: unmodelled channels and bad chains stop with a diagnostic", "[d
         write_qword(ram + 0x1100, dma_tag(0, 5, 0x1200));
         write_qword(ram + 0x1200, dma_tag(0, 5, 0x1300));
         rig.w32(spr_to + tadr, 0x1000);
-        CHECK_THROWS_AS(rig.w32(spr_to + chcr, str | chain), GuestStop);
+        CHECK_THROWS_AS(rig.w32(spr_to + chcr, chcr_str | chain), GuestStop);
     }
 }
 
@@ -388,7 +388,7 @@ TEST_CASE("dmac: VIF1 to memory reads GS data through the sink", "[dmac][gif]") 
     EeRig rig;
     rig.w32(vif1_ch + madr, 0x6000);
     rig.w32(vif1_ch + qwc, 2);
-    rig.w32(vif1_ch + chcr, str); // DIR 0: VIF1 -> memory
+    rig.w32(vif1_ch + chcr, chcr_str); // DIR 0: VIF1 -> memory
     const std::uint8_t* ram = rig.mem().rdram();
     for (unsigned i = 0; i < 32; ++i) {
         CHECK(ram[0x6000 + i] == static_cast<std::uint8_t>(i));
@@ -402,7 +402,7 @@ TEST_CASE("dmac: DMA starts and GIF packets are traced when their categories are
     write_qword(rig.mem().rdram() + 0x1000, gif_tag(0, 0, 1));
     rig.w32(gif_ch + madr, 0x1000);
     rig.w32(gif_ch + qwc, 1);
-    rig.w32(gif_ch + chcr, str);
+    rig.w32(gif_ch + chcr, chcr_str);
     std::vector<std::string> lines;
     for (const MachineEvent& e : rig.machine.emitted) {
         if (e.type == "trace") {
@@ -425,24 +425,24 @@ TEST_CASE("dmac: resetting a VIF or the GIF releases the channel that waited on 
     std::memcpy(rig.mem().rdram() + 0x1000, data.data(), data.size());
     rig.w32(vif1_ch + madr, 0x1000);
     rig.w32(vif1_ch + qwc, 1);
-    rig.w32(vif1_ch + chcr, str | 1u);
+    rig.w32(vif1_ch + chcr, chcr_str | 1u);
     drain(rig);
-    REQUIRE((rig.r32(vif1_ch + chcr) & str) != 0u);
+    REQUIRE((rig.r32(vif1_ch + chcr) & chcr_str) != 0u);
     rig.w32(0x10003C10u, 0x1u); // FBRST.RST
     CHECK_FALSE(rig.vif1().holding_input());
     drain(rig);
-    CHECK((rig.r32(vif1_ch + chcr) & str) == 0u);
+    CHECK((rig.r32(vif1_ch + chcr) & chcr_str) == 0u);
     CHECK(rig.vif1().registers().mode == 0u); // the kept STMOD was dropped
 
     rig.w32(0x10003010u, 1u); // GIF_MODE.M3R
     write_qword(rig.mem().rdram() + 0x2000, gif_tag(0, 0, 1));
     rig.w32(gif_ch + madr, 0x2000);
     rig.w32(gif_ch + qwc, 1);
-    rig.w32(gif_ch + chcr, str);
+    rig.w32(gif_ch + chcr, chcr_str);
     drain(rig);
-    REQUIRE((rig.r32(gif_ch + chcr) & str) != 0u);
+    REQUIRE((rig.r32(gif_ch + chcr) & chcr_str) != 0u);
     rig.w32(0x10003000u, 1u); // GIF_CTRL.RST
     drain(rig);
-    CHECK((rig.r32(gif_ch + chcr) & str) == 0u);
+    CHECK((rig.r32(gif_ch + chcr) & chcr_str) == 0u);
     CHECK(rig.sink.transfers.empty());
 }

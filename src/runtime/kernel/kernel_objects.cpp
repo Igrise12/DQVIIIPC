@@ -203,7 +203,9 @@ std::uint64_t EeKernel::lines_started(Cycles t) const noexcept {
 // ---- Threads.
 
 std::int32_t EeKernel::create_thread(const ThreadParams& p) {
-    if (p.priority < 1 || p.priority >= kabi::priority_count) {
+    // 0 (highest) to 127, as the EE kernel takes them: Sony's libkernel creates its KernelTopThread at
+    // priority 0 at start-up and drops it when CreateThread refuses (M3 bring-up). PS2Recomp refuses 0.
+    if (p.priority < 0 || p.priority >= kabi::priority_count) {
         return kabi::illegal_priority;
     }
     std::int32_t id = 0;
@@ -422,7 +424,7 @@ std::int32_t EeKernel::cancel_wakeup(std::int32_t id) {
 }
 
 std::int32_t EeKernel::change_priority(std::int32_t id, std::int32_t priority, std::int32_t& old_priority) {
-    if (priority < 1 || priority >= kabi::priority_count) {
+    if (priority < 0 || priority >= kabi::priority_count) {
         return kabi::illegal_priority;
     }
     if (id == 0) {

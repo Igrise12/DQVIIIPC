@@ -92,7 +92,8 @@ for unit in "${selected[@]}"; do
         *",$unit,"*) ;;
         *) echo "error: unknown unit '$unit' (expected one of $all_units)" >&2; exit 2 ;;
     esac
-    extra=()
+    # Code that only data pointers reach (vtables, callbacks) becomes functions too (M3 bring-up).
+    extra=(pointer_gaps=1)
     if [ "$unit" = main ]; then
         project=$projects/base
         read -r start end < <(unit_range "$elf")
@@ -108,7 +109,7 @@ for f in sorted(pathlib.Path(sys.argv[1]).glob("*.toml")):
 PY
 )
         if [ -n "$tables" ]; then
-            extra=("$tables")
+            extra+=("$tables")
         fi
     else
         project=$projects/s3-$unit

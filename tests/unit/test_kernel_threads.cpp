@@ -201,9 +201,12 @@ TEST_CASE("kernel threads: invalid ids give the documented kernel errors", "[ker
     CHECK(m.call(sys_poll_sema, {0x7FFF}) == kabi::unknown_semaphore_id);
     CHECK(m.call(sys_resume_thread, {0}) == kabi::illegal_thread_id);
     CHECK(m.call(sys_refer_thread_status, {0x7FFF, k_status}) == kabi::unknown_thread_id);
-    CHECK(m.call(sys_change_priority, {1, 0}) == kabi::illegal_priority);
     CHECK(m.call(sys_change_priority, {1, 128}) == kabi::illegal_priority);
-    CHECK(create(m, 0) == kabi::illegal_priority); // priority 0 belongs to the boot thread
+    CHECK(create(m, 128) == kabi::illegal_priority);
+    // 0 is the highest priority and valid: libkernel's KernelTopThread runs there (M3 bring-up).
+    const std::int32_t top = create(m, 0);
+    CHECK(top > 0);
+    CHECK(m.call(sys_delete_thread, {static_cast<std::uint32_t>(top)}) == kabi::ok);
     const std::int32_t id = create(m, 20);
     CHECK(m.call(sys_delete_thread, {static_cast<std::uint32_t>(id)}) == kabi::ok);
     CHECK(m.call(sys_start_thread, {static_cast<std::uint32_t>(id), 0}) == kabi::unknown_thread_id);

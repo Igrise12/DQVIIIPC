@@ -4,13 +4,21 @@
 // Headless postScript: export the function map of one code unit for ps2_recomp.
 //
 //   -postScript ExportFunctionMap.java <out.csv> <out.jump_tables.toml> <out.stats.toml> <unit_start> <unit_end>
-//               [entry_tables=START:END[,START:END...]]
+//               [entry_tables=START:END[,START:END...]] [pointer_gaps=1]
 //
 // entry_tables: pointer tables whose words are function entries (the static-constructor table crt0 walks,
 // from the region profile's [boot].ctor_table). A word that points into the unit at an address Ghidra holds no
 // function for is disassembled and made a function before the export: such code is reached only through the
 // table, so auto-analysis never found it (M3 bring-up: 6 of main's 156 constructors). The project is opened
 // read-only, so these functions exist only for the export.
+//
+// pointer_gaps=1: every aligned data word of the unit (a word no instruction covers) that points into the unit
+// at a 4-aligned address no function covers is a candidate entry: indirect calls through vtables and callbacks
+// reach such code, which auto-analysis left undisassembled (M3 bring-up: 3,456 distinct targets in main). The
+// target is disassembled and made a function when the result is clean: the flow stays inside the unit, covers no
+// existing function and every word of the body is an instruction. Pointers into existing bodies are never used,
+// so no function is split, and targets in gaps larger than MAX_CODE_GAP between auto-analysed functions are data
+// areas and never used either (floats and tables decode as instructions too).
 //
 // The unit is the half-open address range [unit_start, unit_end): the main program's file image, or
 // one overlay's 64-byte header plus text plus data at the window base. Three files are written:
@@ -59,6 +67,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 import ghidra.app.cmd.disassemble.DisassembleCommand;
@@ -171,6 +180,7 @@ public class ExportFunctionMap extends GhidraScript {
     private final List<String> islands = new ArrayList<>();
     private final Map<String, Long> counts = new LinkedHashMap<>();
     private final TreeSet<Long> tableEntryFunctions = new TreeSet<>();
+    private final TreeSet<Long> pointerGapFunctions = new TreeSet<>();
 
     private Memory memory;
     private Listing listing;
@@ -178,9 +188,10 @@ public class ExportFunctionMap extends GhidraScript {
     @Override
     public void run() throws Exception {
         String[] args = getScriptArgs();
-        if (args.length != 5 && args.length != 6) {
+        if (args.length < 5) {
             throw new IllegalArgumentException("usage: ExportFunctionMap.java <out.csv> <out.jump_tables.toml> " +
-                    "<out.stats.toml> <unit_start> <unit_end> [entry_tables=START:END[,START:END...]]");
+                    "<out.stats.toml> <unit_start> <unit_end> [entry_tables=START:END[,START:END...]] " +
+                    "[pointer_gaps=1]");
         }
         File csvFile = new File(args[0]);
         File tablesFile = new File(args[1]);
@@ -192,8 +203,16 @@ public class ExportFunctionMap extends GhidraScript {
         }
         memory = currentProgram.getMemory();
         listing = currentProgram.getListing();
-        if (args.length == 6) {
-            createTableEntryFunctions(args[5], unitStart, unitEnd);
+        for (int i = 5; i < args.length; i++) {
+            if (args[i].startsWith("entry_tables=")) {
+                createTableEntryFunctions(args[i], unitStart, unitEnd);
+            }
+            else if (args[i].equals("pointer_gaps=1")) {
+                createPointerGapFunctions(unitStart, unitEnd);
+            }
+            else {
+                throw new IllegalArgumentException("unknown option " + args[i]);
+            }
         }
 
         // Pass 1 finds the switches; case blocks held as functions join their owner; pass 2 is final.
@@ -985,6 +1004,127 @@ public class ExportFunctionMap extends GhidraScript {
         counts.put(key, value);
     }
 
+    // A gap between two functions auto-analysis found counts as code area only up to this size; the data areas of
+    // a program (constant tables, strings) are far larger (main: 62 KiB and 217 KiB, the largest code gap 3.3 KiB).
+    private static final long MAX_CODE_GAP = 8192;
+
+    // Makes functions at data-pointer targets in undisassembled gaps (see pointer_gaps).
+    private void createPointerGapFunctions(long unitStart, long unitEnd) throws Exception {
+        // The functions auto-analysis found, as [start, end) by start, before any is added here.
+        TreeMap<Long, Long> known = new TreeMap<>();
+        for (FunctionIterator it = currentProgram.getFunctionManager().getFunctions(true); it.hasNext();) {
+            Function f = it.next();
+            long s = f.getEntryPoint().getOffset();
+            if (s >= unitStart && s < unitEnd) {
+                known.put(s, f.getBody().getMaxAddress().getOffset() + 1);
+            }
+        }
+        TreeSet<Long> targets = new TreeSet<>();
+        long dataArea = 0;
+        for (long a = unitStart; a + 4 <= unitEnd; a += 4) {
+            if (listing.getInstructionContaining(toAddr(a)) != null) {
+                continue; // code, not a data word
+            }
+            long target = readWordOrNull(a);
+            if (target == NO_VALUE || target < unitStart || target >= unitEnd || (target & 3) != 0) {
+                continue;
+            }
+            Address at = toAddr(target);
+            if (getFunctionContaining(at) != null) {
+                continue;
+            }
+            Instruction ins = listing.getInstructionContaining(at);
+            if (ins != null && !ins.getAddress().equals(at)) {
+                continue;
+            }
+            Map.Entry<Long, Long> before = known.floorEntry(target);
+            Map.Entry<Long, Long> after = known.ceilingEntry(target);
+            if (before == null || after == null || after.getKey() - before.getValue() > MAX_CODE_GAP) {
+                dataArea++;
+                continue; // a data area, not a code gap
+            }
+            targets.add(target);
+        }
+        // Address constants code computes (lui/addiu pairs, references auto-analysis made) count the same as data
+        // words: callbacks and constructor thunks are passed that way. Branch and call references are not used.
+        long codeRefs = 0;
+        ReferenceManager refs = currentProgram.getReferenceManager();
+        AddressSet unit = new AddressSet(toAddr(unitStart), toAddr(unitEnd - 1));
+        for (Iterator<Address> it = refs.getReferenceDestinationIterator(unit, true); it.hasNext();) {
+            Address to = it.next();
+            long target = to.getOffset();
+            if ((target & 3) != 0 || targets.contains(target) || getFunctionContaining(to) != null) {
+                continue;
+            }
+            boolean addressConstant = false;
+            for (ReferenceIterator ri = refs.getReferencesTo(to); ri.hasNext();) {
+                Reference r = ri.next();
+                if (!r.getReferenceType().isFlow() && listing.getInstructionAt(r.getFromAddress()) != null) {
+                    addressConstant = true;
+                    break;
+                }
+            }
+            if (!addressConstant) {
+                continue;
+            }
+            Instruction ins = listing.getInstructionContaining(to);
+            if (ins != null && !ins.getAddress().equals(to)) {
+                continue;
+            }
+            Map.Entry<Long, Long> before = known.floorEntry(target);
+            Map.Entry<Long, Long> after = known.ceilingEntry(target);
+            if (before == null || after == null || after.getKey() - before.getValue() > MAX_CODE_GAP) {
+                continue;
+            }
+            targets.add(target);
+            codeRefs++;
+        }
+        put("pointer_gap_code_refs", codeRefs);
+        put("pointer_gap_in_data_areas", dataArea);
+        long rejected = 0;
+        for (long target : targets) {
+            Address at = toAddr(target);
+            if (getFunctionContaining(at) != null) {
+                continue; // a function made for an earlier target covers it now
+            }
+            if (listing.getInstructionAt(at) == null) {
+                if (!listing.isUndefined(at, at.add(3))) {
+                    rejected++;
+                    continue; // defined data, not code
+                }
+                new DisassembleCommand(at, null, true).applyTo(currentProgram, monitor);
+            }
+            Function f = listing.getInstructionAt(at) != null ? createFunction(at, null) : null;
+            if (f == null || !cleanBody(f, unitStart, unitEnd)) {
+                if (f != null) {
+                    removeFunction(f);
+                }
+                rejected++;
+                continue;
+            }
+            pointerGapFunctions.add(target);
+        }
+        put("pointer_gap_targets", targets.size());
+        put("pointer_gap_functions_created", pointerGapFunctions.size());
+        put("pointer_gap_rejected", rejected);
+    }
+
+    // A made function is kept only when its body lies in the unit and every word of it is an instruction.
+    private boolean cleanBody(Function f, long unitStart, long unitEnd) {
+        AddressSetView body = f.getBody();
+        if (body.getMinAddress().getOffset() < unitStart || body.getMaxAddress().getOffset() >= unitEnd) {
+            return false;
+        }
+        for (AddressRange r : body) {
+            for (long a = r.getMinAddress().getOffset(); a <= r.getMaxAddress().getOffset(); a += 4) {
+                if (listing.getInstructionAt(toAddr(a)) == null) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     // Makes a function at every pointer-table word that targets the unit and has none yet (see entry_tables).
     private void createTableEntryFunctions(String spec, long unitStart, long unitEnd) throws Exception {
         if (!spec.startsWith("entry_tables=")) {
@@ -1081,6 +1221,8 @@ public class ExportFunctionMap extends GhidraScript {
             writeList(w, "link_return_entries", linkReturns);
             w.println("# Functions made at entry_tables words that Ghidra had no function for.");
             writeList(w, "entry_table_functions", tableEntryFunctions);
+            w.println("# Functions made at data-pointer targets in undisassembled gaps (pointer_gaps=1).");
+            writeList(w, "pointer_gap_functions", pointerGapFunctions);
             w.println("# The same for link branches whose target is inside their own function (not entries).");
             writeList(w, "link_branch_internal", linkInternal);
             w.println("# Computed jr sites with an emitted table (bound: slti/sltiu case count, or scan).");
