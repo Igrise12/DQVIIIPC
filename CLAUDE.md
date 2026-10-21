@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 DQ8-Native: an open-source native PC port of *Dragon Quest VIII* (PS2, NTSC-U, boot file `SLUS_212.07`) by
 static recompilation of the game's EE code to C++, run on a purpose-built runtime. Not an emulator. GPL-3.0-or-later.
 
-**Current state: M1 (disc intake) and M2 (first recompile) complete; M3 (boots) acceptance met on 2026-10-21:
-M3a (headless boot to the title) and M3b (paraLLEl-GS pixels at PCSX2 parity, the SDL3 window with keyboard and
-gamepad). M3 closes once CI is green on the last fix; M4 (playable core) is next.**
+**Current state: M1 (disc intake), M2 (first recompile) and M3 (boots, done 2026-10-21) complete: the disc boots to
+the title menu headless or in an SDL3 window, with paraLLEl-GS frames at PCSX2 parity. M4 (playable core) is being
+planned.**
 - `src/core` (`libdq8core`): ISO 9660 reader, SHA-1/CRC-32, ELF32 reader and writer, `MWo3` parser, region profiles
   (`data/regions/SLUS_21207.toml`: hashes, sizes, addresses and the S3 loader facts, never bytes), `verify_image()` /
   `extract()`, a portable process runner, and the recompile pipeline (`core/recomp/`: function maps, per-unit
@@ -147,16 +147,12 @@ launcher, cli  ->  core only
 ## Next work
 
 All M0 spikes (S0–S7) are done; their findings live in `Docs/spikes/` and are folded into the three docs and
-`Docs/formats/`. **M3 (boots) is in progress**, planned with the project owner on 2026-10-21:
-- day 0 (the shared contracts, submodules, ADR-0005/0007/0011/0012) and sessions A–E are merged on `main`: the
-  execution core and kernel, the devices and GS pipeline, the SIF/IOP services, the paraLLEl-GS backend and SDL3
-  platform, and the host and game layer;
-- the M3a bring-up on the real disc is done: the headless boot reaches the title menu, deterministically, with no
-  unimplemented kernel call and no unhandled MMIO (acceptance results and the bring-up log in the milestone file);
-- M3b is done too: paraLLEl-GS frames match PCSX2's software renderer (settings 0.9998, title logo 0.9989 SSIM),
-  and `--window` runs at real time with keyboard and gamepad input (`tools/bringup/window_smoke.py`);
-- next: confirm CI on the ASan fix, then plan M4 (playable core: audio, memory card saves, movies, VU1, New Game,
-  battle, menu and shop) with the project owner.
+`Docs/formats/`. **M3 (boots) is done** (2026-10-21, `Docs/milestones/M3-boots.md`): day 0, sessions A–E, and the
+bring-up on the real disc; the headless boot reaches the title menu deterministically, paraLLEl-GS matches PCSX2's
+software renderer (settings 0.9998, title logo 0.9989 SSIM), and `--window` runs at real time with keyboard and
+gamepad (`tools/bringup/window_smoke.py`). CI is green on all six jobs at `38fdf4d`.
 
-Everything is in `Docs/milestones/M3-boots.md`. M2's record is `Docs/milestones/M2-first-recompile.md`.
+**Next: M4 (playable core)**, being planned with the project owner from 2026-10-21 (brief §11: pad, memory card,
+audio, VU1 and movies; New Game, a battle, the menu and shop, a save made and reloaded). M2's record is
+`Docs/milestones/M2-first-recompile.md`.
 Do not start implementation work the user has not asked for.

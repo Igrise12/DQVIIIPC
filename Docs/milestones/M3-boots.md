@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Day 0 (contracts) done 2026-10-21; sessions A–E merged 2026-10-21 (430 unit tests on Clang, GCC and ASan); bring-up on the real disc next |
+| **Status** | **Done 2026-10-21.** Day 0 (contracts) and sessions A–E merged 2026-10-21; M3a and M3b acceptance met on the real disc 2026-10-21 (see Results); CI green on all six jobs at `38fdf4d` |
 | **Exit (brief §11)** | Memory, kernel HLE, threads, CDVD and overlay switching work; the game reaches the title screen; first pixels through the GS backend |
 | **Owner choices (2026-10-21)** | Native IOP servers, with null servers for the two sound servers (ADR-0011) · SDL3 window plus headless mode · five parallel sessions, then serial bring-up · movies skipped (playback is M4) · ADR-0005 and ADR-0007 accepted |
 | **Split** | **M3a**: headless boot to the title screen with the trace backend. **M3b**: paraLLEl-GS pixels, the window, live input |
@@ -933,6 +933,7 @@ Scores are SSIM by `tools/bringup/ssim.sh`: bilinear to 640×480, crops in those
     headroom test, because the 8 KiB frame of the Clang 18 fix sat on ASan's fake stack. The next commit makes it a
     dynamic allocation. In the Ubuntu 24.04 CI container, with clang-18's ASan runtime added, ASan+UBSan passes all
     434 unit tests; ci-clang and ci-gcc pass all 433. M2's `--stop-at-first-syscall` still stops at `SetupThread`.
+    CI at `38fdf4d` (the fix and this record): all six jobs green, ASan+UBSan included.
 12. Performance (recorded, not gated):
 
     | Build | Backend | Time to the title (1,200 vblanks) | Vblanks per second |
