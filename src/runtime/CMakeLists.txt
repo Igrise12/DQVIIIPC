@@ -19,6 +19,17 @@ add_library(dq8_runtime STATIC
     machine/events.cpp
     machine/interrupts.cpp
     machine/mmio.cpp
+    machine/intc_regs.cpp
+    machine/ee_timers.cpp
+    machine/ee_devices.cpp
+    dma/gif.cpp
+    dma/vif.cpp
+    dma/dmac.cpp
+    gs/gs_priv_device.cpp
+    vu/vu_core.cpp
+    vu/vu_lower.cpp
+    vu/vu_upper.cpp
+    vu/vu_units.cpp
     platform/dynlib.cpp
 )
 add_library(dq8::runtime ALIAS dq8_runtime)
