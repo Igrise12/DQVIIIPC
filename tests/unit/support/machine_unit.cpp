@@ -278,10 +278,10 @@ struct Guest {
     }
     // A syscall at `pc` with up to six arguments in a0..a3, t0, t1; returns v0.
     uint32_t sys(uint32_t pc, uint32_t number, std::initializer_list<uint32_t> args = {}) {
-        unsigned i = 0;
+        int reg = static_cast<int>(reg_a0);
         for (const uint32_t a : args) {
-            SET_GPR_U32(ctx, i < 4 ? reg_a0 + i : reg_t0 + (i - 4), a);
-            ++i;
+            SET_GPR_U32(ctx, reg, a);
+            reg = reg == static_cast<int>(reg_a3) ? static_cast<int>(reg_t0) : reg + 1;
         }
         ctx->pc = pc;
         syscall_at(rdram, ctx, runtime, pc, number);
