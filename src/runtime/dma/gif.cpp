@@ -133,10 +133,14 @@ bool Gif::write32(std::uint32_t offset, std::uint32_t value, std::uint32_t mask,
     switch (offset) {
     case reg_ctrl: {
         const std::uint32_t v = value & mask;
-        if ((v & 1u) != 0) { // RST: drop partial packets and queued PATH3 data
+        if ((v & 1u) != 0) { // RST: drop partial packets and queued PATH3 data (releasing a held GIF DMA)
+            const bool had_queue = !path3_queue_.empty();
             paths_ = {};
             path3_queue_.clear();
             readback_pending_ = 0;
+            if (had_queue && path3_drained_) {
+                path3_drained_();
+            }
         }
         ctrl_ = merge_masked(ctrl_, v, mask) & stat_pse;
         break;

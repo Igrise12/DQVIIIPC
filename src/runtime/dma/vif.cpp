@@ -177,11 +177,14 @@ bool Vif::write32(std::uint32_t offset, std::uint32_t value, std::uint32_t mask,
         }
         break;
     case reg_fbrst:
-        if ((v & 1u) != 0) { // RST
-            const bool was_masking = unit_ == 1 && gif_ != nullptr;
+        if ((v & 1u) != 0) { // RST: drops kept input too, which releases a DMA channel waiting on it
+            const bool was_holding = held_;
             reset();
-            if (was_masking) {
+            if (unit_ == 1 && gif_ != nullptr) {
                 gif_->set_vif_path3_mask(false);
+            }
+            if (was_holding && drained_) {
+                drained_();
             }
         }
         if ((v & 2u) != 0) { // FBK

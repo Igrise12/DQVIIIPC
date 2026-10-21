@@ -412,3 +412,35 @@ TEST_CASE("dmac: DMA starts and GIF packets are traced when their categories are
     CHECK(lines[0] == "gs: path3 packet 16 bytes");
     CHECK(lines[1] == "dma: gif mode 0 chcr 0x00000100 tadr 0x00000000: 1 qwords, 0 tags");
 }
+
+TEST_CASE("dmac: resetting a VIF or the GIF releases the channel that waited on it", "[dmac][vif][gif]") {
+    EeRig rig;
+    std::vector<std::uint8_t> data;
+    dq8::test::put32(data, vif_code(0x00, 0, 0, true)); // NOP with the i bit: stall
+    dq8::test::put32(data, vif_code(0x05, 0, 1));
+    dq8::test::put32(data, 0);
+    dq8::test::put32(data, 0);
+    std::memcpy(rig.mem().rdram() + 0x1000, data.data(), data.size());
+    rig.w32(vif1_ch + madr, 0x1000);
+    rig.w32(vif1_ch + qwc, 1);
+    rig.w32(vif1_ch + chcr, str | 1u);
+    drain(rig);
+    REQUIRE((rig.r32(vif1_ch + chcr) & str) != 0u);
+    rig.w32(0x10003C10u, 0x1u); // FBRST.RST
+    CHECK_FALSE(rig.vif1().holding_input());
+    drain(rig);
+    CHECK((rig.r32(vif1_ch + chcr) & str) == 0u);
+    CHECK(rig.vif1().registers().mode == 0u); // the kept STMOD was dropped
+
+    rig.w32(0x10003010u, 1u); // GIF_MODE.M3R
+    write_qword(rig.mem().rdram() + 0x2000, gif_tag(0, 0, 1));
+    rig.w32(gif_ch + madr, 0x2000);
+    rig.w32(gif_ch + qwc, 1);
+    rig.w32(gif_ch + chcr, str);
+    drain(rig);
+    REQUIRE((rig.r32(gif_ch + chcr) & str) != 0u);
+    rig.w32(0x10003000u, 1u); // GIF_CTRL.RST
+    drain(rig);
+    CHECK((rig.r32(gif_ch + chcr) & str) == 0u);
+    CHECK(rig.sink.transfers.empty());
+}
