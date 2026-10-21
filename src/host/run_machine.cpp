@@ -310,7 +310,28 @@ int run_game(const Options& o, const char* argv0) {
         pipeline.request_frame_dump(d.vblank, d.path.string());
     }
 
-    // The machine and its devices, in the fixed attach order: EE devices, IOP, game layer.
+    // The devices exist before the machine so that they outlive it (machine.h: an attached device must).
+    std::vector<std::unique_ptr<rt::IDevice>> devices = rt::make_ee_devices(rt::EeDevicesConfig{&pipeline});
+    rt::IopConfig iop_config;
+    iop_config.disc = disc.get();
+    iop_config.input = input;
+    if (profile != nullptr) {
+        iop_config.modules = game::iop_module_specs(*profile);
+        iop_config.reset_image = game::iop_reset_image(*profile);
+    }
+    rt::Iop iop(std::move(iop_config));
+    std::unique_ptr<game::OverlayResidency> residency;
+    std::unique_ptr<game::ModeWatcher> mode_watcher;
+    if (profile != nullptr) {
+        residency = std::make_unique<game::OverlayResidency>(
+            game::OverlayResidencyConfig{profile, &s.overlays, o.verify_overlays});
+        if (profile->overlay_window.mode_variable != 0) {
+            mode_watcher = std::make_unique<game::ModeWatcher>(profile->overlay_window.mode_variable);
+        }
+    }
+    std::atomic<bool> requested{false};
+
+    // The machine, then the devices in the fixed attach order: EE devices, IOP, game layer.
     rt::MachineConfig config;
     config.video = video_for(s);
     config.strict_kernel = o.strict_kernel;
@@ -327,32 +348,23 @@ int run_game(const Options& o, const char* argv0) {
     }
     rt::Machine machine(s.memory, *s.dispatcher, config);
     s.dispatcher->set_machine(&machine);
-    std::vector<std::unique_ptr<rt::IDevice>> devices = rt::make_ee_devices(rt::EeDevicesConfig{&pipeline});
+    // The dispatcher outlives the machine: forget it before the machine goes.
+    struct ForgetMachine {
+        rt::Dispatcher& dispatcher;
+        ~ForgetMachine() { dispatcher.set_machine(nullptr); }
+    } forget_machine{*s.dispatcher};
     for (const auto& d : devices) {
         machine.attach(*d);
     }
-    rt::IopConfig iop_config;
-    iop_config.disc = disc.get();
-    iop_config.input = input;
-    if (profile != nullptr) {
-        iop_config.modules = game::iop_module_specs(*profile);
-        iop_config.reset_image = game::iop_reset_image(*profile);
-    }
-    rt::Iop iop(std::move(iop_config));
     machine.attach(iop);
-
-    std::unique_ptr<game::OverlayResidency> residency;
-    std::unique_ptr<game::ModeWatcher> mode_watcher;
-    std::atomic<bool> requested{false};
-    if (profile != nullptr) {
-        residency = std::make_unique<game::OverlayResidency>(
-            game::OverlayResidencyConfig{profile, &s.overlays, o.verify_overlays});
+    if (residency) {
         machine.attach(*residency);
         s.dispatcher->install_override(residency->hook_override(), &s.memory);
-        if (profile->overlay_window.mode_variable != 0) {
-            mode_watcher = std::make_unique<game::ModeWatcher>(profile->overlay_window.mode_variable);
-            machine.attach(*mode_watcher);
-        }
+    }
+    if (mode_watcher) {
+        machine.attach(*mode_watcher);
+    }
+    if (profile != nullptr) {
         for (rt::OverrideSpec& spec :
              game::movie_overrides(*profile, movie_policy.value_or(game::MoviePolicy::skip))) {
             s.dispatcher->install_override(std::move(spec), &s.memory);
