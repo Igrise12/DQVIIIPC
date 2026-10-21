@@ -106,3 +106,24 @@ add_test(NAME host.dq8_game_elf_no_modules
         "-DEXPECT=\"code\":\"module-validation\"@@no unit modules"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
 set_tests_properties(host.dq8_game_elf_no_modules PROPERTIES FIXTURES_REQUIRED dq8_contract_elf LABELS unit)
+
+# M3 session D. Separate executables: the paraLLEl-GS tests need the dq8-gs-parallel library file, the platform tests
+# link SDL3; neither belongs in dq8_unit_tests. Both run in CI (label "unit") without a GPU or a display.
+if(DQ8_BUILD_GS_PARALLEL)
+    add_executable(dq8_gs_parallel_tests test_gs_parallel_abi.cpp)
+    target_link_libraries(dq8_gs_parallel_tests PRIVATE dq8::runtime Catch2::Catch2WithMain)
+    target_compile_definitions(dq8_gs_parallel_tests PRIVATE
+        DQ8_GS_PARALLEL_LIBRARY="$<TARGET_FILE:dq8-gs-parallel>")
+    add_dependencies(dq8_gs_parallel_tests dq8-gs-parallel)
+    dq8_set_warnings(dq8_gs_parallel_tests)
+    dq8_enable_sanitizers(dq8_gs_parallel_tests)
+    catch_discover_tests(dq8_gs_parallel_tests PROPERTIES LABELS unit)
+    # The hidden [.gpu] cases draw on a real Vulkan device; label "gpu", never in CI. They skip without a device.
+    add_test(NAME gs_parallel.gpu_render COMMAND dq8_gs_parallel_tests "[gpu]")
+    set_tests_properties(gs_parallel.gpu_render PROPERTIES LABELS gpu SKIP_REGULAR_EXPRESSION "SKIPPED")
+    if(DQ8_SANITIZERS)
+        # The GPU driver leaks a few KiB per process (NVIDIA 615: every leaked block traces into libnvidia-glcore
+        # and libnvidia-glsi, none into our code, paraLLEl-GS or Granite); AddressSanitizer stays on.
+        set_tests_properties(gs_parallel.gpu_render PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_leaks=0")
+    endif()
+endif()

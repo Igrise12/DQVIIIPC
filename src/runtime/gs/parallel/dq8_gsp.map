@@ -1,0 +1,10 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+/* SPDX-FileCopyrightText: 2026 DQ8-Native contributors */
+/* dq8-gs-parallel exports only its C ABI (include/dq8/gs/gs_parallel_abi.h); everything else, including the
+   paraLLEl-GS and Granite code linked in, stays local. Anonymous version node: no version symbol is added. */
+{
+  global:
+    dq8_gsp_*;
+  local:
+    *;
+};

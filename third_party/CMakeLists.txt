@@ -32,3 +32,6 @@ add_library(dq8::stb ALIAS dq8_stb)
 target_include_directories(dq8_stb SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/stb")
 # SDL3 (DQ8_BUILD_WINDOW) and paraLLEl-GS (DQ8_BUILD_GS_PARALLEL) are wired up in cmake/Sdl3.cmake and
 # cmake/ParallelGs.cmake (M3 session D).
+if(DQ8_BUILD_GS_PARALLEL)
+    include(ParallelGs)
+endif()
