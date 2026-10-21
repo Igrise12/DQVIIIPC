@@ -15,6 +15,13 @@
 #include <string>
 #include <vector>
 
+#if defined(_MSC_VER)
+#include <malloc.h>
+#define DQ8_TEST_ALLOCA _alloca
+#else
+#define DQ8_TEST_ALLOCA __builtin_alloca
+#endif
+
 namespace {
 
 using dq8::rt::Fiber;
@@ -51,7 +58,11 @@ struct Headroom {
 char* volatile frame_sink = nullptr;
 
 void measure_inner(Headroom* h) {
-    char frame[8192]; // twice the checked margin, so a tail call from measure() cannot eat it
+    // A dynamic allocation, because AddressSanitizer moves a published fixed-size array to its fake stack;
+    // the size goes through a volatile so that no compiler turns it back into a fixed-size array. 8 KiB is
+    // twice the checked margin, so a tail call from measure() cannot eat it.
+    volatile std::size_t size = 8192;
+    char* frame = static_cast<char*>(DQ8_TEST_ALLOCA(size));
     frame_sink = frame;
     h->inner = Fiber::current()->headroom();
     frame_sink = nullptr;
