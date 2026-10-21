@@ -7,6 +7,8 @@
 
 #include <cstdint>
 #include <functional>
+#include <initializer_list>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -30,6 +32,22 @@ enum class OverrideKind {
 
 std::string_view to_string(OverrideKind kind) noexcept;
 
+// Calls from native override code into the guest (M4 day 0; the sceMpeg HLE calls the player's callbacks).
+// Implemented by the EE runtime; the dispatcher hands it to every override (Dispatcher::set_guest_calls).
+class IGuestCalls {
+  public:
+    virtual ~IGuestCalls() = default;
+    // Runs the guest function at `entry` as a nested call on a copy of `ctx`'s registers: $a0..$a3 and
+    // $t0..$t3 from `args`, $sp = `sp`, $ra = 0. The callee may block, yield or be terminated with its thread
+    // (the fiber is then abandoned with every host frame on it, so callers keep no state in locals that must
+    // be destroyed). Returns the callee's $v0 (low 64 bits); `ctx` is unchanged.
+    virtual std::uint64_t call_function(R5900Context& ctx, std::uint32_t entry,
+                                        std::span<const std::uint64_t> args, std::uint32_t sp) = 0;
+    // A kernel service by name, as the guest's by-name call would make it (it may block); returns $v0.
+    virtual std::uint64_t call_kernel(R5900Context& ctx, std::string_view name,
+                                      std::span<const std::uint64_t> args) = 0;
+};
+
 struct OverrideCall {
     std::uint8_t* rdram = nullptr;
     R5900Context* ctx = nullptr;
@@ -37,8 +55,22 @@ struct OverrideCall {
     MachineServices* machine = nullptr; // Dispatcher::set_machine; null in tests that run without one
     dq8_guest_fn original = nullptr;    // the recompiled function, for wrappers that call it themselves
     std::uint32_t address = 0;          // the overridden entry (ctx->pc when the trampoline was entered)
+    IGuestCalls* guest = nullptr;       // Dispatcher::set_guest_calls; null without a machine
     // A replacement returns like a guest function: it sets ctx->pc to $ra (the trampoline checks in debug).
     void return_to_caller() const noexcept;
+
+    // Guest memory below the caller's stack pointer for data a callee reads (a callback block): 16-byte
+    // aligned, valid until the override returns. Each call returns a new block below the previous one.
+    std::uint32_t scratch(std::uint32_t bytes);
+    // Calls the guest function at `entry` with up to eight arguments; its stack starts below every scratch
+    // block. Returns its $v0. std::logic_error without IGuestCalls.
+    std::uint64_t call_guest(std::uint32_t entry, std::initializer_list<std::uint64_t> args = {});
+    // Calls a kernel service by name ("RotateThreadReadyQueue") with up to eight arguments; returns $v0.
+    std::uint64_t kernel_call(std::string_view name, std::initializer_list<std::uint64_t> args = {});
+
+    // Internal to scratch(): 0 until the first block, then the lowest block's address. Public so that
+    // OverrideCall stays an aggregate.
+    std::uint32_t scratch_sp = 0;
 };
 
 using OverrideFn = std::function<void(OverrideCall&)>;

@@ -16,6 +16,12 @@ std::string_view to_string(TraceCategory category) noexcept {
         return "dma";
     case TraceCategory::gs:
         return "gs";
+    case TraceCategory::iop:
+        return "iop";
+    case TraceCategory::spu2:
+        return "spu2";
+    case TraceCategory::audio:
+        return "audio";
     }
     return "unknown";
 }

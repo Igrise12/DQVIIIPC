@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Accepted** 2026-10-21 by the project owner (M3 planning) |
+| **Status** | **Accepted** 2026-10-21 by the project owner (M3 planning). Amended 2026-10-21 by ADR-0014: the sound modules run on an IOP interpreter from M4 |
 | **Related** | architecture.md §5.2, §7.1, §8, Docs/milestones/M3-boots.md, ADR-0003 |
 
 ## Context

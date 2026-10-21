@@ -124,6 +124,22 @@ struct RegionProfile {
         std::string scene_unit;           // the overlay holding the scene functions, e.g. "TITLE"
         std::vector<std::uint32_t> scene_functions; // fallback override targets inside the overlay window
         std::vector<MovieTimeline> timelines;       // [[movie.timelines]], in the file's order
+        // [movie.sce_mpeg] (M4, ADR-0015): the SDK entry points the movie HLE overrides or hooks, all in the
+        // main program; absent (create == 0) when the profile has no table.
+        struct SceMpeg {
+            std::uint32_t create = 0;
+            std::uint32_t delete_ = 0;
+            std::uint32_t add_callback = 0;
+            std::uint32_t add_str_callback = 0;
+            std::uint32_t demux_pss_ring = 0;
+            std::uint32_t get_picture = 0;
+            std::uint32_t get_picture_inner = 0;
+            std::uint32_t is_end = 0;
+            std::uint32_t reset = 0;
+            std::uint32_t ipu_init = 0;
+            std::uint32_t video_stream_callback = 0;
+            bool present() const noexcept { return create != 0; }
+        } sce_mpeg;
     } movie;
 
     // What "the title screen" is (dq8-game --until title; M3 bring-up): the overlay that must be resident and

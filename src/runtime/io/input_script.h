@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -16,15 +17,16 @@
 
 // Scripted input: a `.dq8in` file (Docs/formats/dq8-input-script.md) played back as an IInputSource. Lines
 // take effect at absolute vblanks, relative to the previous line (`+N`), or relative to the first occurrence
-// of a trigger after the previous line (`after overlay:NAME +N`, `mode:N`, `rpc_bind:SID`). Triggers come
-// from the host, which turns machine events into them as they are emitted on the machine thread, so a run
-// with the same script, disc and build reads the same pad states.
+// of a trigger after the previous line (`after overlay:NAME +N`, `mode:N`, `rpc_bind:SID`, and since format
+// version 2 `mark:NAME` and `event:TYPE[:FIELD=VALUE]`). Triggers come from the host, which matches the
+// machine events against them as they are emitted on the machine thread, so a run with the same script, disc
+// and build reads the same pad states. The `mark NAME` action emits a `mark` event through the host.
 namespace dq8::rt {
 
 // A moment a script line can wait for. Values are canonical (canonical_trigger_value).
 struct InputTrigger {
-    std::string kind;  // "overlay", "mode" or "rpc_bind"
-    std::string value; // "TITLE", "4", "0x80000001"
+    std::string kind;  // "overlay", "mode", "rpc_bind", "mark" or "event"
+    std::string value; // "TITLE", "4", "0x80000001", "field", "movie:phase=end"
     bool operator==(const InputTrigger&) const = default;
 };
 
@@ -41,7 +43,7 @@ std::string format_buttons(std::uint16_t buttons);
 
 struct InputScriptLine {
     enum class Time { absolute, relative, after };
-    enum class Action { press, hold, release, state, stick, connect, disconnect };
+    enum class Action { press, hold, release, state, stick, connect, disconnect, mark };
 
     std::size_t line = 0; // 1-based line number in the file
     Time time = Time::absolute;
@@ -55,6 +57,7 @@ struct InputScriptLine {
     std::uint8_t x = 0x80, y = 0x80; // stick
     // state: the sticks it sets (absent = centre).
     std::uint8_t lx = 0x80, ly = 0x80, rx = 0x80, ry = 0x80;
+    std::string name; // mark
 };
 
 struct InputScript {
@@ -70,6 +73,10 @@ InputScript load_input_script(const std::filesystem::path& file);
 class ScriptInput final : public IInputSource {
   public:
     explicit ScriptInput(InputScript script);
+    // Where `mark NAME` lines go when they take effect (the host emits a `mark` event); unset: ignored.
+    using MarkSink = std::function<void(const std::string& name, std::uint64_t vblank)>;
+    void set_mark_sink(MarkSink sink) { mark_sink_ = std::move(sink); }
+    const InputScript& script() const noexcept { return script_; }
 
     // A trigger happened when `vblank` vblanks had started (MachineServices::vblank_count at emission).
     void note_trigger(const InputTrigger& trigger, std::uint64_t vblank);
@@ -98,6 +105,7 @@ class ScriptInput final : public IInputSource {
     void apply(const InputScriptLine& line, std::uint64_t vblank);
 
     InputScript script_;
+    MarkSink mark_sink_;
     std::size_t next_ = 0;
     std::uint64_t previous_time_ = 0; // resolved time of the last applied line
     std::vector<std::pair<InputTrigger, std::uint64_t>> history_;

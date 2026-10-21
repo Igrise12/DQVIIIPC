@@ -125,6 +125,22 @@ finished_query = 0x001A1380
 scene_unit = "TITLE"
 scene_functions = [0x00461E40, 0x00462110, 0x00463C50]
 
+# The movie HLE (M4 session C, ADR-0015, Docs/milestones/M4-playable.md): the sceMpeg SDK entry points it
+# replaces or hooks (spike S6b and the M4 design review). The player's own IPU init runs recompiled against the
+# IPU register stub. `delete` is to be confirmed by session C.
+[movie.sce_mpeg]
+create = 0x00110728
+delete = 0x00111380
+add_callback = 0x00111540
+add_str_callback = 0x001159C0
+demux_pss_ring = 0x001155C0
+get_picture = 0x001113C8
+get_picture_inner = 0x00110B28
+is_end = 0x001114E8
+reset = 0x00111468
+ipu_init = 0x001112D0
+video_stream_callback = 0x001A06C0
+
 # The title's flyover (M3 bring-up, Docs/milestones/M3-boots.md): TITLE stage 10 (the halfword at 0x003D2630)
 # zeroes the word at 0x004670C0, then steps it once per 30 Hz frame, whether or not its movie plays; the title
 # fades in from step 638 and is complete at 648. A button press before 648 makes the game set the word to 648.

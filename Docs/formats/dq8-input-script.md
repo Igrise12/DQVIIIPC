@@ -32,8 +32,13 @@ full length.
 | `overlay:NAME` | `overlay_resident`: the residency hook made overlay `NAME` resident (ADR-0012) | the profile's overlay name, any case: `overlay:TITLE` |
 | `mode:N` | `mode`: the game-mode variable became `N` | decimal or `0x` hex |
 | `rpc_bind:SID` | `rpc_bind`: the game bound IOP RPC server `SID` | decimal or `0x` hex: `rpc_bind:0x80000100` |
+| `mark:NAME` (version 2) | `mark`: this script's `mark NAME` line took effect | the name as written: `mark:field` |
+| `event:TYPE[:FIELD=VALUE]` (version 2) | any machine event of that type (`--events`), with that field value if given | lower-case type and field; numbers compare in decimal: `event:movie:phase=end`, `event:mc_op` |
 
 ## Syntax
+
+Version 2 (M4) adds the `mark:` and `event:` triggers and the `mark` action; version 1 files stay valid, and the
+reader takes `dq8in 1` and `dq8in 2`.
 
 ```
 dq8in 1                               # header: the first line that is not blank or a comment, version 1
@@ -56,6 +61,7 @@ A line is `TIME [p1|p2] ACTION`. `p1` (the default) is port 0 and `p2` is port 1
 | `state BUTTONS [lx=V] [ly=V] [rx=V] [ry=V]` | exactly this: holds = `BUTTONS` (or `none`), presses ended, sticks as given, others centred |
 | `stick left\|right X Y` | one stick's axes, 0..255 (0x80 is the centre); kept until changed |
 | `disconnect`, `connect` | unplug and replug: a disconnected port reads no buttons, and its holds and sticks are kept for the reconnect |
+| `mark NAME` (version 2) | no pad change: the host emits a `mark {name}` event, which `after mark:NAME` lines and `--until mark:NAME` wait for; with `--dump-dir DIR` the next frame is written as `DIR/<script>-<NAME>.png`. `NAME`: letters, digits, `_`, `-` |
 
 `BUTTONS` is one button or several joined by `+` (`down+cross`): `select`, `l3`, `r3`, `start`, `up`, `right`,
 `down`, `left`, `l2`, `r2`, `l1`, `r1`, `triangle`, `circle`, `cross`, `square`. Names are case-insensitive.

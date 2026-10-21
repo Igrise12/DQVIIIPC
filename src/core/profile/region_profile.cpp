@@ -609,6 +609,33 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
         }
         p.movie.scene_functions = scenes;
 
+        if (const toml::value* mpeg = r.optional(*movie, "sce_mpeg")) {
+            if (!mpeg->is_table()) {
+                r.fail(*mpeg, "[movie.sce_mpeg] must be a table");
+            }
+            // Every entry is a main-program function the movie HLE replaces or hooks (M4 session C).
+            const auto entry = [&](const char* key) {
+                const std::uint32_t a = r.u32(*mpeg, key, "movie.sce_mpeg");
+                if (a % 4 != 0 || a < main_begin || a >= main_end) {
+                    r.fail(mpeg->at(key), std::string("[movie.sce_mpeg].") + key +
+                                              " must be a 4-byte aligned address inside the main program");
+                }
+                return a;
+            };
+            RegionProfile::Movie::SceMpeg& m = p.movie.sce_mpeg;
+            m.create = entry("create");
+            m.delete_ = entry("delete");
+            m.add_callback = entry("add_callback");
+            m.add_str_callback = entry("add_str_callback");
+            m.demux_pss_ring = entry("demux_pss_ring");
+            m.get_picture = entry("get_picture");
+            m.get_picture_inner = entry("get_picture_inner");
+            m.is_end = entry("is_end");
+            m.reset = entry("reset");
+            m.ipu_init = entry("ipu_init");
+            m.video_stream_callback = entry("video_stream_callback");
+        }
+
         if (const toml::value* timelines = r.optional(*movie, "timelines")) {
             if (!timelines->is_array()) {
                 r.fail(*timelines, "[movie].timelines must be an array of [[movie.timelines]] tables");

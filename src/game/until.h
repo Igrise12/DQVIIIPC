@@ -18,14 +18,16 @@
 //   overlay:NAME  the residency hook made overlay NAME resident (a profile overlay name, any case)
 //   mode:N        the mode watcher saw the game mode become N
 //   title         the title screen: the profile's [title] marker held (TitleWatcher's `title` event)
-// Machine events become the same triggers the input scripts wait for (trigger_from_event).
+//   mark:NAME     the input script's `mark NAME` line took effect
+//   event:TYPE[:FIELD=VALUE]  a machine event of that type (with that field value) was emitted
+// Machine events match the same triggers the input scripts wait for (event_matches_trigger).
 namespace dq8::game {
 
 struct UntilCondition {
     enum class Kind { vblank, trigger, title };
     Kind kind = Kind::vblank;
     std::uint64_t vblank = 0; // Kind::vblank
-    rt::InputTrigger trigger; // Kind::trigger ("overlay" or "mode")
+    rt::InputTrigger trigger; // Kind::trigger ("overlay", "mode", "mark" or "event")
     std::string text;         // as given, for messages
 };
 
@@ -36,6 +38,9 @@ UntilCondition parse_until(std::string_view text, const core::RegionProfile* pro
 // The input-script trigger a machine event stands for: overlay_resident -> overlay:NAME, mode -> mode:N,
 // rpc_bind -> rpc_bind:SID; nullopt for every other event.
 std::optional<rt::InputTrigger> trigger_from_event(const rt::MachineEvent& event);
+// Whether a machine event is the moment `trigger` names: the trigger_from_event kinds by equality, a `mark`
+// event by name, and an `event:TYPE[:FIELD=VALUE]` trigger by type and field (numbers compared in decimal).
+bool event_matches_trigger(const rt::MachineEvent& event, const rt::InputTrigger& trigger);
 
 class UntilTracker {
   public:

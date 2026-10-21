@@ -257,11 +257,18 @@ TEST_CASE("spin detector: N identical reads in a row, reset by anything else", "
     CHECK_FALSE(s.note(0x104, 0x12001000, 0x2000)); // another pc
 }
 
-TEST_CASE("cost model: m3-v1 completions are never instantaneous", "[machine][cost]") {
+TEST_CASE("cost model: m4-v1 completions are never instantaneous", "[machine][cost]") {
     const CostModel c;
-    CHECK(c.name == "m3-v1");
+    CHECK(c.name == "m4-v1");
     CHECK(c.rpc_reply(0) == cycles_from_us(20));
     CHECK(c.rpc_reply(40'000) > c.rpc_reply(0));
     CHECK(c.cdvd_read(2048) > cycles_from_us(100));
     CHECK(c.spin_reads == 64);
+    // M4 fields: the IOP clock is an exact eighth of the EE's, a movie picture costs 4 ms, card replies take
+    // time.
+    CHECK(c.iop_instruction == ee_cycles_per_iop_cycle);
+    CHECK(c.iop_slice == 2048 * ee_cycles_per_iop_cycle);
+    CHECK(c.movie_picture == cycles_from_us(4000));
+    CHECK(c.mc_reply(0) == cycles_from_us(200));
+    CHECK(ee_cycles_per_spu2_sample * spu2_sample_rate == ee_clock_hz);
 }

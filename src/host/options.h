@@ -75,7 +75,7 @@ struct Options {
     std::optional<fs::path> record_input;
     std::optional<double> speed; // nullopt: as fast as possible ("max")
     std::uint32_t ssaa = 1;
-    std::string movies = "skip";
+    std::string movies = "auto";
     std::optional<std::string> events; // a file, or "-" for stdout
     std::uint32_t trace = 0;           // rt::trace_bit() mask (MachineConfig::trace_mask)
     bool trace_events = false;         // also write "trace" events into --events
@@ -84,6 +84,21 @@ struct Options {
     std::vector<std::uint32_t> stop_at_pc;
     std::vector<RpcStop> stop_at_rpc;
     std::vector<AtVblank> dump_ram_at;
+    // M4 (Docs/milestones/M4-playable.md, "Contracts"). Options whose subsystem has not arrived yet are
+    // refused at start-up with the session that brings them (run_machine.cpp, unwired_m4_option).
+    std::string audio;                       // "null" or "sdl"; set by parsing: sdl with --window, else null
+    std::optional<fs::path> audio_dump;      // a WAV file of everything the SPU2 mixed
+    std::uint32_t audio_latency_ms = 64;     // the SDL sink's target buffer
+    std::optional<fs::path> movie_decoder;   // the dq8-movie library to load
+    std::optional<std::string> save_dir;     // a directory, or "none"; unset: the platform default
+    std::string memory_card = "unformatted"; // port 0: unformatted, formatted or none
+    std::string memory_card2 = "none";       // port 1
+    std::optional<std::string> rtc;          // YYYY-MM-DDTHH:MM:SS or "host"; unset: the fixed epoch
+    bool rumble = true;
+    std::string vu0_registers = "per-thread"; // or "shared"
+    std::optional<fs::path> dump_dir;         // where `mark NAME` script lines dump the next frame
+    std::vector<AtVblank> dump_iop_ram_at;
+    std::vector<AtVblank> dump_spu2_at;
 
     bool help = false;
     bool version = false;

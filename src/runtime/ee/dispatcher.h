@@ -65,6 +65,8 @@ class Dispatcher {
     // one a stop throws GuestStop, which is what unit tests catch.
     void set_machine(MachineServices* machine) noexcept { machine_ = machine; }
     MachineServices* machine() const noexcept { return machine_; }
+    // Native-to-guest calls for overrides (OverrideCall::call_guest); the machine sets it to its EE runtime.
+    void set_guest_calls(IGuestCalls* calls) noexcept { guest_ = calls; }
 
     // Points the slot of `spec.unit` at `spec.address` at the trampoline. Throws std::invalid_argument when
     // the unit is unknown (units are registered first: set_main, OverlayManager::register_unit), the address
@@ -94,6 +96,7 @@ class Dispatcher {
     DispatchTable main_;
     std::string main_name_;
     MachineServices* machine_ = nullptr;
+    IGuestCalls* guest_ = nullptr;
     std::map<std::uint64_t, Installed> overrides_;
 };
 

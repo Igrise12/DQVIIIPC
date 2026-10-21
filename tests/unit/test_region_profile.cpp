@@ -277,6 +277,10 @@ TEST_CASE("the shipped region profiles are valid", "[core][profile]") {
             CHECK(p.title_screen.width == 1);
             CHECK(p.title_screen.value == 1);
             CHECK(p.movie.finished_query == 0x001A1380);
+            REQUIRE(p.movie.sce_mpeg.present());
+            CHECK(p.movie.sce_mpeg.create == 0x00110728);
+            CHECK(p.movie.sce_mpeg.get_picture == 0x001113C8);
+            CHECK(p.movie.sce_mpeg.video_stream_callback == 0x001A06C0);
             CHECK(p.boot.ctor_table_start == 0x003CF910);
             CHECK(p.boot.ctor_table_end == 0x003CFB80);
             CHECK(p.iop.reset_image == "MODULES/IOPRP300.IMG");
@@ -360,6 +364,21 @@ TEST_CASE("the optional [iop] and [movie] tables are validated", "[core][profile
     fails(std::string(minimal_profile) + replace_line(title, "0x00100F00", "0x00100F01"),
           "aligned to its width");
     fails(base + iop + movie + "finished_query = 0x00300000\n", "finished_query");
+
+    // [movie.sce_mpeg]: every entry required, all inside the main program.
+    std::string mpeg = "\n[movie.sce_mpeg]\n";
+    for (const char* key :
+         {"create", "delete", "add_callback", "add_str_callback", "demux_pss_ring", "get_picture",
+          "get_picture_inner", "is_end", "reset", "ipu_init", "video_stream_callback"}) {
+        mpeg += std::string(key) + " = 0x00100020\n";
+    }
+    const auto with_mpeg =
+        dq8::core::load_region_profile(write(tmp.path(), "mpeg.toml", base + iop + movie + mpeg));
+    CHECK(with_mpeg.movie.sce_mpeg.present());
+    CHECK(with_mpeg.movie.sce_mpeg.delete_ == 0x00100020);
+    CHECK_FALSE(plain.movie.sce_mpeg.present());
+    fails(base + iop + movie + replace_line(mpeg, "is_end = 0x00100020", "is_end = 0x00300000"), "is_end");
+    fails(base + iop + movie + replace_line(mpeg, "reset = 0x00100020", ""), "reset");
 }
 
 TEST_CASE("[[movie.timelines]] rows are validated", "[core][profile]") {

@@ -133,6 +133,44 @@ std::optional<std::string> canonical_trigger_value(std::string_view kind, std::s
         }
         return std::to_string(*v);
     }
+    if (kind == "mark") {
+        // A script's own mark (the `mark NAME` action): letters, digits, '_' and '-', kept as written.
+        for (const char c : value) {
+            if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_' && c != '-') {
+                return std::nullopt;
+            }
+        }
+        return std::string(value);
+    }
+    if (kind == "event") {
+        // Any machine event: TYPE, or TYPE:FIELD=VALUE (event:movie:phase=end). Kept as written; the host
+        // matches it against the events it emits.
+        const std::size_t colon = value.find(':');
+        const std::string_view type = value.substr(0, colon);
+        const auto word = [](std::string_view t) {
+            if (t.empty()) {
+                return false;
+            }
+            for (const char c : t) {
+                if (!std::islower(static_cast<unsigned char>(c)) &&
+                    !std::isdigit(static_cast<unsigned char>(c)) && c != '_') {
+                    return false;
+                }
+            }
+            return true;
+        };
+        if (!word(type)) {
+            return std::nullopt;
+        }
+        if (colon != std::string_view::npos) {
+            const std::string_view rest = value.substr(colon + 1);
+            const std::size_t eq = rest.find('=');
+            if (eq == std::string_view::npos || !word(rest.substr(0, eq)) || eq + 1 >= rest.size()) {
+                return std::nullopt;
+            }
+        }
+        return std::string(value);
+    }
     if (kind == "rpc_bind") {
         const auto v = parse_uint(value);
         if (!v || *v > 0xFFFFFFFFu) {
@@ -241,8 +279,9 @@ InputScript parse_input_script(std::string_view text, std::string name) {
             if (w.size() != 2 || w[0] != "dq8in") {
                 throw fail("the first line must be the header 'dq8in 1'");
             }
-            if (w[1] != "1") {
-                throw fail("unsupported format version '" + std::string(w[1]) + "' (this build reads 1)");
+            if (w[1] != "1" && w[1] != "2") {
+                throw fail("unsupported format version '" + std::string(w[1]) +
+                           "' (this build reads 1 and 2)");
             }
             header = true;
             continue;
@@ -258,7 +297,7 @@ InputScript parse_input_script(std::string_view text, std::string name) {
             const auto trigger = parse_trigger(w[1]);
             if (!trigger) {
                 throw fail("unknown trigger '" + std::string(w[1]) +
-                           "' (overlay:NAME, mode:N or rpc_bind:SID)");
+                           "' (overlay:NAME, mode:N, rpc_bind:SID, mark:NAME or event:TYPE[:FIELD=VALUE])");
             }
             if (w[2].size() < 2 || w[2][0] != '+') {
                 throw fail("'after " + std::string(w[1]) + "' needs an offset like +0");
@@ -294,7 +333,7 @@ InputScript parse_input_script(std::string_view text, std::string name) {
             ++i;
         }
         if (i >= w.size()) {
-            throw fail("missing action (press, hold, release, state, stick, connect, disconnect)");
+            throw fail("missing action (press, hold, release, state, stick, connect, disconnect, mark)");
         }
         const std::string_view action = w[i++];
         const std::size_t args = w.size() - i;
@@ -374,9 +413,16 @@ InputScript parse_input_script(std::string_view text, std::string name) {
             }
             l.action =
                 action == "connect" ? InputScriptLine::Action::connect : InputScriptLine::Action::disconnect;
+        } else if (action == "mark") {
+            const auto mark = args == 1 ? canonical_trigger_value("mark", w[i]) : std::nullopt;
+            if (!mark) {
+                throw fail("mark NAME (letters, digits, '_' and '-')");
+            }
+            l.action = InputScriptLine::Action::mark;
+            l.name = *mark;
         } else {
             throw fail("unknown action '" + std::string(action) +
-                       "' (press, hold, release, state, stick, connect, disconnect)");
+                       "' (press, hold, release, state, stick, connect, disconnect, mark)");
         }
         script.lines.push_back(l);
     }
@@ -458,6 +504,11 @@ void ScriptInput::apply(const InputScriptLine& line, std::uint64_t vblank) {
         break;
     case InputScriptLine::Action::disconnect:
         p.connected = false;
+        break;
+    case InputScriptLine::Action::mark:
+        if (mark_sink_) {
+            mark_sink_(line.name, vblank);
+        }
         break;
     }
 }

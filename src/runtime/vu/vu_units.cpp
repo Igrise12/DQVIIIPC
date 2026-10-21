@@ -4,6 +4,7 @@
 
 #include "runtime/dma/gif.h"
 #include "runtime/ee/guest_stop.h"
+#include "runtime/vu/vu0_bridge.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -32,6 +33,7 @@ void VuUnits::Host::reserved_instruction(bool upper, std::uint32_t pc, std::uint
 void VuUnits::attach(MachineServices& machine) {
     machine_ = &machine;
     machine.mmio().map(base, size, *this);
+    machine.set_vu0(this);
 }
 
 void VuUnits::reset() {
@@ -88,6 +90,15 @@ void VuUnits::start(unsigned unit, std::uint32_t start_pc, std::uint32_t top, st
 
 void VuUnits::resume(unsigned unit, std::uint32_t top, std::uint32_t itop) {
     run(unit, false, 0, top, itop);
+}
+
+std::uint64_t VuUnits::run_from_ee(R5900Context& ctx, std::uint32_t start) {
+    VuState& state = units_[0].interp.state();
+    load_vu0_state(ctx, state);
+    const std::uint64_t before = state.cycles;
+    run(0, true, start, 0, ctx.vu0_itop);
+    store_vu0_state(state, ctx);
+    return state.cycles - before;
 }
 
 void VuUnits::run(unsigned unit, bool fresh, std::uint32_t start_pc, std::uint32_t top, std::uint32_t itop) {

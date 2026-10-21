@@ -24,6 +24,7 @@ class EventQueue;
 class InterruptController;
 class KernelServices;
 class Scheduler;
+class IVu0Runner;
 struct CostModel;
 struct VideoTiming;
 
@@ -40,10 +41,21 @@ struct MachineEvent {
     }
 };
 
-// Diagnostic trace categories (dq8-game --trace kernel,sif,rpc,dma,gs). Bit i of MachineConfig::trace_mask
-// enables category i. Trace lines are MachineEvents of type "trace" with fields "cat" and "msg"; they are
-// deterministic like every event, and the host prints them on stderr (and in --events only when asked).
-enum class TraceCategory : std::uint8_t { kernel = 0, sif = 1, rpc = 2, dma = 3, gs = 4 };
+// Diagnostic trace categories (dq8-game --trace kernel,sif,rpc,dma,gs,iop,spu2,audio). Bit i of
+// MachineConfig::trace_mask enables category i. Trace lines are MachineEvents of type "trace" with fields
+// "cat" and "msg"; they are deterministic like every event, and the host prints them on stderr (and in
+// --events only when asked). iop, spu2 and audio arrive with M4 (the interpreted IOP, the SPU2, the audio
+// output).
+enum class TraceCategory : std::uint8_t {
+    kernel = 0,
+    sif = 1,
+    rpc = 2,
+    dma = 3,
+    gs = 4,
+    iop = 5,
+    spu2 = 6,
+    audio = 7
+};
 
 constexpr std::uint32_t trace_bit(TraceCategory category) noexcept {
     return 1u << static_cast<unsigned>(category);
@@ -77,6 +89,10 @@ class MachineServices {
     virtual const VideoTiming& video() const = 0;
     // Null where no guest threads exist (device unit tests).
     virtual Scheduler* scheduler() = 0;
+    // VU0 micro mode from EE code (vu/vu0_runner.h): the VU device registers itself at attach; null when no
+    // VU device is attached (VCALLMS then stops as unsupported).
+    virtual IVu0Runner* vu0() = 0;
+    virtual void set_vu0(IVu0Runner* runner) = 0;
 
     virtual void add_vblank_listener(VblankPhase phase, IVblankListener& listener) = 0;
     // Fields started since boot (vblank_start events delivered).

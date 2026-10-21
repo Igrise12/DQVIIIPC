@@ -8,6 +8,7 @@
 #include "runtime/kernel/kernel_services.h"
 #include "runtime/machine/cost_model.h"
 #include "runtime/machine/machine_services.h"
+#include "runtime/vu/vu0_runner.h"
 
 #include <algorithm>
 #include <array>
@@ -157,13 +158,24 @@ void api_store128(void* host, std::uint8_t* /*rdram*/, R5900Context* ctx, std::u
                   std::uint64_t lo, std::uint64_t hi) {
     self(host).memory().store128(vaddr, lo, hi, ctx->pc);
 }
+// VCALLMS and VCALLMSR (vu0_runner.h): the program runs to its end on the thread's VU0 registers, and its
+// cycles are charged to the EE clock (VU0 runs at the EE clock). Without a VU device they stop.
+void run_vu0_program(void* host, R5900Context* ctx, std::uint32_t address, const char* what) {
+    EeRuntime& rt = self(host);
+    IVu0Runner* vu0 = rt.machine().vu0();
+    if (vu0 == nullptr) {
+        rt.stop_unsupported(ctx, what, address);
+    }
+    const std::uint64_t cycles = vu0->run_from_ee(*ctx, address & 0xFF8u);
+    rt.machine().clock().charge(cycles);
+}
 void api_execute_vu0_microprogram(void* host, std::uint8_t* /*rdram*/, R5900Context* ctx,
                                   std::uint32_t address) {
-    self(host).stop_unsupported(ctx, "VU0 microprogram call", address);
+    run_vu0_program(host, ctx, address, "VU0 microprogram call");
 }
 void api_vu0_start_microprogram(void* host, std::uint8_t* /*rdram*/, R5900Context* ctx,
                                 std::uint32_t address) {
-    self(host).stop_unsupported(ctx, "VU0 microprogram start", address);
+    run_vu0_program(host, ctx, address, "VU0 microprogram start");
 }
 void api_kick_gif_dma_chain_from_mmio(void* host, std::uint8_t* /*rdram*/, R5900Context* ctx,
                                       std::uint32_t /*d_pcr*/, std::uint32_t /*d_stat*/, std::uint32_t tadr,
@@ -482,6 +494,60 @@ void EeRuntime::call_guest(ExecState& st, R5900Context& ctx) {
     st.ctx = saved_ctx;
     st.unwinding = saved_unwinding;
     st.depth = base_depth;
+}
+
+// ---- Calls from native override code (IGuestCalls).
+
+namespace {
+
+// The argument registers in order: $a0..$a3, then $t0..$t3.
+constexpr std::array<unsigned, 8> argument_regs{4, 5, 6, 7, 8, 9, 10, 11};
+constexpr unsigned reg_sp = 29;
+
+void load_arguments(R5900Context& ctx, std::span<const std::uint64_t> args) {
+    for (std::size_t i = 0; i < args.size() && i < argument_regs.size(); ++i) {
+        set_gpr_lo(ctx, argument_regs[i], args[i]);
+    }
+}
+
+} // namespace
+
+std::uint64_t EeRuntime::call_function(R5900Context& ctx, std::uint32_t entry,
+                                       std::span<const std::uint64_t> args, std::uint32_t sp) {
+    // The same shape as a SetSyscall handler: a nested call on a copy of the caller's registers that returns
+    // to pc 0. The copy lives in the thread's state, not in a local, so that a thread terminated inside the
+    // callee leaves nothing behind that must be destroyed on this fiber.
+    ExecState& st = state_for(&ctx);
+    machine_.clock().charge(machine_.cost().dispatch);
+    st.nested_contexts.push_back(std::make_unique<R5900Context>(ctx));
+    R5900Context& nested = *st.nested_contexts.back();
+    load_arguments(nested, args);
+    set_gpr_lo(nested, reg_sp, sp);
+    set_gpr_lo(nested, reg_ra, 0);
+    nested.pc = entry;
+    call_guest(st, nested);
+    const std::uint64_t v0 = gpr_lo(nested, reg_v0);
+    st.nested_contexts.pop_back();
+    return v0;
+}
+
+std::uint64_t EeRuntime::call_kernel(R5900Context& ctx, std::string_view name,
+                                     std::span<const std::uint64_t> args) {
+    const KernelServiceInfo* service = services_.find(name);
+    if (service == nullptr) {
+        stop_unsupported(&ctx, "a native kernel call to " + std::string(name) + ", which has no service");
+    }
+    ExecState& st = state_for(&ctx);
+    machine_.clock().charge(machine_.cost().kernel_call);
+    st.nested_contexts.push_back(std::make_unique<R5900Context>(ctx));
+    R5900Context& nested = *st.nested_contexts.back();
+    load_arguments(nested, args);
+    KernelCallContext call(machine_, nested, service->name, name, false, 0, false);
+    services_.invoke(*service, call);
+    trace_kernel_call(service->name, nested);
+    const std::uint64_t v0 = gpr_lo(nested, reg_v0);
+    st.nested_contexts.pop_back();
+    return v0;
 }
 
 // ---- Kernel calls.

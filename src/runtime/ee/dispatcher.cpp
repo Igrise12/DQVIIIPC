@@ -209,7 +209,7 @@ void Dispatcher::run_override(std::uint8_t* rdram, R5900Context* ctx, PS2Runtime
         o.verified_generation = overlays_.generation();
     }
     ++o.calls;
-    OverrideCall call{rdram, ctx, runtime, machine_, o.original, pc};
+    OverrideCall call{rdram, ctx, runtime, machine_, o.original, pc, guest_, 0};
     switch (o.spec.kind) {
     case OverrideKind::replace: {
         [[maybe_unused]] const std::uint32_t ra = gpr_u32(*ctx, reg_ra);

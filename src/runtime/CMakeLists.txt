@@ -41,10 +41,12 @@ add_library(dq8_runtime STATIC
     vu/vu_core.cpp
     vu/vu_lower.cpp
     vu/vu_upper.cpp
+    vu/vu0_bridge.cpp
     vu/vu_units.cpp
     io/input_script.cpp
     io/input_live.cpp
     io/input_record.cpp
+    platform/audio.cpp
     platform/dynlib.cpp
     io/iso_disc_source.cpp
     iop/iop.cpp
@@ -88,6 +90,11 @@ elseif(DQ8_FIBER_BACKEND STREQUAL "win32")
 else()
     message(FATAL_ERROR "DQ8_FIBER_BACKEND must be minicoro, ucontext or win32, not '${DQ8_FIBER_BACKEND}'")
 endif()
+# M4 (Docs/milestones/M4-playable.md): one source list per session, so the sessions never edit this file.
+include(${CMAKE_CURRENT_SOURCE_DIR}/iop/interp.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/spu2/spu2.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/movie/movie.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/io/memcard.cmake)
 add_library(dq8::runtime ALIAS dq8_runtime)
 # Headers are included as "runtime/<area>/<file>.h"; the module ABI comes from include/ through dq8::core.
 target_include_directories(dq8_runtime PUBLIC "${PROJECT_SOURCE_DIR}/src")

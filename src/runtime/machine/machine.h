@@ -79,6 +79,8 @@ class Machine final : public MachineServices {
     const CostModel& cost() const override;
     const VideoTiming& video() const override;
     Scheduler* scheduler() override;
+    IVu0Runner* vu0() override;
+    void set_vu0(IVu0Runner* runner) override;
     void add_vblank_listener(VblankPhase phase, IVblankListener& listener) override;
     std::uint64_t vblank_count() const override;
     void note_poll(std::uint32_t pc, std::uint32_t address, std::uint64_t value) override;

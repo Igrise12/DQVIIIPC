@@ -472,3 +472,30 @@ TEST_CASE("until: conditions parse against the profile and track events", "[game
     CHECK(*bind == rt::InputTrigger{"rpc_bind", "0x80000001"});
     CHECK_FALSE(game::trigger_from_event(rt::MachineEvent{"thread", {}}));
 }
+
+TEST_CASE("until: mark and event conditions match emitted events", "[game][until]") {
+    auto mark = dq8::game::parse_until("mark:field", nullptr);
+    CHECK(mark.kind == dq8::game::UntilCondition::Kind::trigger);
+    dq8::game::UntilTracker t(mark);
+    t.observe(rt::MachineEvent{"mark", {}}.add("name", std::string("other")), 10);
+    CHECK_FALSE(t.met());
+    t.observe(rt::MachineEvent{"mark", {}}.add("name", std::string("field")), 11);
+    CHECK(t.met_at() == std::optional<std::uint64_t>(11));
+
+    dq8::game::UntilTracker e(dq8::game::parse_until("event:mc_op:op=close", nullptr));
+    e.observe(rt::MachineEvent{"mc_op", {}}.add("op", std::string("open")), 5);
+    CHECK_FALSE(e.met());
+    e.observe(rt::MachineEvent{"mc_op", {}}.add("op", std::string("close")), 6);
+    CHECK(e.met());
+    // Numbers compare in decimal; a bare type matches any event of that type.
+    CHECK(dq8::game::event_matches_trigger(rt::MachineEvent{"mode", {}}.add("mode", std::int64_t{4}),
+                                           rt::InputTrigger{"event", "mode:mode=4"}));
+    CHECK(
+        dq8::game::event_matches_trigger(rt::MachineEvent{"movie", {}}, rt::InputTrigger{"event", "movie"}));
+    CHECK_FALSE(
+        dq8::game::event_matches_trigger(rt::MachineEvent{"movie", {}}, rt::InputTrigger{"event", "mode"}));
+    CHECK(dq8::game::event_matches_trigger(
+        rt::MachineEvent{"overlay_resident", {}}.add("name", std::string("BATTLE")),
+        rt::InputTrigger{"overlay", "BATTLE"}));
+    CHECK_THROWS_AS(dq8::game::parse_until("event:Bad", nullptr), std::invalid_argument);
+}

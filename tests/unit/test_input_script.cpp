@@ -64,7 +64,7 @@ TEST_CASE("input script: buttons and triggers", "[input]") {
 TEST_CASE("input script: the parser reports the first bad line", "[input]") {
     CHECK(parse_error("").find("t.dq8in:1: the first line must be the header") != std::string::npos);
     CHECK(parse_error("# only a comment\n10 press cross\n").find("t.dq8in:2:") != std::string::npos);
-    CHECK(parse_error("dq8in 2\n").find("unsupported format version '2'") != std::string::npos);
+    CHECK(parse_error("dq8in 3\n").find("unsupported format version '3'") != std::string::npos);
     CHECK(parse_error("dq8in 1\n10 jump\n").find("t.dq8in:2: unknown action 'jump'") != std::string::npos);
     CHECK(parse_error("dq8in 1\nsoon press cross\n").find("not 'soon'") != std::string::npos);
     CHECK(parse_error("dq8in 1\n10 press kick\n").find("unknown button") != std::string::npos);
@@ -257,4 +257,38 @@ TEST_CASE("input script: the authored boot-to-title scripts parse", "[input]") {
     for (std::size_t i = 0; i < 3; ++i) {
         CHECK(settings_only.lines[i].buttons == s.lines[i].buttons);
     }
+}
+
+TEST_CASE("input script: version 2 adds mark and event triggers and the mark action", "[input]") {
+    const InputScript script = parse_input_script("dq8in 2\n"
+                                                  "after event:movie:phase=end +30 press cross\n"
+                                                  "+10 mark field\n"
+                                                  "after mark:field +5 press start\n"
+                                                  "after event:mc_op +0 release all\n",
+                                                  "t.dq8in");
+    REQUIRE(script.lines.size() == 4);
+    CHECK(script.lines[0].trigger == InputTrigger{"event", "movie:phase=end"});
+    CHECK(script.lines[1].action == InputScriptLine::Action::mark);
+    CHECK(script.lines[1].name == "field");
+    CHECK(script.lines[2].trigger == InputTrigger{"mark", "field"});
+    CHECK(script.lines[3].trigger == InputTrigger{"event", "mc_op"});
+    CHECK(parse_error("dq8in 2\nafter event:Movie +0 press cross\n").find("unknown trigger") !=
+          std::string::npos);
+    CHECK(parse_error("dq8in 2\nafter event:movie:phase +0 press cross\n").find("unknown trigger") !=
+          std::string::npos);
+    CHECK(parse_error("dq8in 2\n10 mark two words\n").find("mark NAME") != std::string::npos);
+
+    // The mark line reaches the sink when it takes effect; the host then emits a `mark` event, which the next
+    // line waits for.
+    ScriptInput input(parse_input_script("dq8in 2\n100 mark here\nafter mark:here +2 press cross\n"));
+    std::vector<std::pair<std::string, std::uint64_t>> marks;
+    input.set_mark_sink(
+        [&](const std::string& name, std::uint64_t vblank) { marks.emplace_back(name, vblank); });
+    CHECK(input.sample(0, 99).buttons == 0);
+    CHECK(input.sample(0, 100).buttons == 0);
+    REQUIRE(marks.size() == 1);
+    CHECK(marks[0] == std::pair<std::string, std::uint64_t>{"here", 100});
+    input.note_trigger(InputTrigger{"mark", "here"}, 100);
+    CHECK(input.sample(0, 101).buttons == 0);
+    CHECK(input.sample(0, 102).buttons == pad_cross);
 }

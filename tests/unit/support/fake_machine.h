@@ -78,6 +78,8 @@ class FakeMachine final : public rt::MachineServices {
     const rt::CostModel& cost() const override { return cost_; }
     const rt::VideoTiming& video() const override { return video_; }
     rt::Scheduler* scheduler() override { return nullptr; }
+    rt::IVu0Runner* vu0() override { return vu0_; }
+    void set_vu0(rt::IVu0Runner* runner) override { vu0_ = runner; }
     void add_vblank_listener(rt::VblankPhase phase, rt::IVblankListener& listener) override {
         listeners_[static_cast<std::size_t>(phase)].push_back(&listener);
     }
@@ -116,6 +118,7 @@ class FakeMachine final : public rt::MachineServices {
     rt::CostModel cost_{};
     rt::VideoTiming video_ = rt::VideoTiming::ntsc();
     rt::SpinDetector spin_{64};
+    rt::IVu0Runner* vu0_ = nullptr;
     std::array<std::vector<rt::IVblankListener*>, 4> listeners_{};
     std::uint64_t vblanks_ = 0;
 };

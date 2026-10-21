@@ -9,6 +9,7 @@
 #include "runtime/gs/gs_priv_device.h"
 #include "runtime/machine/ee_timers.h"
 #include "runtime/machine/intc_regs.h"
+#include "runtime/movie/ipu_regs.h"
 #include "runtime/vu/vu_units.h"
 
 #include <array>
@@ -111,6 +112,7 @@ std::vector<std::unique_ptr<IDevice>> make_ee_devices(const EeDevicesConfig& con
     auto vif1 = std::make_unique<Vif>(1, *vu, gif.get());
     auto dmac = std::make_unique<Dmac>(*vif0, *vif1, *gif);
     auto sio = std::make_unique<SioTty>();
+    auto ipu = std::make_unique<IpuRegisters>(); // M4: the IPU stub under the sceMpeg HLE (session C)
 
     std::vector<std::unique_ptr<IDevice>> devices;
     devices.push_back(std::move(timers));
@@ -121,6 +123,7 @@ std::vector<std::unique_ptr<IDevice>> make_ee_devices(const EeDevicesConfig& con
     devices.push_back(std::move(vif0));
     devices.push_back(std::move(vif1));
     devices.push_back(std::move(dmac));
+    devices.push_back(std::move(ipu));
     devices.push_back(std::move(sio));
     return devices;
 }

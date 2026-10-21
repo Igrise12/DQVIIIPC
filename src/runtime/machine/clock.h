@@ -15,6 +15,14 @@ using Cycles = std::uint64_t;
 // The EE core clock. Bus-clock devices (timers, DMA) run at half of it.
 inline constexpr Cycles ee_clock_hz = 294'912'000;
 inline constexpr Cycles bus_clock_hz = ee_clock_hz / 2;
+// The IOP runs at 36.864 MHz, exactly one eighth of the EE clock (M4: the interpreted IOP, ADR-0014).
+inline constexpr Cycles ee_cycles_per_iop_cycle = 8;
+inline constexpr Cycles iop_clock_hz = ee_clock_hz / ee_cycles_per_iop_cycle;
+// The SPU2 mixes at 48 kHz: one sample is exactly 6,144 EE cycles.
+inline constexpr std::uint32_t spu2_sample_rate = 48'000;
+inline constexpr Cycles ee_cycles_per_spu2_sample = ee_clock_hz / spu2_sample_rate;
+static_assert(ee_clock_hz % ee_cycles_per_iop_cycle == 0);
+static_assert(ee_clock_hz % spu2_sample_rate == 0 && ee_cycles_per_spu2_sample == 6144);
 
 // Converts a duration to cycles, rounding down. Exact for whole microseconds and nanoseconds.
 constexpr Cycles cycles_from_us(std::uint64_t us) noexcept {

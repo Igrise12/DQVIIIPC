@@ -36,6 +36,10 @@ class IopVblankClient {
 struct IopServiceDeps {
     const IDiscSource* disc = nullptr;
     IInputSource* input = nullptr;
+    // M4 session D: the memory cards (null: no card), the virtual clock, the pad feedback sink.
+    IMemoryCardStore* cards[2] = {nullptr, nullptr};
+    const VirtualRtc* rtc = nullptr;
+    IPadFeedbackSink* pad_feedback = nullptr;
     // loadfile: load a module by path with its argument block; returns the module id or a negative IOP error.
     std::function<std::int32_t(std::string_view path, std::span<const std::uint8_t> args)> load_module;
     // Sends a command packet of the given id and option word to the EE (the header is filled in; `body`

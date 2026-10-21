@@ -57,6 +57,8 @@ add_executable(dq8_unit_tests
     test_mmio_devices.cpp
     test_dmac.cpp
     test_vif.cpp
+    test_vu0_bridge.cpp
+    test_override_guest_calls.cpp
     test_gif.cpp
     test_ee_timers.cpp
     test_gs_priv.cpp
@@ -76,6 +78,11 @@ add_executable(dq8_unit_tests
     test_input_script.cpp
     test_host_options.cpp
 )
+# M4: one test list per session, so the sessions never edit this file.
+include(${CMAKE_CURRENT_SOURCE_DIR}/m4_iop_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/m4_spu2_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/m4_movie_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/m4_save_tests.cmake)
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(dq8_unit_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")
 target_compile_definitions(dq8_unit_tests PRIVATE
@@ -163,7 +170,7 @@ set(_machine_iso "${CMAKE_CURRENT_BINARY_DIR}/machine.iso")
 add_test(NAME host.machine_inputs COMMAND dq8_machine_inputs "${_machine_elf}" "${_machine_iso}")
 set_tests_properties(host.machine_inputs PROPERTIES FIXTURES_SETUP dq8_machine_inputs LABELS unit)
 
-# Golden values of the 10-vblank run (cost model m3-v1), the same with --speed 1, --gs null and --gs parallel.
+# Golden values of the 10-vblank run (cost model m4-v1, whose M3 fields are m3-v1's), the same with --speed 1, --gs null and --gs parallel.
 # Re-record them, and say why in the commit, when the program, the cost model or guest-visible timing changes;
 # run_machine_synthetic.cmake checks what the program did before it compares them.
 set(DQ8_MACHINE_SYNTHETIC_GS_HASH "3028b8f27428c40b26a20ffa96f1351b8d04fd57")

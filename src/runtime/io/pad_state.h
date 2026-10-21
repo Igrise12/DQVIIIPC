@@ -50,4 +50,20 @@ class IInputSource {
     virtual PadState sample(unsigned port, std::uint64_t vblank) = 0;
 };
 
+// The DualShock 2's two motors as the game drives them (M4 session D, architecture §8.1): the small motor is
+// on or off, the large one has a strength.
+struct PadActuators {
+    bool small = false;
+    std::uint8_t large = 0;
+    friend bool operator==(const PadActuators&, const PadActuators&) = default;
+};
+
+// Where the pad service reports actuator changes, on the machine thread in the IOP vblank phase. Nothing it
+// does flows back into the guest: rumble is output only.
+class IPadFeedbackSink {
+  public:
+    virtual ~IPadFeedbackSink() = default;
+    virtual void actuators(unsigned port, std::uint64_t vblank, const PadActuators& state) = 0;
+};
+
 } // namespace dq8::rt

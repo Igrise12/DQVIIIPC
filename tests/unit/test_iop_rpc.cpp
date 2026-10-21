@@ -226,14 +226,25 @@ TEST_CASE("iop modules: the catalogue and the module table", "[iop][modules]") {
     CHECK(reg.find("PADMAN")->name == "PADMAN");
 }
 
+namespace {
+rt::IopConfig iop_config(const rt::IDiscSource* disc, rt::IInputSource* input,
+                         std::vector<rt::IopModuleSpec> modules) {
+    rt::IopConfig c;
+    c.disc = disc;
+    c.input = input;
+    c.modules = std::move(modules);
+    return c;
+}
+} // namespace
+
 TEST_CASE("iop: configuration errors are refused at construction", "[iop]") {
     dq8::test::TableInput input;
-    CHECK_THROWS_AS(rt::Iop(rt::IopConfig{nullptr, &input, {}, {}}), std::invalid_argument);
+    CHECK_THROWS_AS(rt::Iop(iop_config(nullptr, &input, {})), std::invalid_argument);
     const auto image = dq8::core::iso::Image::from_bytes(dq8::test::test_disc().build());
     const auto disc = rt::make_iso_disc_source(image);
-    CHECK_THROWS_AS(rt::Iop(rt::IopConfig{disc.get(), nullptr, {{"PADMAN", {"padman.v1"}}}, {}}),
+    CHECK_THROWS_AS(rt::Iop(iop_config(disc.get(), nullptr, {{"PADMAN", {"padman.v1"}}})),
                     std::invalid_argument);
-    CHECK_THROWS_AS(rt::Iop(rt::IopConfig{disc.get(), &input, {{"X", {"nope"}}}, {}}), std::invalid_argument);
+    CHECK_THROWS_AS(rt::Iop(iop_config(disc.get(), &input, {{"X", {"nope"}}})), std::invalid_argument);
 }
 
 TEST_CASE("iop memory: first-fit, 16-byte blocks, deterministic reuse", "[iop][memory]") {

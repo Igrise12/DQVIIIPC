@@ -8,8 +8,9 @@ DQ8-Native: an open-source native PC port of *Dragon Quest VIII* (PS2, NTSC-U, b
 static recompilation of the game's EE code to C++, run on a purpose-built runtime. Not an emulator. GPL-3.0-or-later.
 
 **Current state: M1 (disc intake), M2 (first recompile) and M3 (boots, done 2026-10-21) complete: the disc boots to
-the title menu headless or in an SDL3 window, with paraLLEl-GS frames at PCSX2 parity. M4 (playable core) is being
-planned.**
+the title menu headless or in an SDL3 window, with paraLLEl-GS frames at PCSX2 parity. M4 (playable core) is planned
+(2026-10-21) and its day 0 is on `main`: the contracts for four sessions and the VU0 bridge, which takes New Game
+into the field (BATTLE resident; the 3D world does not draw yet).**
 - `src/core` (`libdq8core`): ISO 9660 reader, SHA-1/CRC-32, ELF32 reader and writer, `MWo3` parser, region profiles
   (`data/regions/SLUS_21207.toml`: hashes, sizes, addresses and the S3 loader facts, never bytes), `verify_image()` /
   `extract()`, a portable process runner, and the recompile pipeline (`core/recomp/`: function maps, per-unit
@@ -42,9 +43,10 @@ proposing or changing design:
 
 Decided in brief §14: D1 (name), D2 (license, ADR-0009), D3 (local game-module build, ADR-0008), D4 (PS2Recomp pinned
 plus patch queue, ADR-0003) and D5 (paraLLEl-GS first, ADR-0004); with M3 (2026-10-21) ADR-0005 (SDL3), 0007 (machine
-thread and fibers), 0011 (native IOP servers first) and 0012 (overlay residency through the loader hook). D6 to D9 and
-ADR-0001, 0002, 0006, 0010 and 0013 (guarded guest-state writes, implemented behind `--movies skip`) are
-**proposals**; do not present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
+thread and fibers), 0011 (native IOP servers first) and 0012 (overlay residency through the loader hook); with M4
+(2026-10-21) ADR-0014 (sound modules on an IOP interpreter), 0015 (movies through an sceMpeg HLE with libavcodec) and
+0016 (host-folder memory card). D6 to D9 and ADR-0001, 0002, 0006, 0010 and 0013 (guarded guest-state writes,
+implemented behind `--movies skip`) are **proposals**; do not present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
 its row in architecture.md §18 and brief §14, and use absolute dates.
 
 ## Commands
@@ -154,7 +156,13 @@ bring-up on the real disc; the headless boot reaches the title menu deterministi
 software renderer (settings 0.9998, title logo 0.9989 SSIM), and `--window` runs at real time with keyboard and
 gamepad (`tools/bringup/window_smoke.py`). CI is green on all six jobs at `38fdf4d`.
 
-**Next: M4 (playable core)**, being planned with the project owner from 2026-10-21 (brief §11: pad, memory card,
-audio, VU1 and movies; New Game, a battle, the menu and shop, a save made and reloaded). M2's record is
-`Docs/milestones/M2-first-recompile.md`.
+**M4 (playable core) is in progress**, planned with the project owner on 2026-10-21 (`Docs/milestones/M4-playable.md`;
+ADRs 0014–0016):
+- day 0 is on `main`: the contracts (IOP hardware seam, SPU2 stub, audio ring, movie ABI and IPU stub, pad feedback,
+  native-to-guest calls for overrides, host options and per-session wiring, `.dq8in` version 2, `[movie.sce_mpeg]`,
+  cost model "m4-v1") and the VU0 bridge;
+- next: sessions A (IOP interpreter and sound hosting), B (SPU2 and audio output), C (movies) and D (saves, pad,
+  robustness) in parallel, and the coordinator's bring-up from step B1 (the field draws no 3D yet: VU1 never runs).
+
+M2's and M3's records are `Docs/milestones/M2-first-recompile.md` and `M3-boots.md`.
 Do not start implementation work the user has not asked for.

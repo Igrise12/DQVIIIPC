@@ -67,6 +67,7 @@ struct Machine::Impl {
     std::vector<IDevice*> devices;
     std::function<void(const MachineEvent&)> sink;
     SpinDetector spin;
+    IVu0Runner* vu0 = nullptr; // registered by the VU device at attach
     std::uint64_t vblanks = 0;
     bool booted = false;
     // Last: they hold references to everything above, and the kernel's fibers die before the runtime.
@@ -78,6 +79,8 @@ Machine::Machine(GuestMemory& memory, Dispatcher& dispatcher, MachineConfig conf
     : impl_(std::make_unique<Impl>(*this, memory, dispatcher, std::move(config))) {
     Impl& m = *impl_;
     m.kernel_services.set_strict(m.config.strict_kernel);
+    // Overrides call guest code through the EE runtime (OverrideCall::call_guest).
+    m.dispatcher.set_guest_calls(&m.ee);
     // An interrupt that becomes pending makes the next safe point yield to the scheduler.
     m.interrupts.set_raise_hook([&m] { m.clock.force_safe_point(); });
     // An event scheduled during a slice (an RPC reply while the guest polls RAM for it) lowers the deadline,
@@ -101,8 +104,9 @@ Machine::Machine(GuestMemory& memory, Dispatcher& dispatcher, MachineConfig conf
 }
 
 Machine::~Machine() {
-    // The memory usually outlives the machine: leave it without a dangling bus.
+    // The memory and the dispatcher usually outlive the machine: leave them without dangling pointers.
     impl_->memory.set_mmio_bus(nullptr, nullptr, 0);
+    impl_->dispatcher.set_guest_calls(nullptr);
 }
 
 void Machine::attach(IDevice& device) {
@@ -194,6 +198,14 @@ const VideoTiming& Machine::video() const {
 
 Scheduler* Machine::scheduler() {
     return &impl_->kernel;
+}
+
+IVu0Runner* Machine::vu0() {
+    return impl_->vu0;
+}
+
+void Machine::set_vu0(IVu0Runner* runner) {
+    impl_->vu0 = runner;
 }
 
 void Machine::add_vblank_listener(VblankPhase phase, IVblankListener& listener) {

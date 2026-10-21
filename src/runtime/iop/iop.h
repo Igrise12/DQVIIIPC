@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #pragma once
 
+#include "runtime/iop/hw/iop_hw.h"
 #include "runtime/machine/machine_services.h"
 
 #include <cstdint>
@@ -18,6 +19,9 @@ namespace dq8::rt {
 
 class IDiscSource;
 class IInputSource;
+class IMemoryCardStore;
+class IPadFeedbackSink;
+class VirtualRtc;
 
 // One IOP module the game loads and the native services that stand in for it. Service names are the runtime's
 // catalogue: "fileio", "iopheap", "loadfile", "cdvdfsv", "padman.v1", "mcserv.v1", or "null:<sid>" (a server
@@ -34,6 +38,17 @@ struct IopConfig {
     // The IOP update image the EE resets the IOP with (accepted and not executed; the standard services
     // stay).
     std::string reset_image;
+    // M4 (Docs/milestones/M4-playable.md, "Contracts"):
+    // IOP-side devices for the interpreted modules (the SPU2), mapped on the IOP bus (session A).
+    std::vector<IopDeviceMapping> devices;
+    // An interpreted module that imports an HLE function nobody implemented stops at load instead of at its
+    // first call.
+    bool strict_imports = false;
+    // The memory cards in ports 0 and 1 (null: no card), the virtual clock for timestamps, and where the pad
+    // service reports actuator changes (session D).
+    IMemoryCardStore* cards[2] = {nullptr, nullptr};
+    const VirtualRtc* rtc = nullptr;
+    IPadFeedbackSink* pad_feedback = nullptr;
 };
 
 class Iop final : public IDevice {

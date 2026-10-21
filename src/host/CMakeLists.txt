@@ -15,7 +15,9 @@ target_link_libraries(dq8_host PUBLIC dq8::game dq8::runtime dq8::core)
 dq8_set_warnings(dq8_host)
 dq8_enable_sanitizers(dq8_host)
 
-add_executable(dq8-game main.cpp run_machine.cpp)
+# The M4 sessions' host wiring (m4_wiring.h): one file each.
+add_executable(dq8-game main.cpp run_machine.cpp audio_wiring.cpp movie_wiring.cpp save_wiring.cpp
+    feedback_wiring.cpp)
 # The SDL3 platform (session D, ADR-0005), when the build has it.
 if(TARGET dq8_platform_sdl)
     target_link_libraries(dq8-game PRIVATE dq8_platform_sdl)

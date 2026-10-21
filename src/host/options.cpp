@@ -16,21 +16,77 @@ namespace {
 
 // Options that take a value, and those of them that may be given more than once.
 const std::set<std::string, std::less<>> value_options{
-    "iso",        "elf",         "regions",        "module-dir",   "overlay-window",
-    "resident",   "disc",        "max-dispatches", "gs",           "vblanks",
-    "until",      "dump-frame",  "gs-trace",       "input-script", "record-input",
-    "speed",      "ssaa",        "movies",         "events",       "trace",
-    "stop-at-pc", "stop-at-rpc", "dump-ram-at"};
-const std::set<std::string, std::less<>> repeatable{"dump-frame", "stop-at-pc", "stop-at-rpc", "dump-ram-at"};
+    "iso",           "elf",           "regions",        "module-dir",   "overlay-window",
+    "resident",      "disc",          "max-dispatches", "gs",           "vblanks",
+    "until",         "dump-frame",    "gs-trace",       "input-script", "record-input",
+    "speed",         "ssaa",          "movies",         "events",       "trace",
+    "stop-at-pc",    "stop-at-rpc",   "dump-ram-at",    "audio",        "audio-dump",
+    "audio-latency", "movie-decoder", "save-dir",       "memory-card",  "memory-card2",
+    "rtc",           "rumble",        "vu0-registers",  "dump-dir",     "dump-iop-ram-at",
+    "dump-spu2-at"};
+const std::set<std::string, std::less<>> repeatable{"dump-frame",  "stop-at-pc",      "stop-at-rpc",
+                                                    "dump-ram-at", "dump-iop-ram-at", "dump-spu2-at"};
 const std::set<std::string, std::less<>> flag_options{
     "stop-at-first-syscall", "trace-dispatch",  "trap-mmio",   "json", "help", "version", "headless",
     "strict-kernel",         "verify-overlays", "trace-events"};
 // Options that only the M3 machine understands.
-const std::set<std::string, std::less<>> machine_options{
-    "disc",        "gs",           "vblanks",       "until",           "dump-frame",
-    "gs-trace",    "input-script", "record-input",  "speed",           "ssaa",
-    "movies",      "events",       "trace",         "stop-at-pc",      "stop-at-rpc",
-    "dump-ram-at", "headless",     "strict-kernel", "verify-overlays", "trace-events"};
+const std::set<std::string, std::less<>> machine_options{"disc",
+                                                         "gs",
+                                                         "vblanks",
+                                                         "until",
+                                                         "dump-frame",
+                                                         "gs-trace",
+                                                         "input-script",
+                                                         "record-input",
+                                                         "speed",
+                                                         "ssaa",
+                                                         "movies",
+                                                         "events",
+                                                         "trace",
+                                                         "stop-at-pc",
+                                                         "stop-at-rpc",
+                                                         "dump-ram-at",
+                                                         "headless",
+                                                         "strict-kernel",
+                                                         "verify-overlays",
+                                                         "trace-events",
+                                                         "audio",
+                                                         "audio-dump",
+                                                         "audio-latency",
+                                                         "movie-decoder",
+                                                         "save-dir",
+                                                         "memory-card",
+                                                         "memory-card2",
+                                                         "rtc",
+                                                         "rumble",
+                                                         "vu0-registers",
+                                                         "dump-dir",
+                                                         "dump-iop-ram-at",
+                                                         "dump-spu2-at"};
+
+// YYYY-MM-DDTHH:MM:SS with a date the CDVD clock can hold (two-digit years from 2000).
+bool valid_rtc(std::string_view v) {
+    if (v.size() != 19 || v[4] != '-' || v[7] != '-' || v[10] != 'T' || v[13] != ':' || v[16] != ':') {
+        return false;
+    }
+    for (const std::size_t i : {0u, 1u, 2u, 3u, 5u, 6u, 8u, 9u, 11u, 12u, 14u, 15u, 17u, 18u}) {
+        if (v[i] < '0' || v[i] > '9') {
+            return false;
+        }
+    }
+    const auto num = [&](std::size_t at, std::size_t n) {
+        int x = 0;
+        for (std::size_t i = 0; i < n; ++i) {
+            x = x * 10 + (v[at + i] - '0');
+        }
+        return x;
+    };
+    const int year = num(0, 4);
+    const int month = num(5, 2);
+    const int day = num(8, 2);
+    return year >= 2000 && year <= 2099 && month >= 1 && month <= 12 && day >= 1 && day <= 31 &&
+           num(11, 2) < 24 && num(14, 2) < 60 && num(17, 2) < 60;
+}
 
 rt::OverlayWindowSpec parse_window(std::string_view v) {
     const std::size_t colon = v.find(':');
@@ -64,7 +120,8 @@ std::uint32_t parse_trace(std::string_view v) {
         bool known = false;
         for (const rt::TraceCategory c :
              {rt::TraceCategory::kernel, rt::TraceCategory::sif, rt::TraceCategory::rpc,
-              rt::TraceCategory::dma, rt::TraceCategory::gs}) {
+              rt::TraceCategory::dma, rt::TraceCategory::gs, rt::TraceCategory::iop, rt::TraceCategory::spu2,
+              rt::TraceCategory::audio}) {
             if (name == rt::to_string(c)) {
                 mask |= rt::trace_bit(c);
                 known = true;
@@ -72,7 +129,7 @@ std::uint32_t parse_trace(std::string_view v) {
         }
         if (!known) {
             throw UsageError("--trace: unknown category '" + std::string(name) +
-                             "' (kernel, sif, rpc, dma, gs)");
+                             "' (kernel, sif, rpc, dma, gs, iop, spu2, audio)");
         }
         if (comma == std::string_view::npos) {
             break;
@@ -151,13 +208,32 @@ int usage(std::FILE* out) {
         "                           default with --window: 1.0\n"
         "  --input-script <file>    scripted pad input (.dq8in, Docs/formats/dq8-input-script.md)\n"
         "  --record-input <file>    write the input the run read as a .dq8in script\n"
-        "  --movies skip|blank|stop movies end at once, their scene timelines too (default); blank: the\n"
-        "                           player returns at once but the scene's clock runs on black (as in M3);\n"
-        "                           stop: the first player call stops the guest\n"
+        "  --movies MODE            auto (default): play when the dq8-movie library loads, else skip;\n"
+        "                           play: decode the movies (needs dq8-movie); nodecode: the movie HLE with\n"
+        "                           black pictures; skip: movies end at once, their scene timelines too;\n"
+        "                           blank: the player returns at once but the scene's clock runs on black\n"
+        "                           (as in M3); stop: the first player call stops the guest\n"
+        "  --movie-decoder <file>   the dq8-movie library (default: next to the executable)\n"
+        "  --audio null|sdl         audio output (default: sdl with --window, null headless)\n"
+        "  --audio-dump <file.wav>  also write everything the SPU2 mixes as a WAV file\n"
+        "  --audio-latency MS       the audio device's target buffer (default 64)\n"
+        "  --save-dir DIR|none      the memory-card folders (default: the user data directory with "
+        "--window;\n"
+        "                           none, an in-memory card, headless)\n"
+        "  --memory-card STATE      port 0: unformatted (default), formatted or none\n"
+        "  --memory-card2 STATE     port 1 (default none)\n"
+        "  --rtc DATE|host          the console clock at boot, YYYY-MM-DDTHH:MM:SS (default: a fixed date);\n"
+        "                           host: now, recorded in the start event\n"
+        "  --rumble on|off          gamepad vibration (default on)\n"
+        "  --vu0-registers MODE     per-thread (default) or shared VU0 registers across guest threads\n"
+        "  --dump-dir DIR           where `mark NAME` script lines write the next frame as PNG\n"
+        "  --dump-iop-ram-at N:PATH write the 2 MiB of IOP RAM after N vblanks (repeatable)\n"
+        "  --dump-spu2-at N:PATH    write the SPU2's 2 MiB sound RAM after N vblanks (repeatable)\n"
         "  --dump-frame N:PATH      write the scanout of vblank N as PNG (repeatable)\n"
         "  --dump-ram-at N:PATH     write the 32 MiB of RAM after N vblanks (repeatable)\n"
         "  --events FILE|-          JSON-lines events (deterministic fields only)\n"
-        "  --trace LIST             trace categories, printed on stderr: kernel,sif,rpc,dma,gs\n"
+        "  --trace LIST             trace categories, printed on stderr: "
+        "kernel,sif,rpc,dma,gs,iop,spu2,audio\n"
         "  --trace-events           also write the trace events into --events\n"
         "  --strict-kernel          noop kernel services stop instead\n"
         "  --verify-overlays        hash each loaded overlay against the profile and watch its text\n"
@@ -334,10 +410,74 @@ Options parse_options(int argc, const char* const* argv) {
         o.speed = 1.0;
     }
     if (const auto* v = get("movies")) {
-        if (*v != "skip" && *v != "blank" && *v != "stop") {
-            throw UsageError("--movies '" + *v + "': skip, blank or stop (playback comes in M4)");
+        if (*v != "auto" && *v != "play" && *v != "nodecode" && *v != "skip" && *v != "blank" &&
+            *v != "stop") {
+            throw UsageError("--movies '" + *v + "': auto, play, nodecode, skip, blank or stop");
         }
         o.movies = *v;
+    }
+    if (const auto* v = get("movie-decoder")) {
+        o.movie_decoder = *v;
+    }
+    if (const auto* v = get("audio")) {
+        if (*v != "null" && *v != "sdl") {
+            throw UsageError("--audio '" + *v + "': null or sdl");
+        }
+        o.audio = *v;
+    } else {
+        o.audio = o.display == Display::window ? "sdl" : "null";
+    }
+    if (const auto* v = get("audio-dump")) {
+        o.audio_dump = *v;
+    }
+    if (const auto* v = get("audio-latency")) {
+        const std::uint32_t ms = parse_u32(*v, "--audio-latency");
+        if (ms < 10 || ms > 1000) {
+            throw UsageError("--audio-latency " + *v + ": 10 to 1000 ms");
+        }
+        o.audio_latency_ms = ms;
+    }
+    if (const auto* v = get("save-dir")) {
+        o.save_dir = *v;
+    }
+    const auto card_state = [](const std::string& value, const char* option) {
+        if (value != "unformatted" && value != "formatted" && value != "none") {
+            throw UsageError(std::string(option) + " '" + value + "': unformatted, formatted or none");
+        }
+        return value;
+    };
+    if (const auto* v = get("memory-card")) {
+        o.memory_card = card_state(*v, "--memory-card");
+    }
+    if (const auto* v = get("memory-card2")) {
+        o.memory_card2 = card_state(*v, "--memory-card2");
+    }
+    if (const auto* v = get("rtc")) {
+        if (*v != "host" && !valid_rtc(*v)) {
+            throw UsageError("--rtc '" + *v + "': YYYY-MM-DDTHH:MM:SS (2000 to 2099) or host");
+        }
+        o.rtc = *v;
+    }
+    if (const auto* v = get("rumble")) {
+        if (*v != "on" && *v != "off") {
+            throw UsageError("--rumble '" + *v + "': on or off");
+        }
+        o.rumble = *v == "on";
+    }
+    if (const auto* v = get("vu0-registers")) {
+        if (*v != "per-thread" && *v != "shared") {
+            throw UsageError("--vu0-registers '" + *v + "': per-thread or shared");
+        }
+        o.vu0_registers = *v;
+    }
+    if (const auto* v = get("dump-dir")) {
+        o.dump_dir = *v;
+    }
+    for (const std::string& v : all("dump-iop-ram-at")) {
+        o.dump_iop_ram_at.push_back(parse_at_vblank(v, "--dump-iop-ram-at"));
+    }
+    for (const std::string& v : all("dump-spu2-at")) {
+        o.dump_spu2_at.push_back(parse_at_vblank(v, "--dump-spu2-at"));
     }
     if (const auto* v = get("events")) {
         o.events = *v;

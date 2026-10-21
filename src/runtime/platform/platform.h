@@ -5,6 +5,7 @@
 #include "runtime/gs/gs_backend.h"
 #include "runtime/io/pad_state.h"
 
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -30,6 +31,8 @@ class IPlatform {
     virtual PadState pad(unsigned port) const = 0;
     // Shows a frame scaled into the window; `aspect` is the display aspect (4/3 or 16/9).
     virtual void present(const gs::FrameImage& frame, double aspect) = 0;
+    // Drives the gamepad motors of `port` (M4 session D): low and high frequency strengths, 0 = off.
+    virtual void set_rumble(unsigned /*port*/, std::uint16_t /*low*/, std::uint16_t /*high*/) {}
 };
 
 // Throws std::runtime_error when no window can be created.

@@ -146,8 +146,82 @@ TEST_CASE("host options: M3 run options", "[host]") {
     CHECK(parse({"--iso", "g", "--module-dir", "m", "--gs-trace", "t.gs"}).gs == GsKind::trace);
     CHECK(parse({"--iso", "g", "--module-dir", "m", "--gs", "parallel", "--ssaa", "4"}).ssaa == 4);
     CHECK(parse({"--elf", "e", "--module-dir", "m", "--disc", "d.iso"}).disc == fs::path("d.iso"));
-    CHECK(parse({"--iso", "g", "--module-dir", "m"}).movies == "skip");
+    CHECK(parse({"--iso", "g", "--module-dir", "m"}).movies == "auto");
     CHECK(parse({"--iso", "g", "--module-dir", "m", "--movies", "blank"}).movies == "blank");
+}
+
+TEST_CASE("host options: M4 options and their defaults", "[host]") {
+    const Options d = parse({"--iso", "g", "--module-dir", "m"});
+    CHECK(d.audio == "null");
+    CHECK(parse({"--iso", "g", "--module-dir", "m", "--window"}).audio == "sdl");
+    CHECK(d.audio_latency_ms == 64);
+    CHECK(d.memory_card == "unformatted");
+    CHECK(d.memory_card2 == "none");
+    CHECK(d.rumble);
+    CHECK(d.vu0_registers == "per-thread");
+    CHECK_FALSE(d.save_dir);
+    CHECK_FALSE(d.rtc);
+    const Options o = parse({"--iso",
+                             "g",
+                             "--module-dir",
+                             "m",
+                             "--movies",
+                             "nodecode",
+                             "--audio",
+                             "sdl",
+                             "--audio-dump",
+                             "a.wav",
+                             "--audio-latency",
+                             "100",
+                             "--save-dir",
+                             "none",
+                             "--memory-card",
+                             "formatted",
+                             "--memory-card2",
+                             "unformatted",
+                             "--rtc",
+                             "2004-11-15T09:30:00",
+                             "--rumble",
+                             "off",
+                             "--vu0-registers",
+                             "shared",
+                             "--dump-dir",
+                             "dumps",
+                             "--dump-iop-ram-at",
+                             "10:i.bin",
+                             "--dump-spu2-at",
+                             "20:s.bin",
+                             "--movie-decoder",
+                             "lib.so"});
+    CHECK(o.movies == "nodecode");
+    CHECK(o.audio == "sdl");
+    CHECK(o.audio_dump == fs::path("a.wav"));
+    CHECK(o.audio_latency_ms == 100);
+    CHECK(o.save_dir == std::optional<std::string>("none"));
+    CHECK(o.memory_card == "formatted");
+    CHECK(o.memory_card2 == "unformatted");
+    CHECK(o.rtc == std::optional<std::string>("2004-11-15T09:30:00"));
+    CHECK_FALSE(o.rumble);
+    CHECK(o.vu0_registers == "shared");
+    CHECK(o.dump_dir == fs::path("dumps"));
+    REQUIRE(o.dump_iop_ram_at.size() == 1);
+    CHECK(o.dump_iop_ram_at[0].vblank == 10);
+    REQUIRE(o.dump_spu2_at.size() == 1);
+    CHECK(o.movie_decoder == fs::path("lib.so"));
+    CHECK(parse({"--iso", "g", "--module-dir", "m", "--rtc", "host"}).rtc ==
+          std::optional<std::string>("host"));
+    CHECK(error_of({"--iso", "g", "--module-dir", "m", "--audio", "alsa"}).find("null or sdl") !=
+          std::string::npos);
+    CHECK(error_of({"--iso", "g", "--module-dir", "m", "--memory-card", "full"})
+              .find("unformatted, formatted") != std::string::npos);
+    CHECK(error_of({"--iso", "g", "--module-dir", "m", "--rtc", "2004-13-01T00:00:00"}).find("--rtc") !=
+          std::string::npos);
+    CHECK(error_of({"--iso", "g", "--module-dir", "m", "--rtc", "1999-01-01T00:00:00"}).find("--rtc") !=
+          std::string::npos);
+    CHECK(error_of({"--iso", "g", "--module-dir", "m", "--audio-latency", "5"}).find("10 to 1000") !=
+          std::string::npos);
+    CHECK(error_of({"--iso", "g", "--module-dir", "m", "--rumble", "maybe"}).find("on or off") !=
+          std::string::npos);
 }
 
 TEST_CASE("host options: problems are usage errors", "[host]") {
@@ -180,7 +254,7 @@ TEST_CASE("host options: problems are usage errors", "[host]") {
     CHECK(error_of({"--iso", "g", "--module-dir", "m", "--speed", "0"}).find("--speed") != std::string::npos);
     CHECK(error_of({"--iso", "g", "--module-dir", "m", "--speed", "fast"}).find("--speed") !=
           std::string::npos);
-    CHECK(error_of({"--iso", "g", "--module-dir", "m", "--movies", "play"}).find("skip, blank or stop") !=
+    CHECK(error_of({"--iso", "g", "--module-dir", "m", "--movies", "fast"}).find("auto, play, nodecode") !=
           std::string::npos);
     CHECK(
         error_of({"--iso", "g", "--module-dir", "m", "--trace", "kernel,vu"}).find("unknown category 'vu'") !=

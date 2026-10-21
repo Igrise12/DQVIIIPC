@@ -44,7 +44,9 @@ std::optional<std::string> number_field(const rt::MachineEvent& e, std::string_v
 UntilCondition parse_until(std::string_view text, const core::RegionProfile* profile) {
     UntilCondition c;
     c.text = std::string(text);
-    const std::string usage = "--until " + c.text + ": expected vblank:N, overlay:NAME, mode:N or title";
+    const std::string usage =
+        "--until " + c.text +
+        ": expected vblank:N, overlay:NAME, mode:N, mark:NAME, event:TYPE[:FIELD=VALUE] or title";
     if (text == "title") {
         // The profile's [title] marker says what the title screen is; TitleWatcher emits `title` there.
         if (profile == nullptr || profile->title_screen.variable == 0) {
@@ -72,7 +74,7 @@ UntilCondition parse_until(std::string_view text, const core::RegionProfile* pro
         c.vblank = n;
         return c;
     }
-    if (kind != "overlay" && kind != "mode") {
+    if (kind != "overlay" && kind != "mode" && kind != "mark" && kind != "event") {
         throw std::invalid_argument(usage);
     }
     const auto trigger = rt::parse_trigger(text);
@@ -123,6 +125,33 @@ std::optional<rt::InputTrigger> trigger_from_event(const rt::MachineEvent& event
     return rt::InputTrigger{kind, *canonical};
 }
 
+bool event_matches_trigger(const rt::MachineEvent& event, const rt::InputTrigger& trigger) {
+    if (trigger.kind == "mark") {
+        const std::string* name = string_field(event, "name");
+        return event.type == "mark" && name != nullptr && *name == trigger.value;
+    }
+    if (trigger.kind == "event") {
+        const std::size_t colon = trigger.value.find(':');
+        if (event.type != std::string_view(trigger.value).substr(0, colon)) {
+            return false;
+        }
+        if (colon == std::string::npos) {
+            return true;
+        }
+        const std::string_view rest = std::string_view(trigger.value).substr(colon + 1);
+        const std::size_t eq = rest.find('=');
+        const std::string_view key = rest.substr(0, eq);
+        const std::string_view want = rest.substr(eq + 1);
+        if (const std::string* str = string_field(event, key)) {
+            return *str == want;
+        }
+        const auto num = number_field(event, key);
+        return num && *num == want;
+    }
+    const auto t = trigger_from_event(event);
+    return t && *t == trigger;
+}
+
 void UntilTracker::observe(const rt::MachineEvent& event, std::uint64_t vblank) {
     if (met_at_) {
         return;
@@ -136,7 +165,7 @@ void UntilTracker::observe(const rt::MachineEvent& event, std::uint64_t vblank) 
     if (condition_.kind != UntilCondition::Kind::trigger) {
         return;
     }
-    if (const auto t = trigger_from_event(event); t && *t == condition_.trigger) {
+    if (event_matches_trigger(event, condition_.trigger)) {
         met_at_ = vblank;
     }
 }

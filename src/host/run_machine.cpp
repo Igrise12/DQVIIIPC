@@ -16,6 +16,7 @@
 #include "game/until.h"
 #include "host/event_log.h"
 #include "host/limiter.h"
+#include "host/m4_wiring.h"
 #include "host/run.h"
 #include "host/session.h"
 #include "runtime/ee/context.h"
@@ -30,6 +31,7 @@
 #include "runtime/iop/iop.h"
 #include "runtime/machine/ee_devices.h"
 #include "runtime/machine/machine.h"
+#include "runtime/vu/vu_units.h"
 // The paraLLEl-GS backend (session D) when the tree has it.
 #if __has_include("runtime/gs/gs_parallel_backend.h")
 #include "runtime/gs/gs_parallel_backend.h"
@@ -230,7 +232,41 @@ struct Outcome {
 
 } // namespace
 
+// M4 options whose subsystem has not arrived on this build yet (Docs/milestones/M4-playable.md): the session
+// that brings each one removes its line. Refused at start-up rather than silently ignored.
+std::optional<std::string> unwired_m4_option(const Options& o) {
+    if (o.movies == "play" || o.movies == "nodecode") {
+        return "--movies " + o.movies + " arrives with the movie HLE (M4 session C)";
+    }
+    if (o.movie_decoder) {
+        return std::string("--movie-decoder arrives with the movie HLE (M4 session C)");
+    }
+    if (o.audio == "sdl" && o.display == Display::headless) {
+        return std::string("--audio sdl arrives with the audio output (M4 session B)");
+    }
+    if (o.audio_dump) {
+        return std::string("--audio-dump arrives with the SPU2 (M4 session B)");
+    }
+    if (!o.dump_spu2_at.empty()) {
+        return std::string("--dump-spu2-at arrives with the SPU2 (M4 session B)");
+    }
+    if (!o.dump_iop_ram_at.empty()) {
+        return std::string("--dump-iop-ram-at arrives with the interpreted IOP (M4 session A)");
+    }
+    if (o.save_dir || o.memory_card != "unformatted" || o.memory_card2 != "none" || o.rtc) {
+        return std::string("--save-dir, --memory-card, --memory-card2 and --rtc arrive with the memory card "
+                           "(M4 session D)");
+    }
+    if (o.vu0_registers != "per-thread") {
+        return std::string("--vu0-registers shared arrives with M4 session D");
+    }
+    return std::nullopt;
+}
+
 int run_game(const Options& o, const char* argv0) {
+    if (const auto unwired = unwired_m4_option(o)) {
+        throw UsageError(*unwired);
+    }
     Session s;
     setup_session(o, argv0, s);
     const core::RegionProfile* profile = s.profile();
@@ -252,7 +288,9 @@ int run_game(const Options& o, const char* argv0) {
             throw UsageError(std::string("--input-script: ") + e.what());
         }
     }
-    const auto movie_policy = game::parse_movie_policy(o.movies);
+    // --movies auto plays when the movie HLE and its decoder are available (M4 session C); until then it
+    // skips.
+    const auto movie_policy = game::parse_movie_policy(o.movies == "auto" ? std::string("skip") : o.movies);
     EventLog log(o.events, o.trace_events);
 
     // Disc.
@@ -313,6 +351,12 @@ int run_game(const Options& o, const char* argv0) {
         iop_config.modules = game::iop_module_specs(*profile);
         iop_config.reset_image = game::iop_reset_image(*profile);
     }
+    // The M4 sessions' additions (m4_wiring.h), before the IOP is built from its configuration.
+    M4Wiring m4{o, profile, pipeline, iop_config, {}, {}, {}, {}, {}};
+    wire_audio(m4);
+    wire_movies(m4);
+    wire_saves(m4);
+    wire_feedback(m4);
     rt::Iop iop(std::move(iop_config));
     std::unique_ptr<game::OverlayResidency> residency;
     std::unique_ptr<game::ModeWatcher> mode_watcher;
@@ -378,15 +422,45 @@ int run_game(const Options& o, const char* argv0) {
             s.dispatcher->install_override(std::move(spec), &s.memory);
         }
     }
+    for (const auto& d : m4.devices) {
+        machine.attach(*d);
+    }
+    for (rt::OverrideSpec& spec : m4.overrides) {
+        s.dispatcher->install_override(std::move(spec), &s.memory);
+    }
     for (rt::OverrideSpec& spec : stop_at_pc_overrides(o, s)) {
         s.dispatcher->install_override(std::move(spec), &s.memory);
     }
 
+    // The distinct triggers the script waits for, and its marks as `mark` events.
+    std::vector<rt::InputTrigger> script_triggers;
+    if (script) {
+        for (const rt::InputScriptLine& line : script->script().lines) {
+            if (line.time == rt::InputScriptLine::Time::after &&
+                std::find(script_triggers.begin(), script_triggers.end(), line.trigger) ==
+                    script_triggers.end()) {
+                script_triggers.push_back(line.trigger);
+            }
+        }
+        // A mark also dumps the next frame into --dump-dir as <script>-<name>.png.
+        const std::string stem = o.input_script ? o.input_script->stem().string() : std::string("script");
+        script->set_mark_sink([&machine, &pipeline, &o, stem](const std::string& name, std::uint64_t vblank) {
+            machine.emit(rt::MachineEvent{"mark", {}}.add("name", name));
+            if (o.dump_dir) {
+                pipeline.request_frame_dump(vblank + 1,
+                                            (*o.dump_dir / (stem + "-" + name + ".png")).string());
+            }
+        });
+    }
     machine.set_event_sink([&](const rt::MachineEvent& e) {
         const std::uint64_t vblank = machine.vblank_count();
         log.write(e, vblank, machine.clock().now());
-        if (const auto trigger = game::trigger_from_event(e); trigger && script) {
-            script->note_trigger(*trigger, vblank);
+        if (script) {
+            for (const rt::InputTrigger& t : script_triggers) {
+                if (game::event_matches_trigger(e, t)) {
+                    script->note_trigger(t, vblank);
+                }
+            }
         }
         if (until) {
             until->observe(e, vblank);
@@ -476,6 +550,9 @@ int run_game(const Options& o, const char* argv0) {
         done.store(true);
     };
 
+    for (const auto& start_hook : m4.on_start) {
+        start_hook();
+    }
     std::thread machine_thread(machine_loop);
 #ifdef DQ8_HAVE_WINDOW
     if (platform) {
@@ -497,6 +574,9 @@ int run_game(const Options& o, const char* argv0) {
     }
 #endif
     machine_thread.join();
+    for (const auto& stop_hook : m4.on_stop) {
+        stop_hook();
+    }
     if (recorder) {
         recorder->flush();
     }
@@ -530,6 +610,9 @@ int run_game(const Options& o, const char* argv0) {
         if (outcome.stop) {
             end.add("reason", std::string(rt::to_string(outcome.stop->reason)));
         }
+        for (const auto& add_fields : m4.end_fields) {
+            add_fields(end);
+        }
         log.write(end, outcome.last.vblank, outcome.last.cycles);
         log.flush();
     }
@@ -549,6 +632,23 @@ int run_game(const Options& o, const char* argv0) {
         j.member("gs_hash", outcome.gs_hash);
         j.member("gs_vsyncs", pipeline.vsyncs());
         j.member("ram_sha1", ram);
+        for (const auto& device : devices) {
+            if (const auto* vu = dynamic_cast<const rt::VuUnits*>(device.get())) {
+                // Micro programs run (VIF MSCAL/MSCNT and, for VU0, VCALLMS), their cycles, VU1's XGKICKs.
+                j.key("vu");
+                j.begin_object();
+                for (unsigned unit = 0; unit < 2; ++unit) {
+                    const rt::VuUnits::UnitStats& st = vu->stats(unit);
+                    j.key(unit == 0 ? "vu0" : "vu1");
+                    j.begin_object();
+                    j.member("programs", st.programs);
+                    j.member("cycles", st.cycles);
+                    j.member("xgkicks", st.xgkicks);
+                    j.end_object();
+                }
+                j.end_object();
+            }
+        }
         j.end_object();
         j.member("ended", ended);
         if (until) {

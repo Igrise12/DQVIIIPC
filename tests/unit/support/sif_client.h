@@ -298,11 +298,15 @@ class SifClient {
         }
     }
 
+    // Byte by byte (little-endian, as the guest stores it): GCC 13 at -O3 reports a false array-bounds error
+    // on the resize path of a memcpy version even when it never runs.
     static void put(std::vector<std::uint8_t>& b, std::size_t off, std::uint32_t v) {
-        if (b.size() < off + 4) {
-            b.resize(off + 4);
+        while (b.size() < off + 4) {
+            b.push_back(0);
         }
-        std::memcpy(b.data() + off, &v, 4);
+        for (unsigned i = 0; i < 4; ++i) {
+            b[off + i] = static_cast<std::uint8_t>(v >> (8 * i));
+        }
     }
     static std::uint32_t get(const std::vector<std::uint8_t>& b, std::size_t off) {
         std::uint32_t v = 0;
@@ -442,8 +446,14 @@ struct IopRig {
                     std::vector<rt::IopModuleSpec> modules = test_modules(),
                     std::string reset_image = "MODULES/IOPRP.IMG")
         : image(core::iso::Image::from_bytes(disc.build(&layout))), source(rt::make_iso_disc_source(image)),
-          iop(std::make_unique<rt::Iop>(
-              rt::IopConfig{source.get(), &input, std::move(modules), std::move(reset_image)})),
+          iop(std::make_unique<rt::Iop>([&] {
+              rt::IopConfig c;
+              c.disc = source.get();
+              c.input = &input;
+              c.modules = std::move(modules);
+              c.reset_image = std::move(reset_image);
+              return c;
+          }())),
           client(m) {
         m.attach(*iop);
     }

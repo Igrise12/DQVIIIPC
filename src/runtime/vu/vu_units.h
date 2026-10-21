@@ -4,6 +4,7 @@
 
 #include "runtime/machine/machine_services.h"
 #include "runtime/machine/mmio.h"
+#include "runtime/vu/vu0_runner.h"
 #include "runtime/vu/vu_interpreter.h"
 
 #include <array>
@@ -22,7 +23,7 @@ namespace dq8::rt {
 
 class Gif;
 
-class VuUnits final : public IDevice, public IMmioDevice {
+class VuUnits final : public IDevice, public IMmioDevice, public IVu0Runner {
   public:
     static constexpr std::uint32_t base = 0x11000000u;
     static constexpr std::uint32_t size = 0x10000u;
@@ -57,6 +58,9 @@ class VuUnits final : public IDevice, public IMmioDevice {
     // program ended.
     void start(unsigned unit, std::uint32_t start_pc, std::uint32_t top, std::uint32_t itop);
     void resume(unsigned unit, std::uint32_t top, std::uint32_t itop);
+    // VCALLMS/VCALLMSR (vu0_runner.h): unit 0 runs with `ctx`'s VU0 registers in and out. Registered with
+    // the machine at attach.
+    std::uint64_t run_from_ee(R5900Context& ctx, std::uint32_t start) override;
 
     void set_max_program_cycles(std::uint64_t cycles) noexcept { max_program_cycles_ = cycles; }
     std::uint64_t max_program_cycles() const noexcept { return max_program_cycles_; }

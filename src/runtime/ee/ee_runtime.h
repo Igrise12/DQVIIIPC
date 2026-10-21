@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -41,7 +42,7 @@ struct RunResult {
     std::uint64_t dispatches = 0;
 };
 
-class EeRuntime {
+class EeRuntime final : public IGuestCalls {
   public:
     using TraceSink = std::function<void(std::string_view line)>;
 
@@ -65,6 +66,7 @@ class EeRuntime {
     // stopped); before boot, a power-on context.
     R5900Context& context() noexcept;
     GuestMemory& memory() noexcept { return memory_; }
+    MachineServices& machine() noexcept { return machine_; }
     const Dispatcher& dispatcher() const noexcept { return dispatcher_; }
     // What generated code receives as `runtime`.
     PS2Runtime* adapter() noexcept { return &adapter_; }
@@ -80,6 +82,12 @@ class EeRuntime {
     // A nested guest call on the current fiber: runs `ctx` from its pc until it returns to pc 0 (interrupt
     // handlers, SetSyscall handlers). `state.ctx` points at `ctx` meanwhile.
     void call_guest(ExecState& state, R5900Context& ctx);
+    // IGuestCalls (overrides.h): native override code calling guest functions and kernel services on the
+    // current thread's fiber.
+    std::uint64_t call_function(R5900Context& ctx, std::uint32_t entry, std::span<const std::uint64_t> args,
+                                std::uint32_t sp) override;
+    std::uint64_t call_kernel(R5900Context& ctx, std::string_view name,
+                              std::span<const std::uint64_t> args) override;
     // Fills a stop report's last branch.
     void annotate_stop(StopInfo& info) const;
     // Ends the run with `info` (MachineServices::stop: a fiber switch on a fiber, a throw elsewhere).
