@@ -10,6 +10,7 @@ add_library(dq8_runtime STATIC
     ee/dispatch_table.cpp
     ee/overlay_manager.cpp
     ee/dispatcher.cpp
+    ee/overrides.cpp
     ee/ee_runtime.cpp
     ee/game_module.cpp
     kernel/kernel_calls.cpp

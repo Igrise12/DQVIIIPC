@@ -23,7 +23,7 @@ struct OverlayWindowSpec {
 struct OverlayUnit {
     std::uint32_t overlay_id = 0; // non-zero, unique per window
     std::string name;
-    DispatchTable table;
+    DispatchTable table; // an owned copy
 };
 
 class OverlayManager {
@@ -39,7 +39,8 @@ class OverlayManager {
     }
 
     // Throws std::invalid_argument when there is no window, the id is 0 or already registered, or the table
-    // does not lie inside the window. Registering does not make the unit resident.
+    // does not lie inside the window. The manager keeps an owned copy of the table (the dispatcher patches
+    // override slots in it). Registering does not make the unit resident.
     void register_unit(std::uint32_t overlay_id, std::string name, DispatchTable table);
     const std::vector<OverlayUnit>& units() const noexcept { return units_; }
     const OverlayUnit* find(std::uint32_t overlay_id) const noexcept;

@@ -41,7 +41,7 @@ void OverlayManager::register_unit(std::uint32_t overlay_id, std::string name, D
                                     hex32(table.end()) + ") is not inside the window [" +
                                     hex32(window_->base) + ", " + hex32(window_->end) + ")");
     }
-    units_.push_back({overlay_id, std::move(name), table});
+    units_.push_back({overlay_id, std::move(name), table.owned_copy()});
 }
 
 const OverlayUnit* OverlayManager::find(std::uint32_t overlay_id) const noexcept {
