@@ -8,6 +8,7 @@
 #include "dq8/core/iso9660.h"
 #include "game/iop_modules.h"
 #include "game/mode_watcher.h"
+#include "game/movie_timelines.h"
 #include "game/movies.h"
 #include "game/overlay_residency.h"
 #include "game/title_watcher.h"
@@ -316,6 +317,7 @@ int run_game(const Options& o, const char* argv0) {
     std::unique_ptr<game::OverlayResidency> residency;
     std::unique_ptr<game::ModeWatcher> mode_watcher;
     std::unique_ptr<game::TitleWatcher> title_watcher;
+    std::unique_ptr<game::MovieTimelineSkip> timeline_skip;
     if (profile != nullptr) {
         residency = std::make_unique<game::OverlayResidency>(
             game::OverlayResidencyConfig{profile, &s.overlays, o.verify_overlays});
@@ -324,6 +326,10 @@ int run_game(const Options& o, const char* argv0) {
             if (profile->title_screen.variable != 0) {
                 title_watcher = std::make_unique<game::TitleWatcher>(*profile);
             }
+        }
+        if (movie_policy.value_or(game::MoviePolicy::skip) == game::MoviePolicy::skip &&
+            !profile->movie.timelines.empty()) {
+            timeline_skip = std::make_unique<game::MovieTimelineSkip>(*profile);
         }
     }
 
@@ -362,6 +368,9 @@ int run_game(const Options& o, const char* argv0) {
     }
     if (mode_watcher) {
         machine.attach(*mode_watcher);
+    }
+    if (timeline_skip) {
+        machine.attach(*timeline_skip);
     }
     if (profile != nullptr) {
         for (rt::OverrideSpec& spec :

@@ -151,7 +151,9 @@ int usage(std::FILE* out) {
         "                           default with --window: 1.0\n"
         "  --input-script <file>    scripted pad input (.dq8in, Docs/formats/dq8-input-script.md)\n"
         "  --record-input <file>    write the input the run read as a .dq8in script\n"
-        "  --movies skip|stop       movie player calls return at once (default) or stop the guest\n"
+        "  --movies skip|blank|stop movies end at once, their scene timelines too (default); blank: the\n"
+        "                           player returns at once but the scene's clock runs on black (as in M3);\n"
+        "                           stop: the first player call stops the guest\n"
         "  --dump-frame N:PATH      write the scanout of vblank N as PNG (repeatable)\n"
         "  --dump-ram-at N:PATH     write the 32 MiB of RAM after N vblanks (repeatable)\n"
         "  --events FILE|-          JSON-lines events (deterministic fields only)\n"
@@ -332,8 +334,8 @@ Options parse_options(int argc, const char* const* argv) {
         o.speed = 1.0;
     }
     if (const auto* v = get("movies")) {
-        if (*v != "skip" && *v != "stop") {
-            throw UsageError("--movies '" + *v + "': skip or stop (playback comes in M4)");
+        if (*v != "skip" && *v != "blank" && *v != "stop") {
+            throw UsageError("--movies '" + *v + "': skip, blank or stop (playback comes in M4)");
         }
         o.movies = *v;
     }

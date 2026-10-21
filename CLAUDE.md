@@ -21,8 +21,9 @@ gamepad). M3 closes once CI is green on the last fix; M4 (playable core) is next
   kernel, DMAC/VIF/GIF/VU1, the GS pipeline with null, trace and paraLLEl-GS backends, SIF and the native IOP servers,
   guest memory, ELF loader, dispatch tables, overrides and the overlay manager. `src/game`: the profile-driven game
   layer (residency hook, movie skip, title watcher, `--until`). `src/host`: `dq8-game`, headless or SDL3 window.
-- `dq8-game --until title` boots the disc to the title menu in 1,200 vblanks, deterministically; `--window` plays
-  it live (see `Docs/milestones/M3-boots.md` §Results).
+- `dq8-game --until title` boots the disc to the title menu in 1,200 vblanks, deterministically (the M3 input under
+  `--movies blank`; the default `--movies skip` also skips the title's flyover timeline); `--window` plays it live
+  (see `Docs/milestones/M3-boots.md` §Results).
 - Tests: 434 unit tests (CI on GCC, Clang, MSVC, ASan), local disc tests, a synthetic machine run pinned to golden
   hashes, and a synthetic recompile end-to-end suite (label `e2e`, CI job on GCC 13).
 
@@ -42,7 +43,8 @@ proposing or changing design:
 Decided in brief §14: D1 (name), D2 (license, ADR-0009), D3 (local game-module build, ADR-0008), D4 (PS2Recomp pinned
 plus patch queue, ADR-0003) and D5 (paraLLEl-GS first, ADR-0004); with M3 (2026-10-21) ADR-0005 (SDL3), 0007 (machine
 thread and fibers), 0011 (native IOP servers first) and 0012 (overlay residency through the loader hook). D6 to D9 and
-ADR-0001, 0002, 0006 and 0010 are **proposals**; do not present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
+ADR-0001, 0002, 0006, 0010 and 0013 (guarded guest-state writes, implemented behind `--movies skip`) are
+**proposals**; do not present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
 its row in architecture.md §18 and brief §14, and use absolute dates.
 
 ## Commands

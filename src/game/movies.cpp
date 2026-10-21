@@ -32,6 +32,9 @@ std::optional<MoviePolicy> parse_movie_policy(std::string_view text) noexcept {
     if (text == "skip") {
         return MoviePolicy::skip;
     }
+    if (text == "blank") {
+        return MoviePolicy::blank;
+    }
     if (text == "stop") {
         return MoviePolicy::stop;
     }
@@ -39,7 +42,15 @@ std::optional<MoviePolicy> parse_movie_policy(std::string_view text) noexcept {
 }
 
 std::string_view to_string(MoviePolicy policy) noexcept {
-    return policy == MoviePolicy::skip ? "skip" : "stop";
+    switch (policy) {
+    case MoviePolicy::skip:
+        return "skip";
+    case MoviePolicy::blank:
+        return "blank";
+    case MoviePolicy::stop:
+        break;
+    }
+    return "stop";
 }
 
 std::vector<rt::OverrideSpec> movie_overrides(const core::RegionProfile& profile, MoviePolicy policy) {
@@ -59,7 +70,7 @@ std::vector<rt::OverrideSpec> movie_overrides(const core::RegionProfile& profile
                 s.address = entry;
                 s.message = "--movies stop: the game called the movie player entry " + rt::hex32(entry) +
                             " (a0=" + rt::hex32(rt::gpr_u32(*call.ctx, 4)) +
-                            "); movie playback is M4, --movies skip returns from it instead";
+                            "); movie playback is M4, --movies skip or blank returns from it instead";
                 machine_of(call).stop(std::move(s));
             };
         } else {
@@ -74,12 +85,12 @@ std::vector<rt::OverrideSpec> movie_overrides(const core::RegionProfile& profile
         }
         out.push_back(std::move(spec));
     }
-    if (policy == MoviePolicy::skip && profile.movie.finished_query != 0) {
+    if (policy != MoviePolicy::stop && profile.movie.finished_query != 0) {
         rt::OverrideSpec spec;
         spec.unit = std::string(main_unit_name);
         spec.address = profile.movie.finished_query;
         spec.kind = rt::OverrideKind::replace;
-        spec.name = "movie-skip-finished";
+        spec.name = "movie-" + std::string(to_string(policy)) + "-finished";
         spec.fn = [](rt::OverrideCall& call) {
             rt::set_gpr_lo(*call.ctx, reg_v0, 1); // the movie is done
             call.return_to_caller();

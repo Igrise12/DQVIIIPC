@@ -472,6 +472,7 @@ A **patch** is a declarative description of a guest memory change or function ov
 - Targets a region profile, a code unit and an address, and may depend on a setting.
 - Carries only **our** replacement values. Any "expected original" check is a **digest of the region**, never the original bytes, so patch files obey the no-game-data rule (§14).
 - Applied at defined times (module load, overlay load, or on demand), because an overlay patch must be reapplied whenever that overlay becomes resident.
+- The first runtime write is proposed in ADR-0013: a guarded write at vblank, from profile data, of a value the game itself writes (`--movies skip` moves TITLE's flyover timeline to its end). It should become a patch kind once this system exists.
 - Community cheat and patch files in common formats can be **imported at run time** from the user's own files, with warnings for anything unsupported. They are never committed.
 
 ---
@@ -751,6 +752,7 @@ Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are acc
 | 0010 | Launcher is a thin front end over `libdq8core`, Dear ImGui first | Proposed | One toolkit with the in-game overlay, replaceable later. |
 | 0011 | IOP as native RPC servers first (SIF protocol, file I/O, disc, modules, pad, memory card; null servers for the sound modules); interpreting the IRX modules deferred | **Accepted** (2026-10-21; `Docs/adr/0011-iop-native-servers-first.md`) | Every SDK library is recompiled game code, so the SIF protocol is needed either way; the title screen needs no audio. |
 | 0012 | Overlay residency through the loader hook, with the game's own loader over native file I/O | **Accepted** (2026-10-21; `Docs/adr/0012-overlay-residency-loader-hook.md`; confirmed by the M3a bring-up on 2026-10-21) | One file-I/O path for archives and overlays; the hook fires between "bytes in RAM" and "code live". |
+| 0013 | Guarded guest-state writes from the game layer: profile data, guarded by guest state read at a vblank safe point, only values the game itself writes, an event per write, enabled by a policy (first use: `--movies skip` skips TITLE's flyover timeline) | Proposed (2026-10-21; `Docs/adr/0013-guarded-guest-state-writes.md`; implemented behind `--movies skip`, off with `--movies blank`) | No override fits a scene that steps its own clock while its movie is skipped; a write needs rules before the patch system exists. |
 
 ---
 

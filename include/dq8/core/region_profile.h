@@ -101,6 +101,21 @@ struct RegionProfile {
         std::vector<IopModule> modules;
     } iop;
 
+    // A scene timeline that runs alongside a movie on the scene's own frame counter, movie or not (M3
+    // bring-up: TITLE's flyover). While `overlay` is resident and the stage variable holds `stage_value`, the
+    // scene steps `counter`, a signed 32-bit word, up from 0; `skip_to` is the step the game itself jumps to
+    // when the player skips the movie. dq8-game --movies skip writes it once the counter is above 0
+    // (game/movie_timelines.h, ADR-0013, proposed).
+    struct MovieTimeline {
+        std::string name;    // our label, e.g. "title-flyover": [a-z0-9-], unique
+        std::string overlay; // an overlay name
+        std::uint32_t stage_variable = 0;
+        std::uint32_t stage_width = 0; // bytes: 1, 2 or 4 (little-endian, unsigned)
+        std::uint32_t stage_value = 0;
+        std::uint32_t counter = 0; // 4-byte aligned
+        std::int32_t skip_to = 0;  // > 0
+    };
+
     // The movie player entry points the runtime overrides to skip movies (M3: playback is M4). Optional and
     // marked "to be confirmed" in the profile until bring-up proves them.
     struct Movie {
@@ -108,6 +123,7 @@ struct RegionProfile {
         std::uint32_t finished_query = 0; // the player's "movie finished?" function (0: not recorded)
         std::string scene_unit;           // the overlay holding the scene functions, e.g. "TITLE"
         std::vector<std::uint32_t> scene_functions; // fallback override targets inside the overlay window
+        std::vector<MovieTimeline> timelines;       // [[movie.timelines]], in the file's order
     } movie;
 
     // What "the title screen" is (dq8-game --until title; M3 bring-up): the overlay that must be resident and

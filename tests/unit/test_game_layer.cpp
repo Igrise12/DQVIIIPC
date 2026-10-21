@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 // The game layer (src/game) against a synthetic region profile: the overlay residency hook (ADR-0012), the
-// movie policies, the mode watcher, [iop] -> IopModuleSpec and the --until conditions. Every address, size,
-// name and byte is ours.
+// movie policies and timeline skip (ADR-0013, proposed), the mode watcher, [iop] -> IopModuleSpec and the
+// --until conditions. Every address, size, name and byte is ours.
 #include "dq8/core/hash.h"
 #include "game/iop_modules.h"
 #include "game/mode_watcher.h"
+#include "game/movie_timelines.h"
 #include "game/movies.h"
 #include "game/overlay_residency.h"
 #include "game/title_watcher.h"
@@ -231,8 +232,10 @@ TEST_CASE("residency hook: an overlay with no registered unit stops", "[game]") 
 
 TEST_CASE("movies: stop names the entry, skip returns at once and reports the movie done", "[game]") {
     CHECK(game::parse_movie_policy("skip") == game::MoviePolicy::skip);
+    CHECK(game::parse_movie_policy("blank") == game::MoviePolicy::blank);
     CHECK(game::parse_movie_policy("stop") == game::MoviePolicy::stop);
     CHECK_FALSE(game::parse_movie_policy("play"));
+    CHECK(game::to_string(game::MoviePolicy::blank) == "blank");
     {
         Fixture f;
         for (rt::OverrideSpec& s : game::movie_overrides(f.profile, game::MoviePolicy::stop)) {
@@ -267,9 +270,95 @@ TEST_CASE("movies: stop names the entry, skip returns at once and reports the mo
         CHECK(specs[1].name == "movie-skip-finished");
         CHECK(specs[1].address == 0x00100F00);
         CHECK(game::movie_overrides(f.profile, game::MoviePolicy::stop).size() == 1);
+        // blank installs the same overrides; only the timelines (MovieTimelineSkip) tell it from skip.
+        const auto blank = game::movie_overrides(f.profile, game::MoviePolicy::blank);
+        REQUIRE(blank.size() == 2);
+        CHECK(blank[0].name == "movie-blank-0");
+        CHECK(blank[1].name == "movie-blank-finished");
+    }
+    {
+        Fixture f;
+        for (const rt::OverrideSpec& s : game::movie_overrides(f.profile, game::MoviePolicy::blank)) {
+            f.dispatcher->install_override(s);
+        }
+        f.call(movie_entry, 0);
+        CHECK(f.ctx.pc == caller_ra);
+        CHECK(movie_calls == 0);
+        REQUIRE(f.machine.emitted.size() == 1);
+        CHECK(f.machine.emitted[0].type == "movie_skip");
     }
     core::RegionProfile none;
     CHECK(game::movie_overrides(none, game::MoviePolicy::skip).empty());
+}
+
+TEST_CASE("movie timelines: a running timeline jumps to its skip point", "[game]") {
+    Fixture f;
+    CHECK_THROWS_AS(game::MovieTimelineSkip(f.profile), std::invalid_argument); // no [[movie.timelines]]
+    constexpr std::uint32_t stage = 0x00100F00;            // main-program data, a halfword
+    constexpr std::uint32_t counter = window_base + 0x800; // the overlay's data
+    f.profile.movie.timelines.push_back({"intro-pan", "BETA", stage, 2, 10, counter, 300});
+    test::FakeMachine machine;
+    game::MovieTimelineSkip skip(f.profile);
+    machine.attach(skip);
+    const auto put = [&](std::uint32_t address, std::uint32_t value) {
+        const std::uint8_t b[4] = {static_cast<std::uint8_t>(value), static_cast<std::uint8_t>(value >> 8),
+                                   static_cast<std::uint8_t>(value >> 16),
+                                   static_cast<std::uint8_t>(value >> 24)};
+        machine.memory().write_bytes(address, b);
+    };
+    const auto get = [&](std::uint32_t address) {
+        std::uint8_t b[4] = {};
+        machine.memory().read_bytes(address, b);
+        return static_cast<std::uint32_t>(b[0]) | (static_cast<std::uint32_t>(b[1]) << 8) |
+               (static_cast<std::uint32_t>(b[2]) << 16) | (static_cast<std::uint32_t>(b[3]) << 24);
+    };
+
+    put(window_base + 4, f.profile.overlays[0].id); // ALPHA resident: its memory, not the timeline's
+    put(stage, 10);
+    put(counter, 5);
+    machine.fire_vblank_start();
+    CHECK(get(counter) == 5);
+    put(window_base + 4, f.profile.overlays[1].id); // BETA resident, another stage
+    put(stage, 9);
+    machine.fire_vblank_start();
+    CHECK(get(counter) == 5);
+    CHECK(machine.emitted.empty());
+
+    put(stage, 10 | 0x00AB0000); // only the low 2 bytes count
+    machine.fire_vblank_start();
+    CHECK(get(counter) == 300);
+    CHECK(get(stage) == (10 | 0x00AB0000)); // nothing else is written
+    REQUIRE(machine.emitted.size() == 1);
+    const rt::MachineEvent& e = machine.emitted[0];
+    CHECK(e.type == "movie_timeline_skip");
+    CHECK(std::get<std::string>(*field(e, "timeline")) == "intro-pan");
+    CHECK(std::get<std::int64_t>(*field(e, "from")) == 5);
+    CHECK(std::get<std::int64_t>(*field(e, "to")) == 300);
+    CHECK(skip.skips() == 1);
+
+    // At or past the skip point the game's own steps continue untouched.
+    machine.fire_vblank_start();
+    put(counter, 301);
+    machine.fire_vblank_start();
+    CHECK(get(counter) == 301);
+    CHECK(machine.emitted.size() == 1);
+
+    // A timeline that starts again is skipped again once the scene has stepped it: at 0 (the start, or a
+    // stage variable that holds the value before the scene runs) and below (the counter is signed) it waits.
+    put(counter, 0);
+    machine.fire_vblank_start();
+    put(counter, 0xFFFFFFFFu);
+    machine.fire_vblank_start();
+    CHECK(get(counter) == 0xFFFFFFFFu);
+    CHECK(machine.emitted.size() == 1);
+    put(counter, 1);
+    machine.fire_vblank_start();
+    CHECK(get(counter) == 300);
+    REQUIRE(machine.emitted.size() == 2);
+    CHECK(std::get<std::int64_t>(*field(machine.emitted[1], "from")) == 1);
+    CHECK(skip.skips() == 2);
+    skip.reset();
+    CHECK(skip.skips() == 0);
 }
 
 TEST_CASE("title watcher: one event when the [title] overlay is resident and the marker holds", "[game]") {
