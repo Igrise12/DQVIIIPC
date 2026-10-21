@@ -20,6 +20,20 @@ add_library(dq8_runtime STATIC
     machine/interrupts.cpp
     machine/mmio.cpp
     platform/dynlib.cpp
+    io/iso_disc_source.cpp
+    iop/iop.cpp
+    iop/iop_memory.cpp
+    iop/iop_modules.cpp
+    iop/iop_rpc.cpp
+    iop/sif_link.cpp
+    iop/services/cdvdfsv.cpp
+    iop/services/common.cpp
+    iop/services/fileio.cpp
+    iop/services/iopheap.cpp
+    iop/services/loadfile.cpp
+    iop/services/mcserv.cpp
+    iop/services/null_server.cpp
+    iop/services/padman.cpp
 )
 add_library(dq8::runtime ALIAS dq8_runtime)
 # Headers are included as "runtime/<area>/<file>.h"; the module ABI comes from include/ through dq8::core.

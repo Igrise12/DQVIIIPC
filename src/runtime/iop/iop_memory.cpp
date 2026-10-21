@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+#include "runtime/iop/iop_memory.h"
+
+#include "runtime/ee/guest_stop.h"
+
+#include <cstring>
+#include <map>
+#include <stdexcept>
+#include <string>
+
+namespace dq8::rt {
+
+namespace {
+
+void check_range(std::uint32_t addr, std::size_t bytes) {
+    if (addr > IopMemory::size || bytes > IopMemory::size - addr) {
+        throw std::out_of_range("IOP RAM range " + hex32(addr) + " + " + std::to_string(bytes) +
+                                " lies outside the 2 MiB of IOP RAM");
+    }
+}
+
+} // namespace
+
+// First fit over the gaps between allocated blocks, which are kept sorted by address. A free merges nothing
+// because the free space is never stored: it is the gaps themselves.
+struct IopMemory::Heap {
+    std::map<std::uint32_t, std::uint32_t> blocks; // address -> size, both 16-byte multiples
+};
+
+IopMemory::IopMemory() : ram_(new std::uint8_t[size]()), heap_(std::make_shared<Heap>()) {}
+
+void IopMemory::write(std::uint32_t addr, std::span<const std::uint8_t> bytes) {
+    check_range(addr, bytes.size());
+    if (!bytes.empty()) {
+        std::memcpy(ram_.get() + addr, bytes.data(), bytes.size());
+    }
+}
+
+void IopMemory::read(std::uint32_t addr, std::span<std::uint8_t> out) const {
+    check_range(addr, out.size());
+    if (!out.empty()) {
+        std::memcpy(out.data(), ram_.get() + addr, out.size());
+    }
+}
+
+std::uint32_t IopMemory::read32(std::uint32_t addr) const {
+    std::uint8_t b[4];
+    read(addr, b);
+    return static_cast<std::uint32_t>(b[0]) | static_cast<std::uint32_t>(b[1]) << 8 |
+           static_cast<std::uint32_t>(b[2]) << 16 | static_cast<std::uint32_t>(b[3]) << 24;
+}
+
+void IopMemory::write32(std::uint32_t addr, std::uint32_t value) {
+    const std::uint8_t b[4] = {static_cast<std::uint8_t>(value), static_cast<std::uint8_t>(value >> 8),
+                               static_cast<std::uint8_t>(value >> 16),
+                               static_cast<std::uint8_t>(value >> 24)};
+    write(addr, b);
+}
+
+std::optional<std::uint32_t> IopMemory::allocate(std::uint32_t bytes) {
+    if (bytes == 0 || bytes > heap_end - heap_base) {
+        return std::nullopt;
+    }
+    const std::uint32_t rounded = (bytes + 15u) & ~15u;
+    std::uint32_t cursor = heap_base;
+    for (const auto& [addr, block_size] : heap_->blocks) {
+        if (addr - cursor >= rounded) {
+            break;
+        }
+        cursor = addr + block_size;
+    }
+    if (heap_end - cursor < rounded) {
+        return std::nullopt;
+    }
+    heap_->blocks.emplace(cursor, rounded);
+    return cursor;
+}
+
+void IopMemory::free(std::uint32_t addr) {
+    heap_->blocks.erase(addr);
+}
+
+void IopMemory::reset() {
+    std::memset(ram_.get(), 0, size);
+    heap_->blocks.clear();
+}
+
+} // namespace dq8::rt
