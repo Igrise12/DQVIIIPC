@@ -21,13 +21,14 @@ const std::set<std::string, std::less<>> value_options{
     "stop-at-pc", "stop-at-rpc", "dump-ram-at"};
 const std::set<std::string, std::less<>> repeatable{"dump-frame", "stop-at-pc", "stop-at-rpc", "dump-ram-at"};
 const std::set<std::string, std::less<>> flag_options{
-    "stop-at-first-syscall", "trace-dispatch", "trap-mmio", "json", "help", "version", "headless",
-    "strict-kernel",         "verify-overlays"};
+    "stop-at-first-syscall", "trace-dispatch",  "trap-mmio",   "json", "help", "version", "headless",
+    "strict-kernel",         "verify-overlays", "trace-events"};
 // Options that only the M3 machine understands.
 const std::set<std::string, std::less<>> machine_options{
-    "disc",         "gs",          "vblanks",  "until",         "dump-frame",     "gs-trace", "input-script",
-    "record-input", "speed",       "ssaa",     "movies",        "events",         "trace",    "stop-at-pc",
-    "stop-at-rpc",  "dump-ram-at", "headless", "strict-kernel", "verify-overlays"};
+    "disc",        "gs",           "vblanks",       "until",           "dump-frame",
+    "gs-trace",    "input-script", "record-input",  "speed",           "ssaa",
+    "movies",      "events",       "trace",         "stop-at-pc",      "stop-at-rpc",
+    "dump-ram-at", "headless",     "strict-kernel", "verify-overlays", "trace-events"};
 
 rt::OverlayWindowSpec parse_window(std::string_view v) {
     const std::size_t colon = v.find(':');
@@ -58,17 +59,16 @@ std::uint32_t parse_trace(std::string_view v) {
         const std::size_t comma = v.find(',', start);
         const std::string_view name =
             v.substr(start, comma == std::string_view::npos ? v.npos : comma - start);
-        if (name == "kernel") {
-            mask |= trace_kernel;
-        } else if (name == "sif") {
-            mask |= trace_sif;
-        } else if (name == "rpc") {
-            mask |= trace_rpc;
-        } else if (name == "dma") {
-            mask |= trace_dma;
-        } else if (name == "gs") {
-            mask |= trace_gs;
-        } else {
+        bool known = false;
+        for (const rt::TraceCategory c :
+             {rt::TraceCategory::kernel, rt::TraceCategory::sif, rt::TraceCategory::rpc,
+              rt::TraceCategory::dma, rt::TraceCategory::gs}) {
+            if (name == rt::to_string(c)) {
+                mask |= rt::trace_bit(c);
+                known = true;
+            }
+        }
+        if (!known) {
             throw UsageError("--trace: unknown category '" + std::string(name) +
                              "' (kernel, sif, rpc, dma, gs)");
         }
@@ -153,11 +153,13 @@ int usage(std::FILE* out) {
         "  --dump-frame N:PATH      write the scanout of vblank N as PNG (repeatable)\n"
         "  --dump-ram-at N:PATH     write the 32 MiB of RAM after N vblanks (repeatable)\n"
         "  --events FILE|-          JSON-lines events (deterministic fields only)\n"
-        "  --trace LIST             echo machine events on stderr: kernel,sif,rpc,dma,gs\n"
+        "  --trace LIST             trace categories, printed on stderr: kernel,sif,rpc,dma,gs\n"
+        "  --trace-events           also write the trace events into --events\n"
         "  --strict-kernel          noop kernel services stop instead\n"
         "  --verify-overlays        hash each loaded overlay against the profile and watch its text\n"
         "  --stop-at-pc ADDR        stop when the function at ADDR is entered (repeatable)\n"
-        "  --stop-at-rpc SID        stop when the game binds IOP RPC server SID (repeatable)\n"
+        "  --stop-at-rpc SID[:FNO]  stop when the game binds IOP RPC server SID, or calls its function FNO\n"
+        "                           (repeatable)\n"
         "  --stop-at-first-syscall  stop at the first kernel call, implemented or not (exit 0 there)\n"
         "  --max-dispatches N       stop after N dispatches (0: no limit)\n"
         "  --trace-dispatch         print every dispatch on stderr\n"
@@ -239,6 +241,7 @@ Options parse_options(int argc, const char* const* argv) {
     o.trace_dispatch = flags.count("trace-dispatch") != 0;
     o.strict_kernel = flags.count("strict-kernel") != 0;
     o.verify_overlays = flags.count("verify-overlays") != 0;
+    o.trace_events = flags.count("trace-events") != 0;
     const auto get = [&](std::string_view key) -> const std::string* {
         const auto it = values.find(key);
         return it != values.end() ? &it->second.front() : nullptr;
@@ -358,7 +361,15 @@ Options parse_options(int argc, const char* const* argv) {
         o.stop_at_pc.push_back(pc);
     }
     for (const std::string& v : all("stop-at-rpc")) {
-        o.stop_at_rpc.push_back(parse_u32(v, "--stop-at-rpc"));
+        RpcStop stop;
+        const std::size_t colon = v.find(':');
+        stop.sid = parse_u32(std::string_view(v).substr(0, colon), "--stop-at-rpc SID");
+        if (colon != std::string::npos) {
+            stop.fno = parse_u32(std::string_view(v).substr(colon + 1), "--stop-at-rpc FNO");
+            // rpc_call events exist only while RPC tracing is on (Docs/milestones/M3-boots.md, decision 5).
+            o.trace |= rt::trace_bit(rt::TraceCategory::rpc);
+        }
+        o.stop_at_rpc.push_back(stop);
     }
 
     if (o.iso.has_value() == o.elf.has_value()) {

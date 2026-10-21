@@ -271,22 +271,3 @@ TEST_CASE("overrides: a replacement that does not return stops in debug builds",
     }
 }
 #endif
-
-TEST_CASE("dispatcher: the stale-return check compares overlay generations", "[overrides]") {
-    World w;
-    w.overlays.set_resident(3);
-    const std::uint64_t gen = w.dispatcher->window_generation();
-    CHECK_FALSE(w.dispatcher->return_is_stale(window.base + 0x48, gen));
-    CHECK_NOTHROW(w.dispatcher->check_return(window.base + 0x48, gen));
-    w.overlays.set_resident(3); // reloaded during the call
-    CHECK(w.dispatcher->return_is_stale(window.base + 0x48, gen));
-    CHECK_FALSE(w.dispatcher->return_is_stale(main_base + 0x48, gen)); // callers in main are never stale
-    try {
-        w.dispatcher->check_return(window.base + 0x48, gen);
-        FAIL("expected a stop");
-    } catch (const GuestStop& stop) {
-        CHECK(stop.info().reason == StopReason::missing_function);
-        CHECK(stop.info().message.find("stale return to 0x00300048") != std::string::npos);
-        CHECK(stop.info().message.find("now resident: ovl") != std::string::npos);
-    }
-}

@@ -7,7 +7,7 @@ The game executable (dq8-game). It wires the platform, the runtime, the locally 
 | `main.cpp` | Parses the options, runs, and maps exceptions to exit codes. |
 | `options.*` | The command line: `Options`, `parse_options`, the usage text, the exit codes. |
 | `session.*` | Start-up shared by every run: disc verification or a developer ELF, module loading and validation, the dispatcher and overlay manager, the set-up and stop parts of the report. |
-| `run_machine.cpp` | The M3 run: machine, devices, IOP, game layer, threads, limiter, events, report. |
+| `run_machine.cpp` | The M3 run: machine, devices, IOP, game layer, threads, limiter, events, report. The window and the paraLLEl-GS backend are used when the build has them (`DQ8_HAVE_WINDOW` when `dq8_platform_sdl` is linked; `runtime/gs/gs_parallel_backend.h`, which loads `dq8-gs-parallel` from beside the executable). |
 | `run_m2.cpp` | **Temporary.** M2's single-thread run, linked only while the M3 implementations of sessions A, B and C are missing from `dq8_runtime`. While they are missing, `run_machine.cpp` is compiled (object library `dq8_host_machine_check`) against the day-0 contracts but not linked. |
 | `event_log.*` | The JSON-lines event stream, and the `--trace` echo. |
 | `limiter.*` | Wall-clock pacing between slices. |
@@ -41,11 +41,11 @@ dq8-game --elf <file> --module-dir <dir> [--overlay-window BASE:END [--resident 
 | `--dump-frame N:PATH` | PNG of the scanout of vblank N. Repeatable. |
 | `--dump-ram-at N:PATH` | The 32 MiB of RAM after N vblanks. Repeatable. |
 | `--events FILE\|-` | JSON-lines events (below). |
-| `--trace kernel,sif,rpc,dma,gs` | Echo the machine events of these categories on stderr. |
+| `--trace kernel,sif,rpc,dma,gs` | Turn these trace categories on (`MachineConfig::trace_mask`). Devices emit `trace` events {cat, msg}, which the host prints on stderr. `--trace-events` also writes them into `--events`. |
 | `--strict-kernel` | Noop kernel services stop. |
 | `--verify-overlays` | Hash each loaded overlay against the profile, and its text at every vblank. |
 | `--stop-at-pc ADDR` | Stop when the function entry at ADDR is dispatched. Repeatable. |
-| `--stop-at-rpc SID` | Stop when the game binds or calls IOP server SID. Repeatable. |
+| `--stop-at-rpc SID[:FNO]` | Stop when the game binds IOP server SID (`rpc_bind`), or with `:FNO` when it calls function FNO there (`rpc_call`, which turns RPC tracing on). Repeatable. |
 | `--disc <image>` | Developer mode: a disc the IOP serves, not verified. Without it the drive is empty. |
 | M2: `--stop-at-first-syscall`, `--max-dispatches N`, `--trace-dispatch`, `--trap-mmio`, `--json` | As in M2. With the machine, `--stop-at-first-syscall` goes through `MachineConfig`. |
 

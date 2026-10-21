@@ -117,11 +117,22 @@ TEST_CASE("host options: M3 run options", "[host]") {
     CHECK(o.speed == 1.5);
     CHECK(o.movies == "stop");
     CHECK(o.events == "-");
-    CHECK(o.trace == (trace_kernel | trace_rpc | trace_gs));
+    using dq8::rt::trace_bit;
+    using dq8::rt::TraceCategory;
+    CHECK(o.trace ==
+          (trace_bit(TraceCategory::kernel) | trace_bit(TraceCategory::rpc) | trace_bit(TraceCategory::gs)));
     CHECK(o.strict_kernel);
     CHECK(o.verify_overlays);
     CHECK(o.stop_at_pc == std::vector<std::uint32_t>{0x00100320u, 0x00100330u});
-    CHECK(o.stop_at_rpc == std::vector<std::uint32_t>{0x80000001u});
+    CHECK(o.stop_at_rpc == std::vector<RpcStop>{{0x80000001u, std::nullopt}});
+    CHECK_FALSE(o.trace_events);
+
+    // SID:FNO stops at a call, and rpc_call events need RPC tracing on.
+    const Options call =
+        parse({"--iso", "g", "--module-dir", "m", "--stop-at-rpc", "0x80000001:2", "--trace-events"});
+    CHECK(call.stop_at_rpc == std::vector<RpcStop>{{0x80000001u, 2u}});
+    CHECK(call.trace == trace_bit(TraceCategory::rpc));
+    CHECK(call.trace_events);
     REQUIRE(o.dump_frames.size() == 2);
     CHECK(o.dump_frames[1].vblank == 601);
     CHECK(o.dump_frames[1].path == fs::path("b.png"));
@@ -199,13 +210,11 @@ TEST_CASE("host events: one JSON object per event, with vblank and cycles first"
     CHECK(EventLog::format(e, 120, 590413824) ==
           R"({"ev":"overlay_resident","vblank":120,"cycles":590413824,"name":"TITLE","overlay_id":6,)"
           R"("delta":-2,"verified":false})");
-    CHECK(EventLog::category("rpc_bind") == trace_rpc);
-    CHECK(EventLog::category("thread") == trace_kernel);
-    CHECK(EventLog::category("sif_dma") == trace_sif);
-    CHECK(EventLog::category("dma_end") == trace_dma);
-    CHECK(EventLog::category("gs") == trace_gs);
-    CHECK(EventLog::category("mode") == 0);
-    EventLog none(std::nullopt, 0);
+    const dq8::rt::MachineEvent trace = dq8::rt::MachineEvent{"trace", {}}
+                                            .add("cat", std::string("rpc"))
+                                            .add("msg", std::string("bind 0x80000001"));
+    CHECK(EventLog::format_trace(trace, 42) == "trace 42 [rpc] bind 0x80000001");
+    EventLog none(std::nullopt, false);
     CHECK_FALSE(none.enabled());
 }
 

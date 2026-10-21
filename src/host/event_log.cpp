@@ -9,7 +9,8 @@
 
 namespace dq8::host {
 
-EventLog::EventLog(const std::optional<std::string>& target, std::uint32_t trace_mask) : trace_(trace_mask) {
+EventLog::EventLog(const std::optional<std::string>& target, bool trace_in_stream)
+    : trace_in_stream_(trace_in_stream) {
     if (!target) {
         return;
     }
@@ -36,24 +37,18 @@ void EventLog::flush() {
     }
 }
 
-std::uint32_t EventLog::category(std::string_view type) noexcept {
-    const auto starts = [type](std::string_view prefix) { return type.substr(0, prefix.size()) == prefix; };
-    if (starts("kernel") || starts("thread") || starts("intc") || starts("alarm")) {
-        return trace_kernel;
+std::string EventLog::format_trace(const rt::MachineEvent& event, std::uint64_t vblank) {
+    std::string cat;
+    std::string msg;
+    for (const auto& [key, value] : event.fields) {
+        const auto* text = std::get_if<std::string>(&value);
+        if (text != nullptr && key == "cat") {
+            cat = *text;
+        } else if (text != nullptr && key == "msg") {
+            msg = *text;
+        }
     }
-    if (starts("sif")) {
-        return trace_sif;
-    }
-    if (starts("rpc") || starts("iop")) {
-        return trace_rpc;
-    }
-    if (starts("dma") || starts("vif")) {
-        return trace_dma;
-    }
-    if (starts("gs") || starts("vsync") || starts("frame")) {
-        return trace_gs;
-    }
-    return 0;
+    return "trace " + std::to_string(vblank) + " [" + cat + "] " + msg;
 }
 
 std::string EventLog::format(const rt::MachineEvent& event, std::uint64_t vblank, std::uint64_t cycles) {
@@ -71,7 +66,11 @@ std::string EventLog::format(const rt::MachineEvent& event, std::uint64_t vblank
 }
 
 void EventLog::write(const rt::MachineEvent& event, std::uint64_t vblank, std::uint64_t cycles) {
-    if (!enabled()) {
+    const bool trace = event.type == "trace";
+    if (trace) {
+        std::fprintf(stderr, "%s\n", format_trace(event, vblank).c_str());
+    }
+    if (!enabled() || (trace && !trace_in_stream_)) {
         return;
     }
     const std::string line = format(event, vblank, cycles);
@@ -80,9 +79,6 @@ void EventLog::write(const rt::MachineEvent& event, std::uint64_t vblank, std::u
     } else if (out_ != nullptr) {
         std::fputs(line.c_str(), out_);
         std::fputc('\n', out_);
-    }
-    if ((trace_ & category(event.type)) != 0) {
-        std::fprintf(stderr, "trace: %s\n", line.c_str());
     }
 }
 

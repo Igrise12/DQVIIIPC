@@ -43,7 +43,7 @@ endif()
 # The SDL3 platform (session D, ADR-0005), when the build has it.
 if(TARGET dq8_platform_sdl)
     target_link_libraries(${_dq8_machine_target} PRIVATE dq8_platform_sdl)
-    target_compile_definitions(${_dq8_machine_target} PRIVATE DQ8_HOST_HAVE_WINDOW=1)
+    target_compile_definitions(${_dq8_machine_target} PRIVATE DQ8_HAVE_WINDOW=1)
 endif()
 target_link_libraries(dq8-game PRIVATE dq8_host Threads::Threads)
 dq8_set_warnings(dq8-game)

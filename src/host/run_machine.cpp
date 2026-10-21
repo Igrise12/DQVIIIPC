@@ -42,7 +42,7 @@ std::unique_ptr<IGsBackend> make_trace_gs_backend(std::filesystem::path file);
 #include "runtime/gs/gs_parallel_backend.h"
 #define DQ8_HOST_HAVE_GS_PARALLEL 1
 #endif
-#ifdef DQ8_HOST_HAVE_WINDOW
+#ifdef DQ8_HAVE_WINDOW
 #include "runtime/platform/platform.h"
 #endif
 
@@ -62,6 +62,11 @@ namespace dq8::host {
 namespace {
 
 using rt::hex32;
+
+// The reason a --stop-at-pc or --stop-at-rpc stop carries. Decision 4 of Docs/milestones/M3-boots.md adds
+// StopReason::requested with session A; until A's guest_stop.h is in, the host keeps its own `requested` flag
+// and reports "requested" from it, so only this constant changes at the merge.
+constexpr rt::StopReason requested_stop_reason = rt::StopReason::unsupported;
 
 // Developer mode without --disc: a drive with no disc in it.
 class NoDisc final : public rt::IDiscSource {
@@ -96,7 +101,13 @@ std::unique_ptr<gs::IGsBackend> make_backend(const Options& o, const char* argv0
         case GsKind::parallel: {
 #ifdef DQ8_HOST_HAVE_GS_PARALLEL
             gs::ParallelGsConfig config;
-            config.library = executable_dir(argv0) / rt::shared_library_file_name("dq8-gs-parallel");
+            // The target dq8_gs_parallel: output name dq8-gs-parallel with the platform's prefix and suffix.
+#ifdef _WIN32
+            const std::string prefix;
+#else
+            const std::string prefix = "lib";
+#endif
+            config.library = executable_dir(argv0) / rt::shared_library_file_name(prefix + "dq8-gs-parallel");
             config.super_sampling = o.ssaa;
             return gs::make_parallel_gs_backend(config);
 #else
@@ -164,7 +175,7 @@ std::vector<rt::OverrideSpec> stop_at_pc_overrides(const Options& o, const Sessi
             spec.fn = [pc, unit, &requested](rt::OverrideCall& call) {
                 requested.store(true);
                 rt::StopInfo info;
-                info.reason = rt::StopReason::unsupported; // reported as "requested"
+                info.reason = requested_stop_reason;
                 info.pc = pc;
                 info.address = pc;
                 info.message = "--stop-at-pc: entered " + unit + " " + hex32(pc) + " from " +
@@ -177,9 +188,9 @@ std::vector<rt::OverrideSpec> stop_at_pc_overrides(const Options& o, const Sessi
     return out;
 }
 
-std::optional<std::uint64_t> sid_of(const rt::MachineEvent& e) {
+std::optional<std::uint64_t> u64_field(const rt::MachineEvent& e, std::string_view key) {
     for (const auto& [k, v] : e.fields) {
-        if (k != "sid") {
+        if (k != key) {
             continue;
         }
         if (const auto* u = std::get_if<std::uint64_t>(&v)) {
@@ -188,13 +199,28 @@ std::optional<std::uint64_t> sid_of(const rt::MachineEvent& e) {
         if (const auto* i = std::get_if<std::int64_t>(&v)) {
             return static_cast<std::uint64_t>(*i);
         }
-        if (const auto* str = std::get_if<std::string>(&v)) {
-            if (const auto canonical = rt::canonical_trigger_value("rpc_bind", *str)) {
-                return std::stoull(*canonical, nullptr, 16);
-            }
-        }
     }
     return std::nullopt;
+}
+
+// The --stop-at-rpc entry an rpc_bind {sid, server} or rpc_call {sid, fno} event matches (decision 5 in
+// Docs/milestones/M3-boots.md), or null.
+const RpcStop* matching_rpc_stop(const Options& o, const rt::MachineEvent& e) {
+    const bool bind = e.type == "rpc_bind";
+    if (!bind && e.type != "rpc_call") {
+        return nullptr;
+    }
+    const auto sid = u64_field(e, "sid");
+    const auto fno = u64_field(e, "fno");
+    for (const RpcStop& stop : o.stop_at_rpc) {
+        if (!sid || *sid != stop.sid) {
+            continue;
+        }
+        if (bind ? !stop.fno : (stop.fno && fno && *fno == *stop.fno)) {
+            return &stop;
+        }
+    }
+    return nullptr;
 }
 
 // How the machine loop ended.
@@ -233,7 +259,7 @@ int run_game(const Options& o, const char* argv0) {
         }
     }
     const auto movie_policy = game::parse_movie_policy(o.movies);
-    EventLog log(o.events, o.trace);
+    EventLog log(o.events, o.trace_events);
 
     // Disc.
     std::optional<core::iso::Image> image;
@@ -262,7 +288,7 @@ int run_game(const Options& o, const char* argv0) {
     }
 
     // The window first (main thread), then the GS backend: either failing is exit 3.
-#ifdef DQ8_HOST_HAVE_WINDOW
+#ifdef DQ8_HAVE_WINDOW
     std::unique_ptr<rt::IPlatform> platform;
     if (o.display == Display::window) {
         try {
@@ -290,6 +316,7 @@ int run_game(const Options& o, const char* argv0) {
     config.strict_kernel = o.strict_kernel;
     config.stop_at_first_syscall = o.stop_at_first_syscall;
     config.trace_dispatch = o.trace_dispatch;
+    config.trace_mask = o.trace;
     s.memory.set_trap_mmio(o.trap_mmio);
     if (!o.json) {
         s.memory.set_mmio_sink([](const rt::MmioAccess& a) {
@@ -344,17 +371,14 @@ int run_game(const Options& o, const char* argv0) {
         if (until) {
             until->observe(e, vblank);
         }
-        if (!o.stop_at_rpc.empty() && (e.type == "rpc_bind" || e.type == "rpc_call")) {
-            const auto sid = sid_of(e);
-            if (sid && std::find(o.stop_at_rpc.begin(), o.stop_at_rpc.end(), *sid) != o.stop_at_rpc.end()) {
-                requested.store(true);
-                rt::StopInfo info;
-                info.reason = rt::StopReason::unsupported; // reported as "requested"
-                info.address = static_cast<std::uint32_t>(*sid);
-                info.message =
-                    "--stop-at-rpc: " + e.type + " of server " + hex32(static_cast<std::uint32_t>(*sid));
-                machine.stop(std::move(info));
-            }
+        if (const RpcStop* stop = o.stop_at_rpc.empty() ? nullptr : matching_rpc_stop(o, e)) {
+            requested.store(true);
+            rt::StopInfo info;
+            info.reason = requested_stop_reason;
+            info.address = stop->sid;
+            info.message = "--stop-at-rpc: " + e.type + " of server " + hex32(stop->sid) +
+                           (stop->fno ? ", function " + std::to_string(*stop->fno) : std::string());
+            machine.stop(std::move(info));
         }
     });
 
@@ -434,7 +458,7 @@ int run_game(const Options& o, const char* argv0) {
     };
 
     std::thread machine_thread(machine_loop);
-#ifdef DQ8_HOST_HAVE_WINDOW
+#ifdef DQ8_HAVE_WINDOW
     if (platform) {
         std::uint64_t presented = ~std::uint64_t{0};
         while (!done.load()) {

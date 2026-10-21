@@ -3,6 +3,7 @@
 #pragma once
 
 #include "runtime/ee/overlay_manager.h"
+#include "runtime/machine/machine_services.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -33,13 +34,11 @@ class UsageError : public std::runtime_error {
 enum class Display { headless, window };
 enum class GsKind { null, trace, parallel };
 
-// --trace categories: which machine events are echoed on stderr as they happen.
-enum TraceBit : std::uint32_t {
-    trace_kernel = 1u << 0,
-    trace_sif = 1u << 1,
-    trace_rpc = 1u << 2,
-    trace_dma = 1u << 3,
-    trace_gs = 1u << 4,
+// --stop-at-rpc SID (the bind of server SID) or SID:FNO (a call of function FNO on it).
+struct RpcStop {
+    std::uint32_t sid = 0;
+    std::optional<std::uint32_t> fno;
+    bool operator==(const RpcStop&) const = default;
 };
 
 struct AtVblank {
@@ -77,11 +76,12 @@ struct Options {
     std::uint32_t ssaa = 1;
     std::string movies = "skip";
     std::optional<std::string> events; // a file, or "-" for stdout
-    std::uint32_t trace = 0;           // TraceBit mask
+    std::uint32_t trace = 0;           // rt::trace_bit() mask (MachineConfig::trace_mask)
+    bool trace_events = false;         // also write "trace" events into --events
     bool strict_kernel = false;
     bool verify_overlays = false;
     std::vector<std::uint32_t> stop_at_pc;
-    std::vector<std::uint32_t> stop_at_rpc;
+    std::vector<RpcStop> stop_at_rpc;
     std::vector<AtVblank> dump_ram_at;
 
     bool help = false;

@@ -74,18 +74,6 @@ class Dispatcher {
     void install_override(OverrideSpec spec, const GuestMemory* memory = nullptr);
     std::vector<OverrideReport> overrides() const;
 
-    // --- Stale returns (architecture §4.3, debug builds) ------------------------------------------------
-    // Around a dispatched call whose caller lies in the overlay window, the EE runtime reads the generation
-    // before the call and calls check_return afterwards: a different generation means the caller's overlay
-    // was replaced while it waited, and its native code would continue in code that is no longer resident.
-    std::uint64_t window_generation() const noexcept { return overlays_.generation(); }
-    bool return_is_stale(std::uint32_t caller_pc, std::uint64_t generation_at_call) const noexcept {
-        return overlays_.in_window(caller_pc) && overlays_.generation() != generation_at_call;
-    }
-    // Stops the guest (missing_function, with both generations and the resident unit) when the return is
-    // stale; otherwise does nothing.
-    void check_return(std::uint32_t caller_pc, std::uint64_t generation_at_call) const;
-
   private:
     struct Installed {
         OverrideSpec spec;

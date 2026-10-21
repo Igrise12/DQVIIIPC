@@ -153,22 +153,6 @@ std::vector<OverrideReport> Dispatcher::overrides() const {
     return out;
 }
 
-void Dispatcher::check_return(std::uint32_t caller_pc, std::uint64_t generation_at_call) const {
-    if (!return_is_stale(caller_pc, generation_at_call)) {
-        return;
-    }
-    const OverlayUnit* res = overlays_.resident();
-    StopInfo s;
-    s.reason = StopReason::missing_function;
-    s.pc = caller_pc;
-    s.address = caller_pc;
-    s.message = "stale return to " + hex32(caller_pc) + " in the overlay window: the overlay changed from " +
-                "generation " + std::to_string(generation_at_call) + " to " +
-                std::to_string(overlays_.generation()) +
-                " during the call (now resident: " + (res != nullptr ? res->name : std::string("none")) + ")";
-    stop(std::move(s));
-}
-
 void Dispatcher::stop(StopInfo info) const {
     if (machine_ != nullptr) {
         machine_->stop(std::move(info));
