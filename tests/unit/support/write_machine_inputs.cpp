@@ -7,9 +7,11 @@
 #include "support/iso_builder.h"
 #include "support/machine_unit.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <exception>
 #include <fstream>
+#include <vector>
 
 int main(int argc, char** argv) {
     if (argc != 3) {

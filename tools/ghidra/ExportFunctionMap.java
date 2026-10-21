@@ -4,6 +4,13 @@
 // Headless postScript: export the function map of one code unit for ps2_recomp.
 //
 //   -postScript ExportFunctionMap.java <out.csv> <out.jump_tables.toml> <out.stats.toml> <unit_start> <unit_end>
+//               [entry_tables=START:END[,START:END...]]
+//
+// entry_tables: pointer tables whose words are function entries (the static-constructor table crt0 walks,
+// from the region profile's [boot].ctor_table). A word that points into the unit at an address Ghidra holds no
+// function for is disassembled and made a function before the export: such code is reached only through the
+// table, so auto-analysis never found it (M3 bring-up: 6 of main's 156 constructors). The project is opened
+// read-only, so these functions exist only for the export.
 //
 // The unit is the half-open address range [unit_start, unit_end): the main program's file image, or
 // one overlay's 64-byte header plus text plus data at the window base. Three files are written:
@@ -54,6 +61,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
+import ghidra.app.cmd.disassemble.DisassembleCommand;
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressRange;
@@ -162,6 +170,7 @@ public class ExportFunctionMap extends GhidraScript {
     private final List<String> holes = new ArrayList<>();
     private final List<String> islands = new ArrayList<>();
     private final Map<String, Long> counts = new LinkedHashMap<>();
+    private final TreeSet<Long> tableEntryFunctions = new TreeSet<>();
 
     private Memory memory;
     private Listing listing;
@@ -169,9 +178,9 @@ public class ExportFunctionMap extends GhidraScript {
     @Override
     public void run() throws Exception {
         String[] args = getScriptArgs();
-        if (args.length != 5) {
+        if (args.length != 5 && args.length != 6) {
             throw new IllegalArgumentException("usage: ExportFunctionMap.java <out.csv> <out.jump_tables.toml> " +
-                    "<out.stats.toml> <unit_start> <unit_end>");
+                    "<out.stats.toml> <unit_start> <unit_end> [entry_tables=START:END[,START:END...]]");
         }
         File csvFile = new File(args[0]);
         File tablesFile = new File(args[1]);
@@ -183,6 +192,9 @@ public class ExportFunctionMap extends GhidraScript {
         }
         memory = currentProgram.getMemory();
         listing = currentProgram.getListing();
+        if (args.length == 6) {
+            createTableEntryFunctions(args[5], unitStart, unitEnd);
+        }
 
         // Pass 1 finds the switches; case blocks held as functions join their owner; pass 2 is final.
         List<Fn> functions = collectFunctions(unitStart, unitEnd);
@@ -973,6 +985,38 @@ public class ExportFunctionMap extends GhidraScript {
         counts.put(key, value);
     }
 
+    // Makes a function at every pointer-table word that targets the unit and has none yet (see entry_tables).
+    private void createTableEntryFunctions(String spec, long unitStart, long unitEnd) throws Exception {
+        if (!spec.startsWith("entry_tables=")) {
+            throw new IllegalArgumentException("expected entry_tables=START:END[,...], got " + spec);
+        }
+        long words = 0;
+        for (String part : spec.substring("entry_tables=".length()).split(",")) {
+            String[] se = part.split(":");
+            long start = Long.decode(se[0]);
+            long end = Long.decode(se[1]);
+            for (long a = start; a + 4 <= end; a += 4) {
+                words++;
+                long target = readWordOrNull(a);
+                if (target == NO_VALUE || target < unitStart || target >= unitEnd || (target & 3) != 0) {
+                    continue;
+                }
+                Address at = toAddr(target);
+                if (getFunctionAt(at) != null) {
+                    continue;
+                }
+                if (listing.getInstructionAt(at) == null) {
+                    new DisassembleCommand(at, null, true).applyTo(currentProgram, monitor);
+                }
+                if (listing.getInstructionAt(at) != null && createFunction(at, null) != null) {
+                    tableEntryFunctions.add(target);
+                }
+            }
+        }
+        put("entry_table_words", words);
+        put("entry_table_functions_created", tableEntryFunctions.size());
+    }
+
     private static String hex(long v) {
         return String.format("0x%08X", v & 0xFFFF_FFFFL);
     }
@@ -1035,6 +1079,8 @@ public class ExportFunctionMap extends GhidraScript {
             w.println("program = \"" + currentProgram.getName() + "\"");
             w.println("# bgezal/bltzal (and likely forms, bal included) whose target is outside the function, plus 8.");
             writeList(w, "link_return_entries", linkReturns);
+            w.println("# Functions made at entry_tables words that Ghidra had no function for.");
+            writeList(w, "entry_table_functions", tableEntryFunctions);
             w.println("# The same for link branches whose target is inside their own function (not entries).");
             writeList(w, "link_branch_internal", linkInternal);
             w.println("# Computed jr sites with an emitted table (bound: slti/sltiu case count, or scan).");

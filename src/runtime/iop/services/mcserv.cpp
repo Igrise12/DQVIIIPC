@@ -10,7 +10,14 @@
 #include "runtime/iop/services/services.h"
 #include "runtime/machine/machine_services.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
 #include <set>
+#include <span>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 // The memory-card server (server id 0x80000400; "Protocol notes", mcserv). Every call but init is answered
 // with one result word; GetInfo also fills the EE's info block (card type, free clusters, format state) and a

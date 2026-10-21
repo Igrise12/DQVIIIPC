@@ -7,9 +7,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstddef>
+#include <exception>
 #include <optional>
 #include <set>
 #include <stdexcept>
+#include <utility>
 
 namespace dq8::rt {
 

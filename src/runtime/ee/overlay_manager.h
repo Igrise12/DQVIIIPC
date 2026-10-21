@@ -4,6 +4,7 @@
 
 #include "runtime/ee/dispatch_table.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>

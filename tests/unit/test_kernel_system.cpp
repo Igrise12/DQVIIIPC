@@ -19,6 +19,7 @@
 #include "support/machine_harness.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -329,7 +330,7 @@ TEST_CASE("kernel system: a SetSyscall handler runs as a nested guest call", "[k
         CHECK(g.results[0] == 1u);
     }
     SECTION("a jump to an address with no function stops the run (upstream completes it silently)") {
-        g.syscall = 0x83;
+        g.syscall = 0x7F; // GetMemorySize: native, and not native_first (FindAddress and Copy are)
         const SliceResult r = run_override(m, p, [](std::uint8_t*, R5900Context* ctx, PS2Runtime*) {
             set_gpr_lo(*ctx, 2, 0xDEADBEEFu);
             ctx->pc = 0x12345678u;
@@ -338,20 +339,30 @@ TEST_CASE("kernel system: a SetSyscall handler runs as a nested guest call", "[k
         CHECK(r.stop->address == 0x12345678u);
     }
     SECTION("the same number inside the handler reaches the native service") {
-        g.syscall = 0x83; // FindAddress
+        g.syscall = 0x7F; // GetMemorySize
+        const SliceResult r = run_override(m, p, [](std::uint8_t* rdram, R5900Context* ctx, PS2Runtime* rt) {
+            set_gpr_lo(*ctx, 3, 0x7F);
+            rt->handleSyscall(rdram, ctx, 0);
+            guest_return(ctx);
+        });
+        CHECK(stop_of(r).reason == StopReason::requested);
+        CHECK(g.results[0] == 0x02000000u);
+    }
+    SECTION("FindAddress stays native when the program installs its own (native_first)") {
+        g.syscall = 0x83;
         g.args[0] = 0x3000;
         g.args[1] = 0x300C;
         g.args[2] = 0x11223344u;
         m.set_word(0x3000, 0xCAFEBABEu);
         m.set_word(0x3004, 0x11223344u);
         m.set_word(0x3008, 0x55667788u);
-        const SliceResult r = run_override(m, p, [](std::uint8_t* rdram, R5900Context* ctx, PS2Runtime* rt) {
-            set_gpr_lo(*ctx, 3, 0x83);
-            rt->handleSyscall(rdram, ctx, 0);
+        const SliceResult r = run_override(m, p, [](std::uint8_t*, R5900Context* ctx, PS2Runtime*) {
+            set_gpr_lo(*ctx, 2, 0xDEADBEEFu); // never runs
             guest_return(ctx);
         });
         CHECK(stop_of(r).reason == StopReason::requested);
         CHECK(g.results[0] == 0x3004u);
+        CHECK(m.machine->kernel().guest_handler(0x83) == k_handler); // recorded all the same
     }
 }
 

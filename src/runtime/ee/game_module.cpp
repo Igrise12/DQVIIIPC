@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstring>
+#include <exception>
 #include <utility>
 
 namespace dq8::rt {

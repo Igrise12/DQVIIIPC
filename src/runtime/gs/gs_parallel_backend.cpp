@@ -6,8 +6,10 @@
 #include "runtime/platform/dynlib.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <span>
 #include <string>
 #include <system_error>
 #include <utility>

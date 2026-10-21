@@ -21,7 +21,10 @@
 #include "runtime/machine/machine_services.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -300,45 +303,59 @@ void register_system_services(KernelServices& services, EeKernel& kernel) {
         }
         c.ret(kabi::ok);
     });
-    add("GetEntryAddress", [](KernelCallContext& c) {
-        const auto entry = table_entry(c.arg(0));
-        c.ret_u32(entry ? read_u32(c.mem(), *entry) : 0);
-    });
-    // Copy(dest, src, size): a kernel-mode memcpy.
-    add("Copy", [&kernel](KernelCallContext& c) {
-        const std::uint32_t dest = c.arg(0);
-        const std::uint32_t src = c.arg(1);
-        const std::uint32_t size = c.arg(2);
-        kernel.check_kernel_ram_target(dest, size, "Copy");
-        if (size != 0) {
-            if (!guest_block_ok(dest, size, 1) || !guest_block_ok(src, size, 1)) {
-                c.unimplemented("Copy outside guest RAM");
+    // GetEntryAddress is native_first: libkernel points it at kernel-mode patch code (SetSyscall(0x5B, ...))
+    // and calls it to look up the patch's handlers. Natively it returns the handler the kernel already has,
+    // which is what a kernel that needs no patch would hand back.
+    add(
+        "GetEntryAddress",
+        [](KernelCallContext& c) {
+            const auto entry = table_entry(c.arg(0));
+            c.ret_u32(entry ? read_u32(c.mem(), *entry) : 0);
+        },
+        kernel_service_native_first);
+    // Copy(dest, src, size): a kernel-mode memcpy. FindAddress and Copy are native_first: the SDK's start-up
+    // code installs user-mode copies of both with SetSyscall before it uses them (M3 bring-up), and that
+    // handler code is in no function map; the guest's syscall table still shows the program's handler.
+    add(
+        "Copy",
+        [&kernel](KernelCallContext& c) {
+            const std::uint32_t dest = c.arg(0);
+            const std::uint32_t src = c.arg(1);
+            const std::uint32_t size = c.arg(2);
+            kernel.check_kernel_ram_target(dest, size, "Copy");
+            if (size != 0) {
+                if (!guest_block_ok(dest, size, 1) || !guest_block_ok(src, size, 1)) {
+                    c.unimplemented("Copy outside guest RAM");
+                }
+                std::vector<std::uint8_t> bytes(size);
+                c.mem().read_bytes(src, bytes);
+                c.mem().write_bytes(dest, bytes);
             }
-            std::vector<std::uint8_t> bytes(size);
-            c.mem().read_bytes(src, bytes);
-            c.mem().write_bytes(dest, bytes);
-        }
-        c.ret(kabi::ok);
-    });
+            c.ret(kabi::ok);
+        },
+        kernel_service_native_first);
     // FindAddress(start, end, target): the address of the first word in [start, end) equal to `target`
     // (kseg0/kseg1 spellings match), or 0.
-    add("FindAddress", [](KernelCallContext& c) {
-        const std::uint32_t start = (c.arg(0) + 3u) & ~3u;
-        const std::uint32_t end = c.arg(1) & ~3u;
-        const std::uint32_t target = c.arg(2);
-        std::uint32_t found = 0;
-        for (std::uint32_t a = start; a < end; a += 4) {
-            if (!guest_block_ok(a, 4)) {
-                break;
+    add(
+        "FindAddress",
+        [](KernelCallContext& c) {
+            const std::uint32_t start = (c.arg(0) + 3u) & ~3u;
+            const std::uint32_t end = c.arg(1) & ~3u;
+            const std::uint32_t target = c.arg(2);
+            std::uint32_t found = 0;
+            for (std::uint32_t a = start; a < end; a += 4) {
+                if (!guest_block_ok(a, 4)) {
+                    break;
+                }
+                const std::uint32_t word = read_u32(c.mem(), a);
+                if (word == target || without_kseg(word) == without_kseg(target)) {
+                    found = a;
+                    break;
+                }
             }
-            const std::uint32_t word = read_u32(c.mem(), a);
-            if (word == target || without_kseg(word) == without_kseg(target)) {
-                found = a;
-                break;
-            }
-        }
-        c.ret_u32(found);
-    });
+            c.ret_u32(found);
+        },
+        kernel_service_native_first);
 
     // ---- Documented noops (strict mode stops at them).
     const std::string coherent = "host memory is coherent: there is no cache to write back or invalidate";

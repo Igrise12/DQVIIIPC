@@ -16,9 +16,13 @@
 #include "support/mwo3_builder.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <tuple>
+#include <utility>
 #include <variant>
 #include <vector>
 

@@ -9,12 +9,17 @@
 #include "support/ee_rig.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <span>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <variant>
 #include <vector>
 

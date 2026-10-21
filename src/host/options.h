@@ -11,6 +11,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // dq8-game's command line (src/host/README.md has the reference). Parsing only: no file is opened and the

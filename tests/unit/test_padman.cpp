@@ -4,9 +4,12 @@
 #include "runtime/io/pad_state.h"
 #include "support/sif_client.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <cstring>
 #include <string>
+#include <vector>
 
 namespace rt = dq8::rt;
 using dq8::test::IopRig;

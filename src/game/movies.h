@@ -5,6 +5,7 @@
 #include "dq8/core/region_profile.h"
 #include "runtime/ee/overrides.h"
 
+#include <cstdint>
 #include <optional>
 #include <string_view>
 #include <vector>

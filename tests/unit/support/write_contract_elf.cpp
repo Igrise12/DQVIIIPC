@@ -6,8 +6,10 @@
 #include "support/contract_unit.h"
 #include "support/elf_image.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
+#include <vector>
 
 int main(int argc, char** argv) {
     if (argc != 2) {

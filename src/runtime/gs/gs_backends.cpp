@@ -5,8 +5,10 @@
 #include "runtime/gs/gs_trace_format.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace dq8::gs {

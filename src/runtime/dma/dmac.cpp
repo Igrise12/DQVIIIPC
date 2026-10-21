@@ -17,8 +17,10 @@
 #include "runtime/machine/cost_model.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <string>
+#include <utility>
 
 namespace dq8::rt {
 

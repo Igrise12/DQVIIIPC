@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 // dq8-game --until: the game state that ends a run successfully, checked at the end of every one-vblank
 // slice (so the run always ends on a vblank boundary and stays deterministic).

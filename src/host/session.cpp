@@ -11,8 +11,13 @@
 #include "runtime/ee/ee_runtime.h"
 #include "runtime/kernel/kernel_calls.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
+#include <exception>
 #include <fstream>
+#include <string_view>
+#include <utility>
 
 namespace dq8::host {
 

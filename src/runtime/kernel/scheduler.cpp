@@ -17,12 +17,19 @@
 #include "runtime/machine/cost_model.h"
 #include "runtime/machine/interrupts.h"
 #include "runtime/machine/machine_services.h"
+#include "runtime/machine/mmio.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <limits>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -165,6 +172,12 @@ void EeKernel::reset(std::uint32_t entry) {
     std::uint8_t probe_bytes[sizeof probe];
     std::memcpy(probe_bytes, probe, sizeof probe);
     mem.write_bytes(kabi::syscall_table_probe, probe_bytes);
+    // Timer 3 as the kernel's alarm timer (kernel_abi.h): compare interrupt enabled, counting stopped.
+    // Through the bus directly: without a timer device (unit-test machines) the write is simply not taken.
+    std::uint8_t mode_bytes[4];
+    const std::uint32_t mode = kabi::timer_mode_cmpe;
+    std::memcpy(mode_bytes, &mode, sizeof mode);
+    machine_.mmio().write(kabi::timer3_mode, 4, mode_bytes, MmioContext{});
 
     GuestThread boot;
     boot.id = kabi::boot_thread_id;

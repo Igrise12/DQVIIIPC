@@ -14,7 +14,9 @@
 #pragma warning(push, 0)
 #endif
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <cstddef>
 #include <stb_image_write.h>
+#include <string>
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #elif defined(_MSC_VER)

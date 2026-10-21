@@ -12,9 +12,13 @@
 #include "runtime/vu/vu_units.h"
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace dq8::rt {
 

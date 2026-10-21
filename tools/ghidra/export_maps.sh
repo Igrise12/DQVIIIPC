@@ -92,9 +92,24 @@ for unit in "${selected[@]}"; do
         *",$unit,"*) ;;
         *) echo "error: unknown unit '$unit' (expected one of $all_units)" >&2; exit 2 ;;
     esac
+    extra=()
     if [ "$unit" = main ]; then
         project=$projects/base
         read -r start end < <(unit_range "$elf")
+        # The static-constructor table from the region profile whose boot path is this ELF ([boot].ctor_table).
+        tables=$(python3 -I - "$repo/data/regions" "$program" <<'PY'
+import pathlib, sys, tomllib
+for f in sorted(pathlib.Path(sys.argv[1]).glob("*.toml")):
+    boot = tomllib.loads(f.read_text()).get("boot", {})
+    if pathlib.PurePosixPath(boot.get("path", "")).name == sys.argv[2] and "ctor_table" in boot:
+        s, e = boot["ctor_table"]
+        print("entry_tables=0x%08X:0x%08X" % (s, e))
+        break
+PY
+)
+        if [ -n "$tables" ]; then
+            extra=("$tables")
+        fi
     else
         project=$projects/s3-$unit
         read -r start end < <(unit_range "$bin_dir/${unit^^}.BIN")
@@ -108,7 +123,7 @@ for unit in "${selected[@]}"; do
     if ! nice -n "${DQ8_NICE:-19}" "$repo/tools/ghidra/headless.sh" "$project" DQ8 -process "$program" \
         -noanalysis -readOnly -max-cpu "${DQ8_GHIDRA_MAX_CPU:-4}" \
         -postScript ExportFunctionMap.java "$out/$unit.csv" "$out/$unit.jump_tables.toml" \
-        "$out/$unit.stats.toml" "$start" "$end" > "$log" 2>&1; then
+        "$out/$unit.stats.toml" "$start" "$end" "${extra[@]}" > "$log" 2>&1; then
         echo "error: headless run for $unit failed; see $log" >&2
         exit 1
     fi

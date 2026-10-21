@@ -4,9 +4,11 @@
 
 #include "runtime/iop/iop_server.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <string>

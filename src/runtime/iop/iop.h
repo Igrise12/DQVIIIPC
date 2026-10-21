@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // The IOP as native services (architecture §5.2, ADR-0011): the SIF link (SIF registers, SIF0/SIF1 DMA, the

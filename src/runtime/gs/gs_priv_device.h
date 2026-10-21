@@ -7,6 +7,7 @@
 #include "runtime/machine/mmio.h"
 
 #include <cstdint>
+#include <string_view>
 
 namespace dq8::gs {
 class IGsSink;

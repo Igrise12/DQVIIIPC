@@ -5,6 +5,9 @@
 #include "runtime/ee/overlay_manager.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <vector>

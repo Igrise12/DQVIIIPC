@@ -9,6 +9,7 @@
 #include "host/session.h"
 
 #include <cstdio>
+#include <exception>
 #include <string>
 #include <string_view>
 

@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <vector>

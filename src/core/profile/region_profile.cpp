@@ -302,6 +302,20 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
     // Loader facts (spike S3): code and data addresses inside the main program, 4-byte aligned.
     const std::uint64_t main_begin = p.boot.load_address;
     const std::uint64_t main_end = main_begin + p.boot.main_memsz;
+    if (const toml::value* ctor = r.optional(boot, "ctor_table")) {
+        if (!ctor->is_array() || ctor->as_array().size() != 2 || !ctor->as_array()[0].is_integer() ||
+            !ctor->as_array()[1].is_integer()) {
+            r.fail(*ctor, "[boot].ctor_table must be [start, end]");
+        }
+        const std::int64_t s = ctor->as_array()[0].as_integer();
+        const std::int64_t e = ctor->as_array()[1].as_integer();
+        if (s % 4 != 0 || e % 4 != 0 || s >= e || s < static_cast<std::int64_t>(main_begin) ||
+            e > static_cast<std::int64_t>(main_end)) {
+            r.fail(*ctor, "[boot].ctor_table must be a 4-byte aligned [start, end) inside the main program");
+        }
+        p.boot.ctor_table_start = static_cast<std::uint32_t>(s);
+        p.boot.ctor_table_end = static_cast<std::uint32_t>(e);
+    }
     auto main_address = [&](const char* key) {
         const std::uint32_t a = r.u32(window, key, "overlay_window");
         if (a % 4 != 0) {

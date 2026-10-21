@@ -4,7 +4,13 @@
 #include "runtime/iop/services/services.h"
 #include "runtime/machine/machine_services.h"
 
+#include <cstdint>
+#include <memory>
 #include <set>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 // A server that answers every call with zeros (ADR-0011): the game's sound servers until audio work starts.
 // The first call of each function number is reported as an "rpc_null" event, so bring-up can see which

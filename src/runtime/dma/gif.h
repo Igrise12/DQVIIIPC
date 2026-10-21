@@ -13,6 +13,8 @@
 #include <functional>
 #include <optional>
 #include <span>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace dq8::gs {

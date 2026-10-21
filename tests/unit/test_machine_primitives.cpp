@@ -8,9 +8,12 @@
 #include "runtime/machine/spin_detector.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 using namespace dq8::rt;

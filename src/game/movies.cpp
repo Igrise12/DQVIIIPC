@@ -7,8 +7,11 @@
 #include "runtime/ee/guest_stop.h"
 #include "runtime/machine/machine_services.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace dq8::game {
 

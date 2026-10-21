@@ -157,8 +157,7 @@ void VuInterpreter::execLower(uint32_t instr, uint8_t* vuData, uint32_t dataSize
     case 0x10: // FCEQ
     {
         uint32_t imm24 = instr & 0xFFFFFF;
-        if (1 != 0)
-            m_state.vi[1] = ((m_state.clip & 0xFFFFFF) == imm24) ? 1 : 0;
+        m_state.vi[1] = ((m_state.clip & 0xFFFFFF) == imm24) ? 1 : 0;
         return;
     }
     case 0x11: // FCSET
@@ -169,15 +168,13 @@ void VuInterpreter::execLower(uint32_t instr, uint8_t* vuData, uint32_t dataSize
     case 0x12: // FCAND
     {
         uint32_t imm24 = instr & 0xFFFFFF;
-        if (1 != 0)
-            m_state.vi[1] = ((m_state.clip & imm24) != 0) ? 1 : 0;
+        m_state.vi[1] = ((m_state.clip & imm24) != 0) ? 1 : 0;
         return;
     }
     case 0x13: // FCOR
     {
         uint32_t imm24 = instr & 0xFFFFFF;
-        if (1 != 0)
-            m_state.vi[1] = ((m_state.clip | imm24) == 0xFFFFFF) ? 1 : 0;
+        m_state.vi[1] = ((m_state.clip | imm24) == 0xFFFFFF) ? 1 : 0;
         return;
     }
     case 0x14: // FSEQ

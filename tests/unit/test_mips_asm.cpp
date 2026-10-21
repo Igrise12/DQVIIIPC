@@ -3,6 +3,7 @@
 #include "support/mips_asm.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 
 namespace m = dq8::test::mips;
 

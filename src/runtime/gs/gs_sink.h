@@ -5,6 +5,7 @@
 #include "runtime/gs/gs_backend.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <span>
 
 // The machine-thread side of the GS: the GIF (PATH1 from VU1 XGKICK, PATH2 from VIF1 DIRECT, PATH3 from GIF

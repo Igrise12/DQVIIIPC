@@ -17,6 +17,8 @@
 #include "support/machine_harness.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 

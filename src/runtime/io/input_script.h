@@ -5,11 +5,13 @@
 #include "runtime/io/pad_state.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // Scripted input: a `.dq8in` file (Docs/formats/dq8-input-script.md) played back as an IInputSource. Lines

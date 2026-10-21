@@ -14,6 +14,7 @@
 #include "runtime/vu/vu_units.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 
 namespace dq8::rt {

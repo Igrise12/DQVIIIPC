@@ -7,7 +7,14 @@
 #include "runtime/machine/machine_services.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 // The CD/DVD server's six server ids ("Protocol notes", cdvdfsv): init, the S-commands (drive queries
 // answered at once), the N-commands (reads and seeks, whose end packet waits for the virtual disc time),

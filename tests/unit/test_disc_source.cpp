@@ -5,7 +5,11 @@
 #include "runtime/io/disc_source.h"
 #include "support/iso_builder.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
+#include <span>
+#include <vector>
 
 namespace rt = dq8::rt;
 namespace core = dq8::core;

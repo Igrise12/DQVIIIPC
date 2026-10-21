@@ -4,6 +4,8 @@
 
 #include "runtime/machine/interrupts.h"
 
+#include <cstdint>
+
 namespace dq8::rt {
 
 void IntcRegs::attach(MachineServices& machine) {

@@ -14,6 +14,8 @@
 #include "runtime/machine/spin_detector.h"
 
 #include <array>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <utility>
 #include <vector>

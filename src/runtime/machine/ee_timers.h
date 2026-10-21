@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 
 // The four EE timers (0x10000000, 0x10000800, 0x10001000, 0x10001800; COUNT, MODE, COMP and, for timers 0
 // and 1, HOLD). Counts are not stepped: each timer remembers its count at a base time and derives the

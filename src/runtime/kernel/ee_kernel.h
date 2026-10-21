@@ -18,12 +18,14 @@
 #include "runtime/machine/events.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace dq8::rt {

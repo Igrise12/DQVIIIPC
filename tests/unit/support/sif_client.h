@@ -14,7 +14,9 @@
 #include "support/fake_machine.h"
 #include "support/iso_builder.h"
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -25,6 +27,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // A host-side stand-in for the EE's SIF libraries, for IOP tests: it speaks the SIF command and RPC protocol

@@ -5,8 +5,12 @@
 #include "runtime/machine/interrupts.h"
 #include "support/ee_rig.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <span>
 #include <vector>
 
 using namespace dq8::rt;

@@ -9,7 +9,16 @@
 #include "runtime/machine/machine_services.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <map>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 // The file I/O server (server id 0x80000001) over the disc, in the asynchronous form the game's file library
 // uses ("Protocol notes", fileio). A setup call gives the EE addresses of two completion records and checks a

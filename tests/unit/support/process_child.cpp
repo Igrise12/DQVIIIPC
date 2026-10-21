@@ -15,6 +15,7 @@
 //                      writes only DIR/a.cpp, prints an error and exits 1
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

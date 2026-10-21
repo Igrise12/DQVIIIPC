@@ -4,6 +4,8 @@
 
 #include <charconv>
 #include <cmath>
+#include <cstddef>
+#include <functional>
 #include <map>
 #include <set>
 #include <string_view>

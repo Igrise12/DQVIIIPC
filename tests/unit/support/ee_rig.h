@@ -12,10 +12,13 @@
 #include "runtime/vu/vu_units.h"
 #include "support/fake_machine.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
+#include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -104,13 +107,16 @@ class EeRig {
 };
 
 // Little-endian byte builders for test packets.
+// Byte by byte: GCC 13 at -O3 reports a false -Warray-bounds on vector::insert from a 4-byte pointer range.
 inline void put32(std::vector<std::uint8_t>& out, std::uint32_t v) {
-    const auto* p = reinterpret_cast<const std::uint8_t*>(&v);
-    out.insert(out.end(), p, p + 4);
+    for (unsigned i = 0; i < 4; ++i) {
+        out.push_back(static_cast<std::uint8_t>(v >> (8 * i)));
+    }
 }
 inline void put64(std::vector<std::uint8_t>& out, std::uint64_t v) {
-    const auto* p = reinterpret_cast<const std::uint8_t*>(&v);
-    out.insert(out.end(), p, p + 8);
+    for (unsigned i = 0; i < 8; ++i) {
+        out.push_back(static_cast<std::uint8_t>(v >> (8 * i)));
+    }
 }
 
 // DMAtag (lower 64 bits): QWC, ID, IRQ, ADDR (bit 31 of ADDR selects the scratchpad).

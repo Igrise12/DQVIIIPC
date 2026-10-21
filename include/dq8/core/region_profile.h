@@ -63,6 +63,10 @@ struct RegionProfile {
         std::uint32_t entry = 0;
         std::uint32_t load_address = 0;
         std::uint32_t main_memsz = 0;
+        // Optional: the static-constructor pointer table crt0 walks, [start, end) (0, 0 when not recorded).
+        // Its entries are function starts the function-map export must contain (tools/ghidra/export_maps.sh).
+        std::uint32_t ctor_table_start = 0;
+        std::uint32_t ctor_table_end = 0;
     } boot;
 
     // The overlay window and the loader facts from spike S3. Addresses other than base/end lie in the

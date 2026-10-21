@@ -5,6 +5,8 @@
 #include "support/iso_builder.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
+#include <vector>
 
 using dq8::core::Error;
 using dq8::core::ErrorCode;

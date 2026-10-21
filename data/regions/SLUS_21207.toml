@@ -22,6 +22,9 @@ crc32 = "a66a08b0"
 entry = 0x00100008
 load_address = 0x00100000
 main_memsz = 0x361C80
+# The static-constructor table crt0 walks through the constructor walker (M3 bring-up): 156 pointers. Six of
+# their targets are reached only through it, so the function-map export makes functions there.
+ctor_table = [0x003CF910, 0x003CFB80]
 
 # The window the six overlays share, and the loader facts spike S3 established (Docs/spikes/S3-overlay-loader.md):
 # the loader reads a whole BIN file, header included, to the address held at window_pointer, calls the empty

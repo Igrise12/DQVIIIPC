@@ -2,10 +2,12 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Builds small, valid ISO 9660 images in memory for the unit tests: one primary volume descriptor, a

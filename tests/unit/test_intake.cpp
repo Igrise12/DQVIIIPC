@@ -8,8 +8,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 using Catch::Matchers::ContainsSubstring;
 using dq8::core::Error;

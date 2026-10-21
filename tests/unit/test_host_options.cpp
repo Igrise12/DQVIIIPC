@@ -6,7 +6,10 @@
 #include "host/options.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
+#include <cstdint>
 #include <initializer_list>
+#include <optional>
 #include <string>
 #include <vector>
 

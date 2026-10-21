@@ -6,8 +6,10 @@
 // default backend on Windows is minicoro.
 #include "runtime/kernel/fiber.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <stdexcept>
 
 #ifndef WIN32_LEAN_AND_MEAN

@@ -5,6 +5,7 @@
 #include "dq8/core/error.h"
 #include "host/json_writer.h"
 
+#include <optional>
 #include <variant>
 
 namespace dq8::host {

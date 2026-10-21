@@ -10,8 +10,12 @@
 #include "support/ee_rig.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <cstdint>
 #include <initializer_list>
+#include <span>
 #include <string>
+#include <string_view>
 
 using namespace dq8::rt;
 using dq8::test::EeRig;

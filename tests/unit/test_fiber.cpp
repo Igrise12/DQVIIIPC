@@ -7,6 +7,7 @@
 #include "support/machine_harness.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <fstream>
 #include <sstream>
@@ -54,7 +55,10 @@ void measure_inner(Headroom* h) {
 void measure(void* arg) {
     auto* h = static_cast<Headroom*>(arg);
     h->outer = Fiber::current()->headroom();
-    measure_inner(h);
+    // Through a volatile pointer so that no compiler inlines the 4 KiB frame into this one (Clang 18 at -O3
+    // did).
+    void (*volatile inner)(Headroom*) = &measure_inner;
+    inner(h);
 }
 
 struct Caught {

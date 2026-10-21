@@ -2,7 +2,11 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #include "dq8/core/hash.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <cstdint>
+#include <span>
 #include <string>
 #include <vector>
 

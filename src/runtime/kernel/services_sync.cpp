@@ -13,6 +13,8 @@
 #include "runtime/kernel/kernel_abi.h"
 #include "runtime/kernel/kernel_services.h"
 
+#include <cstdint>
+#include <string>
 #include <utility>
 
 namespace dq8::rt {
@@ -50,6 +52,12 @@ std::int32_t check_event_wait(EeKernel& kernel, std::int32_t id, std::uint32_t b
 void register_sync_services(KernelServices& services, EeKernel& kernel) {
     const auto add = [&services](std::string name, KernelServiceFn fn, std::uint32_t flags = 0) {
         services.add(KernelServiceInfo{std::move(name), std::move(fn), flags, {}, "kernel"});
+    };
+    // Event flags are native_first: programs built with Sony's libkernel install a kernel-mode event-flag
+    // implementation at start-up (syscalls 0x54-0x59, located through GetEntryAddress), for kernels without
+    // event flags. Ours has them; the program's handlers are recorded and never run (M3 bring-up).
+    const auto add_evf = [&add](std::string name, KernelServiceFn fn, std::uint32_t flags = 0) {
+        add(std::move(name), std::move(fn), flags | kernel_service_native_first);
     };
     constexpr std::uint32_t blocking = kernel_service_blocking;
     constexpr std::uint32_t irq_ok = kernel_service_interrupt_ok;
@@ -103,7 +111,7 @@ void register_sync_services(KernelServices& services, EeKernel& kernel) {
     add("iReferSemaStatus", refer_sema, irq_ok);
 
     // ---- Event flags.
-    add("CreateEventFlag", [&kernel](KernelCallContext& c) {
+    add_evf("CreateEventFlag", [&kernel](KernelCallContext& c) {
         const std::uint32_t param = c.arg(0);
         if (param == 0 || !guest_block_ok(param, kabi::event_flag_param::size)) {
             c.ret(kabi::error);
@@ -114,18 +122,19 @@ void register_sync_services(KernelServices& services, EeKernel& kernel) {
         c.ret(kernel.create_event_flag(read_u32(mem, param + ep::init_bits), read_u32(mem, param + ep::attr),
                                        read_u32(mem, param + ep::option)));
     });
-    add("DeleteEventFlag", [&kernel](KernelCallContext& c) { c.ret(kernel.delete_event_flag(c.sarg(0))); });
+    add_evf("DeleteEventFlag",
+            [&kernel](KernelCallContext& c) { c.ret(kernel.delete_event_flag(c.sarg(0))); });
     const auto set_flag = [&kernel](KernelCallContext& c) {
         c.ret(kernel.set_event_flag(c.sarg(0), c.arg(1)));
     };
-    add("SetEventFlag", set_flag);
-    add("iSetEventFlag", set_flag, irq_ok);
+    add_evf("SetEventFlag", set_flag);
+    add_evf("iSetEventFlag", set_flag, irq_ok);
     const auto clear_flag = [&kernel](KernelCallContext& c) {
         c.ret(kernel.clear_event_flag(c.sarg(0), c.arg(1)));
     };
-    add("ClearEventFlag", clear_flag);
-    add("iClearEventFlag", clear_flag, irq_ok);
-    add(
+    add_evf("ClearEventFlag", clear_flag);
+    add_evf("iClearEventFlag", clear_flag, irq_ok);
+    add_evf(
         "WaitEventFlag",
         [&kernel](KernelCallContext& c) {
             const std::int32_t check = check_event_wait(kernel, c.sarg(0), c.arg(1), c.arg(2), c.arg(3));
@@ -146,8 +155,8 @@ void register_sync_services(KernelServices& services, EeKernel& kernel) {
         }
         c.ret(result);
     };
-    add("PollEventFlag", poll_flag);
-    add("iPollEventFlag", poll_flag, irq_ok);
+    add_evf("PollEventFlag", poll_flag);
+    add_evf("iPollEventFlag", poll_flag, irq_ok);
     const auto refer_flag = [&kernel](KernelCallContext& c) {
         const EventFlag* f = kernel.event_flag(c.sarg(0));
         if (f == nullptr) {
@@ -170,8 +179,8 @@ void register_sync_services(KernelServices& services, EeKernel& kernel) {
         write_u32(mem, info + ep::wait_threads + 8, 0);
         c.ret(kabi::ok);
     };
-    add("ReferEventFlagStatus", refer_flag);
-    add("iReferEventFlagStatus", refer_flag, irq_ok);
+    add_evf("ReferEventFlagStatus", refer_flag);
+    add_evf("iReferEventFlagStatus", refer_flag, irq_ok);
 
     // ---- Alarms: SetAlarm(ticks, handler, arg); the handler runs with the caller's $gp.
     const auto set_alarm = [&kernel](KernelCallContext& c) {

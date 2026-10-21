@@ -3,6 +3,7 @@
 #include "game/until.h"
 
 #include <charconv>
+#include <cstddef>
 #include <stdexcept>
 #include <variant>
 

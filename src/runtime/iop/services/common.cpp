@@ -6,6 +6,8 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <string>
+#include <string_view>
 #include <utility>
 
 namespace dq8::rt::iop_services {

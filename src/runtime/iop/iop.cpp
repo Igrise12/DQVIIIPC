@@ -16,8 +16,12 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstddef>
 #include <cstdlib>
+#include <span>
 #include <stdexcept>
+#include <string_view>
+#include <utility>
 
 namespace dq8::rt {
 

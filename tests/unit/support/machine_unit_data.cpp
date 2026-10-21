@@ -4,6 +4,10 @@
 // layouts and a GIF packet, all with our own values.
 #include "support/machine_unit.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
 namespace machine_unit {
 
 namespace {

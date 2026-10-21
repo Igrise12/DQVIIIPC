@@ -4,9 +4,14 @@
 #include "dq8/core/iso9660.h"
 #include "support/iso_builder.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cstddef>
+#include <cstdint>
 #include <cstring>
+#include <span>
+#include <vector>
 
 using dq8::core::Error;
 using dq8::core::ErrorCode;

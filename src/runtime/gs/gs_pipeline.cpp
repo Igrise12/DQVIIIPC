@@ -14,6 +14,7 @@
 #include <exception>
 #include <map>
 #include <mutex>
+#include <span>
 #include <stdexcept>
 #include <thread>
 #include <utility>

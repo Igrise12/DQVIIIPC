@@ -7,9 +7,11 @@
 #include "runtime/kernel/fiber.h"
 #include "runtime/kernel/fiber_stack.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <ucontext.h>

@@ -6,7 +6,15 @@
 #include "runtime/machine/cost_model.h"
 #include "runtime/machine/machine_services.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
 #include <set>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
 
 // The IOP heap server (server id 0x80000003): allocate and free IOP RAM for the EE, and load a disc file into
 // an allocated block ("Protocol notes", iopheap). Allocations come from IopMemory's deterministic heap.

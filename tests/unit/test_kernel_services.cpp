@@ -7,6 +7,7 @@
 #include "support/fake_machine.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -117,6 +118,17 @@ TEST_CASE("kernel services: SetSyscall handlers take precedence over native serv
     CHECK(k.resolve_number(0x18).kind == KernelResolution::Kind::native);
     CHECK(k.guest_handler(0x7E) == 0x00081000u);
     CHECK_FALSE(k.guest_handler(0x18).has_value());
+}
+
+TEST_CASE("kernel services: native_first services keep serving over a SetSyscall handler",
+          "[kernel][services]") {
+    KernelServices k;
+    k.add({"FindAddress", [](KernelCallContext&) {}, kernel_service_native_first, {}, "test"});
+    k.install_guest_handler(0x83, 0x00120A00);
+    const auto r = k.resolve_number(0x83);
+    CHECK(r.kind == KernelResolution::Kind::native);
+    CHECK(r.guest_address == 0x00120A00); // the shadowed handler, for traces
+    CHECK(k.resolve_name("FindAddress").kind == KernelResolution::Kind::native);
 }
 
 TEST_CASE("kernel services: registration rules", "[kernel][services]") {

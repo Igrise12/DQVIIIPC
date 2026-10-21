@@ -14,6 +14,8 @@
 #include "runtime/kernel/kernel_abi.h"
 #include "runtime/kernel/kernel_services.h"
 
+#include <cstdint>
+#include <string>
 #include <utility>
 
 namespace dq8::rt {

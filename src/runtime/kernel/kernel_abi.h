@@ -106,6 +106,15 @@ inline constexpr std::uint32_t wait_threads = 0x10;
 inline constexpr std::uint32_t status_size = 0x1C;
 } // namespace event_flag_param
 
+// Timer 3 belongs to the kernel's alarms on the consoles whose kernel implements SetAlarm (EE timer registers
+// are public hardware: T3_MODE at physical 0x10001810, bit 8 = CMPE, compare interrupt enable). Programs
+// built with Sony's libkernel test T3_MODE.CMPE at start-up and install their own kernel-mode alarm patch
+// (syscalls 0xFC-0xFF) only when it is clear. Our alarms are native (event-driven, not on timer 3), so the
+// HLE kernel sets CMPE at reset, counting stopped, and the patch is skipped (M3 bring-up,
+// Docs/milestones/M3-boots.md).
+inline constexpr std::uint32_t timer3_mode = 0x10001810u;
+inline constexpr std::uint32_t timer_mode_cmpe = 1u << 8;
+
 // The kernel's syscall table as guest code finds it: SetSyscall writes a handler word at table + 4 * number
 // (the number is signed, so SDK kernel patches reach below the table), GetEntryAddress reads one, and the two
 // probe words at 0x2F0 and 0x2F8 hold the table address's upper and lower halves the way the SDK's patch code

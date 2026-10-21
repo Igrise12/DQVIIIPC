@@ -10,6 +10,8 @@
 #include "runtime/machine/machine_services.h"
 
 #include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

@@ -10,7 +10,9 @@
 #include "runtime/machine/machine_services.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
+#include <exception>
 #include <stdexcept>
 #include <utility>
 

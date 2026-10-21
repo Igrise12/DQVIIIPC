@@ -20,6 +20,7 @@
 
 #include "ps2_runtime_macros.h"
 
+#include <cstddef>
 #include <initializer_list>
 #include <optional>
 

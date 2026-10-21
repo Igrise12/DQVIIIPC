@@ -6,6 +6,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -270,6 +272,8 @@ TEST_CASE("the shipped region profiles are valid", "[core][profile]") {
                 }
             }
             CHECK(p.boot.sha1 == "f24bfd21c21f6454c05934224ab52cde837bc90b");
+            CHECK(p.boot.ctor_table_start == 0x003CF910);
+            CHECK(p.boot.ctor_table_end == 0x003CFB80);
             CHECK(p.iop.reset_image == "MODULES/IOPRP300.IMG");
             REQUIRE(p.iop.modules.size() == 15); // S7's load order
             CHECK(p.iop.modules.front().name == "SIO2MAN");
@@ -317,4 +321,17 @@ TEST_CASE("the optional [iop] and [movie] tables are validated", "[core][profile
     fails(base + iop + replace_line(movie, "scene_unit = \"A\"", "scene_unit = \"B\""),
           "not an overlay name");
     fails(base + iop + replace_line(movie, "0x00100020", "0x00100022"), "4-byte aligned");
+
+    const std::string with_ctor = replace_line(minimal_profile, "main_memsz = 0x1000",
+                                               "main_memsz = 0x1000\nctor_table = [0x00100F00, 0x00100F10]");
+    const auto ctor = dq8::core::load_region_profile(write(tmp.path(), "ctor.toml", with_ctor));
+    CHECK(ctor.boot.ctor_table_start == 0x00100F00);
+    CHECK(ctor.boot.ctor_table_end == 0x00100F10);
+    CHECK(plain.boot.ctor_table_start == 0);
+    fails(replace_line(minimal_profile, "main_memsz = 0x1000",
+                       "main_memsz = 0x1000\nctor_table = [0x00100F00, 0x00200000]"),
+          "inside the main program");
+    fails(replace_line(minimal_profile, "main_memsz = 0x1000",
+                       "main_memsz = 0x1000\nctor_table = [0x00100F00]"),
+          "[start, end]");
 }

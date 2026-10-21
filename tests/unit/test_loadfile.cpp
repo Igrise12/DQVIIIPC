@@ -4,8 +4,12 @@
 #include "support/sif_client.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
+#include <tuple>
+#include <vector>
 
 namespace rt = dq8::rt;
 using dq8::test::IopRig;

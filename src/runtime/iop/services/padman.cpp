@@ -7,8 +7,15 @@
 #include "runtime/iop/services/services.h"
 #include "runtime/machine/machine_services.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <map>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 // The pad server (server ids 0x80000100 and 0x80000101; "Protocol notes", padman). The catalogue calls it
 // "padman.v1" after the server id pair; the EE library speaks the command-word protocol: one function number,

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 
 // Machine thread -> bounded command queue -> render thread -> IGsBackend (architecture §12.2). The render

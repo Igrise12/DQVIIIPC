@@ -6,6 +6,7 @@
 #include "dq8/core/error.h"
 #include "runtime/ee/guest_stop.h"
 
+#include <cstddef>
 #include <stdexcept>
 #include <string>
 

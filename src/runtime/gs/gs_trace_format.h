@@ -4,6 +4,7 @@
 
 #include "runtime/gs/gs_backend.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <span>

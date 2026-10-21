@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
+#include <utility>
 
 namespace dq8::test {
 

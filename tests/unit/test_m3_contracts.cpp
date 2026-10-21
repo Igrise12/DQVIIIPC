@@ -22,7 +22,12 @@
 #include "support/fake_machine.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <tuple>
 #include <type_traits>
+#include <vector>
 
 using namespace dq8;
 

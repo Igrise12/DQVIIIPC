@@ -4,7 +4,14 @@
 #include "dq8/core/iso9660.h"
 #include "runtime/io/disc_source.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
+#include <utility>
 
 namespace dq8::rt {
 

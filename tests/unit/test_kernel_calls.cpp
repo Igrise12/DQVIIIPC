@@ -3,6 +3,7 @@
 #include "runtime/kernel/kernel_calls.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <set>
 #include <string>
 #include <string_view>

@@ -13,10 +13,13 @@
 #include "runtime/ee/guest_stop.h"
 #include "runtime/ee/overlay_manager.h"
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 // Start-up shared by every run of dq8-game: verify the disc (or take a developer ELF), load and validate the

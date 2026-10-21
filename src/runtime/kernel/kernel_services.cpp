@@ -104,17 +104,20 @@ KernelResolution KernelServices::resolve(std::string_view name, bool has_number,
     r.has_number = has_number;
     r.number = number;
     r.interrupt_context = interrupt;
+    const auto native = services_.find(name);
     if (has_number) {
         if (const auto it = guest_handlers_.find(number); it != guest_handlers_.end()) {
-            r.kind = KernelResolution::Kind::guest_handler;
             r.guest_address = it->second;
-            return r;
+            if (native == services_.end() || (native->second.flags & kernel_service_native_first) == 0) {
+                r.kind = KernelResolution::Kind::guest_handler;
+                return r;
+            }
         }
     }
-    if (const auto it = services_.find(name); it != services_.end()) {
+    if (native != services_.end()) {
         r.kind = KernelResolution::Kind::native;
-        r.service = &it->second;
-        r.name = it->first;
+        r.service = &native->second;
+        r.name = native->first;
     }
     return r;
 }

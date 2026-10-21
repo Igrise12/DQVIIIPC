@@ -16,7 +16,8 @@
 // arrives by number and a by-name call from generated code (ps2_syscalls::Name, ps2_stubs::Name) by name;
 // both resolve here to one service. Resolution order for a call:
 //   1. a guest handler the program installed for that number with SetSyscall (run as a nested guest call that
-//      returns to the instruction after the syscall);
+//      returns to the instruction after the syscall), unless the native service is
+//      kernel_service_native_first;
 //   2. the native service registered under the canonical name;
 //   3. nothing: the caller stops the guest with a diagnostic. An unimplemented call never returns 0 silently.
 // Services are registered by the devices that own them (kernel threads and sync by the kernel, GS calls by
@@ -74,6 +75,11 @@ enum KernelServiceFlag : std::uint32_t {
     kernel_service_noop = 1u << 0,     // does nothing on purpose; `note` says why (strict mode stops instead)
     kernel_service_blocking = 1u << 1, // may block the calling thread
     kernel_service_interrupt_ok = 1u << 2, // valid in interrupt context
+    // A SetSyscall handler a program installs for this number is recorded (the guest's syscall table shows
+    // it) but the native service keeps serving: for kernel calls programs replace with user-mode copies of
+    // what the kernel already does (the SDK's start-up code installs its own FindAddress and Copy). Such
+    // handler code is reached only through the pointer, so function maps never contain it.
+    kernel_service_native_first = 1u << 3,
 };
 
 using KernelServiceFn = std::function<void(KernelCallContext&)>;
@@ -91,8 +97,8 @@ struct KernelResolution {
     enum class Kind { native, guest_handler, missing };
     Kind kind = Kind::missing;
     const KernelServiceInfo* service = nullptr; // native
-    std::uint32_t guest_address = 0;            // guest_handler
-    std::string_view name;                      // canonical name, or the name as called when unknown
+    std::uint32_t guest_address = 0; // guest_handler, or the handler a native_first service shadows
+    std::string_view name;           // canonical name, or the name as called when unknown
     bool has_number = false;
     std::int32_t number = 0;
     bool interrupt_context = false;

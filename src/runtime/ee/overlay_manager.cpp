@@ -4,6 +4,7 @@
 
 #include "runtime/ee/guest_stop.h"
 
+#include <cstddef>
 #include <stdexcept>
 #include <utility>
 

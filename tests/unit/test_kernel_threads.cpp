@@ -11,7 +11,9 @@
 #include "runtime/kernel/kernel_abi.h"
 #include "support/machine_harness.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <cstdint>
 #include <string>
 #include <vector>
 

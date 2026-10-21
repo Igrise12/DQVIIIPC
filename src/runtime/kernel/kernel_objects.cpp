@@ -14,8 +14,15 @@
 #include "runtime/machine/machine_services.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <deque>
 #include <limits>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
 
 namespace dq8::rt {
 

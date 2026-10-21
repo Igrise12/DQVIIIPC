@@ -16,6 +16,8 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 // The DMA controller (architecture §5.3): channel registers at 0x10008000-0x1000D4FF, D_CTRL..D_STADR at

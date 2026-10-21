@@ -13,10 +13,12 @@
 #include "runtime/machine/mmio.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace dq8::rt {
 

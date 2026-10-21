@@ -3,7 +3,15 @@
 #include "runtime/iop/services/services.h"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <span>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 // The module loader (server id 0x80000006): a version query, then "load the module at this path with these
 // arguments" ("Protocol notes", loadfile). Nothing is executed: the Iop registers the native services the

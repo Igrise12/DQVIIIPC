@@ -9,6 +9,7 @@
 #include <array>
 #include <cstdint>
 #include <span>
+#include <string_view>
 #include <vector>
 
 // VU0 and VU1 as the EE and the VIFs see them (architecture §5.4): micro and data memory mapped at
