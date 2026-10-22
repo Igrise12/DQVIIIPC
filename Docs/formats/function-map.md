@@ -60,7 +60,7 @@ The values above illustrate the shape; they are not taken from the game.
 | `code` | The unit's code range `[start, end)` as the pipeline computes it from the disc (`CodeUnit`): main's executable load segment; for an overlay its file's range, from the load address over the header, text and data. Prepare refuses a map whose range differs (`map-invalid`) |
 | `functions` | `[start, size]` pairs: `size` > 0, both 4-aligned, sorted by start, disjoint, inside `code` |
 | `link_return_entries` | Addresses: 4-aligned, sorted, unique, inside `code`; may be empty |
-| `[[named]]` | Optional, sorted by `start`. `start` is a function's start; `name` must resolve against the runtime's call list (`include/dq8/abi/ps2recomp/ps2_call_list.h`) the way the recompiler resolves it: exactly, or with one leading underscore removed or added |
+| `[[named]]` | Optional, sorted by `start`. `start` is a function's start; `name` is a name in the runtime's call list (`include/dq8/abi/ps2recomp/ps2_call_list.h`: its kernel calls and library stubs), matched as the recompiler matches it: exactly, or with one leading underscore removed or added (the map keeps the SDK's spelling, e.g. `_EnableIntc`) |
 | `[[jump_table]]` | Sorted by `address`, each address once: non-zero and 4-aligned; `base_register` 0–31; `count` ≥ 1. The `count` little-endian words at `address` are read from the unit ELF and become the entries 0…`count`−1; each must land inside `code` |
 
 Every number is a TOML integer (the tool writes addresses as eight hex digits, sizes in hex). Nothing else is allowed:

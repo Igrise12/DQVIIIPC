@@ -597,9 +597,10 @@ PublishedMap load_published_map(const fs::path& root, std::string_view profile, 
     const fs::path file = published_map_file(root, profile, unit);
     std::error_code ec;
     if (!fs::is_regular_file(file, ec)) {
-        throw Error(ErrorCode::maps_missing, "no published function map for unit '" + std::string(unit) +
-                                                 "' of " + std::string(profile) + ": '" +
-                                                 detail::path_utf8(file) + "' does not exist");
+        throw Error(ErrorCode::maps_missing,
+                    "no published function map for unit '" + std::string(unit) + "' of " +
+                        std::string(profile) + ": '" + detail::path_utf8(file) +
+                        "' does not exist (contributors: --maps DIR for Ghidra maps)");
     }
     const std::string source = detail::path_utf8(file);
     PublishedMap map = parse_published_map(platform::read_text_file(file), source);
@@ -620,7 +621,8 @@ void check_published_map_source(const PublishedMap& map, std::string_view source
         throw Error(ErrorCode::maps_missing,
                     "the published function map of unit '" + map.unit + "' (" +
                         (map.path.empty() ? map.profile + "/" + map.unit : detail::path_utf8(map.path)) +
-                        ") describes the file with SHA-1 " + map.source_sha1 + ", not this disc's " + actual);
+                        ") describes the file with SHA-1 " + map.source_sha1 + ", not this disc's " + actual +
+                        " (contributors: --maps DIR for Ghidra maps of this disc)");
     }
 }
 

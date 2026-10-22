@@ -378,7 +378,8 @@ std::vector<PublishedMap> require_published_maps(const fs::path& maps_root, cons
             if (sha1.empty()) {
                 throw Error(ErrorCode::maps_missing, "region profile " + v.profile.id +
                                                          " records no SHA-1 for " + unit.source_path +
-                                                         ", so no published map can be matched to it");
+                                                         ", so no published map can be matched to it "
+                                                         "(contributors: --maps DIR for Ghidra maps)");
             }
         }
         PublishedMap map = load_published_map(maps_root, v.profile.id, unit.name);
