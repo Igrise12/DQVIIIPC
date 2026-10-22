@@ -10,6 +10,7 @@
 #include <functional>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -43,8 +44,13 @@ inline constexpr std::uint32_t sid_mcserv = 0x80000400u;
 // `deps` must outlive the server (fileio sends its completions through it).
 std::unique_ptr<IopRpcServer> make_fileio(const IDiscSource* disc, const IopServiceDeps& deps);
 std::unique_ptr<IopRpcServer> make_iopheap(const IDiscSource* disc);
-std::unique_ptr<IopRpcServer>
-make_loadfile(std::function<std::int32_t(std::string_view path, std::span<const std::uint8_t> args)> load);
+// `load` returns nullopt when it answers later itself (an interpreted module's start); see IopServiceDeps.
+std::unique_ptr<IopRpcServer> make_loadfile(
+    std::function<std::optional<std::int32_t>(std::string_view path, std::span<const std::uint8_t> args,
+                                              std::uint64_t request)>
+        load);
+// The loadfile reply: the module id (or a negative error), then the module's start result.
+std::vector<std::uint8_t> loadfile_reply(std::int32_t id, std::int32_t start_result);
 std::vector<std::unique_ptr<IopRpcServer>> make_cdvdfsv(const IDiscSource* disc);
 std::vector<std::unique_ptr<IopRpcServer>> make_padman_v1(IInputSource* input);
 std::unique_ptr<IopRpcServer> make_mcserv_v1();

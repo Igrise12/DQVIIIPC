@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -14,8 +15,9 @@
 #include <vector>
 
 // The module loader (server id 0x80000006): a version query, then "load the module at this path with these
-// arguments" ("Protocol notes", loadfile). Nothing is executed: the Iop registers the native services the
-// region profile lists for the module and answers with a module id.
+// arguments" ("Protocol notes", loadfile). For a native module nothing is executed: the Iop registers the
+// native services the region profile lists for the module and answers with a module id. An interpreted module
+// (M4) is answered once its start function returned, with its start result.
 namespace dq8::rt::iop_services {
 
 namespace {
@@ -37,7 +39,8 @@ constexpr std::size_t reply_start_result = 0x4;
 
 class LoadfileServer final : public IopRpcServer {
   public:
-    using Load = std::function<std::int32_t(std::string_view, std::span<const std::uint8_t>)>;
+    using Load = std::function<std::optional<std::int32_t>(std::string_view, std::span<const std::uint8_t>,
+                                                           std::uint64_t)>;
     explicit LoadfileServer(Load load) : load_(std::move(load)) {}
 
     std::uint32_t sid() const noexcept override { return sid_loadfile; }
@@ -58,11 +61,12 @@ class LoadfileServer final : public IopRpcServer {
         const std::size_t arg_length = std::min<std::size_t>(arg32(args, load_arg_length), load_args_max);
         const auto module_args = args.size() >= load_args + arg_length ? args.subspan(load_args, arg_length)
                                                                        : std::span<const std::uint8_t>{};
-        const std::int32_t id = load_(path, module_args);
-        std::vector<std::uint8_t> reply(8, 0);
-        put32(reply, reply_result, static_cast<std::uint32_t>(id));
-        put32(reply, reply_start_result, 0);
-        return {std::move(reply), {}, 0};
+        const std::optional<std::int32_t> id = load_(path, module_args, call.request);
+        if (!id) {
+            call.deferred = true; // an interpreted module: the reply follows its start
+            return {};
+        }
+        return {loadfile_reply(*id, 0), {}, 0};
     }
 
   private:
@@ -71,9 +75,17 @@ class LoadfileServer final : public IopRpcServer {
 
 } // namespace
 
-std::unique_ptr<IopRpcServer>
-make_loadfile(std::function<std::int32_t(std::string_view, std::span<const std::uint8_t>)> load) {
+std::unique_ptr<IopRpcServer> make_loadfile(
+    std::function<std::optional<std::int32_t>(std::string_view, std::span<const std::uint8_t>, std::uint64_t)>
+        load) {
     return std::make_unique<LoadfileServer>(std::move(load));
+}
+
+std::vector<std::uint8_t> loadfile_reply(std::int32_t id, std::int32_t start_result) {
+    std::vector<std::uint8_t> reply(8, 0);
+    put32(reply, reply_result, static_cast<std::uint32_t>(id));
+    put32(reply, reply_start_result, static_cast<std::uint32_t>(start_result));
+    return reply;
 }
 
 } // namespace dq8::rt::iop_services

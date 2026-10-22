@@ -4,9 +4,11 @@
 
 #include "runtime/ee/guest_stop.h"
 #include "runtime/io/disc_source.h"
+#include "runtime/iop/iop_exec.h"
 #include "runtime/iop/iop_memory.h"
 #include "runtime/iop/iop_modules.h"
 #include "runtime/iop/iop_rpc.h"
+#include "runtime/iop/services/services.h"
 #include "runtime/iop/sif_link.h"
 #include "runtime/iop/sif_protocol.h"
 #include "runtime/machine/cost_model.h"
@@ -18,6 +20,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdlib>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -77,9 +80,8 @@ struct Iop::Impl final : public ISifCommandSink, public IVblankListener {
         }
         deps.disc = config.disc;
         deps.input = config.input;
-        deps.load_module = [this](std::string_view path, std::span<const std::uint8_t> args) {
-            return load_module(path, args);
-        };
+        deps.load_module = [this](std::string_view path, std::span<const std::uint8_t> args,
+                                  std::uint64_t request) { return load_module(path, args, request); };
         deps.send_command = [this](std::uint32_t cid, std::uint32_t opt, std::span<const std::uint8_t> body,
                                    std::vector<EeWrite> writes, Cycles ready_at) {
             send_command(cid, opt, body, std::move(writes), ready_at);
@@ -89,13 +91,16 @@ struct Iop::Impl final : public ISifCommandSink, public IVblankListener {
     void attach(MachineServices& m) {
         machine = &m;
         rpc = std::make_unique<IopRpcLayer>(m, link, memory, config.disc);
+        exec = std::make_unique<IopExec>(m, memory, link, *rpc, config.devices, config.strict_imports);
         link.attach(m, *this);
         m.add_vblank_listener(VblankPhase::iop, *this);
+        exec->connect_devices();
     }
 
     // Power-on: the IOP has booted with the standard services and nothing else.
     void reset() {
         cancel_reboot();
+        exec->reset();
         memory.reset();
         link.reset();
         rpc->clear();
@@ -165,6 +170,13 @@ struct Iop::Impl final : public ISifCommandSink, public IVblankListener {
         case sif::cid_rpc_rdata:
             rpc->rdata(packet);
             break;
+        case sif::cid_rpc_end:
+            // The end of a request the interpreted IOP made of an EE server.
+            if (!exec->has_modules()) {
+                fail(StopReason::guest_error, "an RPC end packet arrived, but no IOP module made a request");
+            }
+            exec->on_rpc_end(packet);
+            break;
         default:
             fail(StopReason::unsupported, "command " + hex32(cid) + " (" +
                                               std::string(sif::command_name(cid)) + ") has no IOP handler");
@@ -221,6 +233,7 @@ struct Iop::Impl final : public ISifCommandSink, public IVblankListener {
         machine->emit(MachineEvent{"iop_reset", {}}.add("image", arg).add("mode", std::uint64_t{mode}));
 
         cancel_reboot();
+        exec->reset();
         link.discard_to_ee();
         rpc->clear();
         registry.reset();
@@ -244,13 +257,17 @@ struct Iop::Impl final : public ISifCommandSink, public IVblankListener {
         reboot_event = 0;
     }
 
-    // The loadfile server's request: register the services the profile lists for the module.
-    std::int32_t load_module(std::string_view path, std::span<const std::uint8_t> args) {
+    // The loadfile server's request: register the services the profile lists for the module, or run the
+    // module on the interpreted IOP (nullopt: the reply follows its start).
+    std::optional<std::int32_t> load_module(std::string_view path, std::span<const std::uint8_t> args,
+                                            std::uint64_t request) {
         const std::string name = IopModuleRegistry::module_name(path);
         const auto colon = path.find(':');
         const std::string device = colon == std::string_view::npos ? "" : upper(path.substr(0, colon));
+        std::optional<DiscFile> file;
         if (device == "CDROM0" || device == "CDROM") {
-            if (!config.disc->find(path.substr(colon + 1))) {
+            file = config.disc->find(path.substr(colon + 1));
+            if (!file) {
                 fail(StopReason::guest_error,
                      "loadfile: module " + std::string(path) + " is not on the disc");
             }
@@ -266,6 +283,13 @@ struct Iop::Impl final : public ISifCommandSink, public IVblankListener {
         if (const auto* loaded = registry.loaded(name)) {
             return loaded->id;
         }
+        if (spec->services.size() == 1 && spec->services.front() == interpret_service) {
+            if (!file) {
+                fail(StopReason::unsupported, "loadfile: module " + name + " is marked interpret but " +
+                                                  std::string(path) + " is not a disc file");
+            }
+            return load_interpreted(name, path, *file, args, request);
+        }
         std::string services;
         for (const std::string& service : spec->services) {
             for (auto& server : make_iop_service(service, deps)) {
@@ -280,8 +304,40 @@ struct Iop::Impl final : public ISifCommandSink, public IVblankListener {
                           .add("name", name)
                           .add("id", static_cast<std::uint64_t>(id))
                           .add("services", services)
-                          .add("args", printable(args)));
+                          .add("args", printable(args))
+                          .add("mode", std::string("native"))
+                          .add("base", std::uint64_t{0})
+                          .add("size", std::uint64_t{0})
+                          .add("start", std::int64_t{0}));
         return id;
+    }
+
+    std::optional<std::int32_t> load_interpreted(const std::string& name, std::string_view path,
+                                                 const DiscFile& file, std::span<const std::uint8_t> args,
+                                                 std::uint64_t request) {
+        const auto sectors =
+            static_cast<std::uint32_t>((file.size + IDiscSource::sector_size - 1) / IDiscSource::sector_size);
+        std::vector<std::uint8_t> bytes(static_cast<std::size_t>(sectors) * IDiscSource::sector_size);
+        config.disc->read_sectors(file.lsn, sectors, bytes);
+        bytes.resize(static_cast<std::size_t>(file.size));
+        const std::int32_t id = registry.note_loaded(name);
+        const std::string shown_args = printable(args);
+        exec->load_module(name, id, bytes, path, args,
+                          [this, request, shown_args](const IopExec::Module& m, std::int32_t result) {
+                              machine->emit(MachineEvent{"iop_module", {}}
+                                                .add("name", m.name)
+                                                .add("id", static_cast<std::uint64_t>(m.id))
+                                                .add("services", std::string(interpret_service))
+                                                .add("args", shown_args)
+                                                .add("mode", std::string(interpret_service))
+                                                .add("base", std::uint64_t{m.base})
+                                                .add("size", std::uint64_t{m.size})
+                                                .add("start", std::int64_t{result}));
+                              rpc->complete(request, RpcReply{iop_services::loadfile_reply(m.id, result),
+                                                              {},
+                                                              exec->now() + machine->cost().rpc_reply(8)});
+                          });
+        return std::nullopt;
     }
 
     // A command packet for the EE: header (size, cid, option word), then `body`.
@@ -314,6 +370,7 @@ struct Iop::Impl final : public ISifCommandSink, public IVblankListener {
     IopServiceDeps deps;
     MachineServices* machine = nullptr;
     std::unique_ptr<IopRpcLayer> rpc;
+    std::unique_ptr<IopExec> exec;
     std::array<std::uint32_t, sif::software_reg_count> iop_sregs{};
     EventId reboot_event = 0;
 };
@@ -331,6 +388,17 @@ void Iop::reset() {
         throw std::logic_error("Iop::reset before attach");
     }
     impl_->reset();
+}
+
+std::span<const std::uint8_t> Iop::ram() const {
+    return {impl_->memory.data(), IopMemory::size};
+}
+
+IopExec& Iop::interpreter() {
+    if (!impl_->exec) {
+        throw std::logic_error("Iop::interpreter before attach");
+    }
+    return *impl_->exec;
 }
 
 } // namespace dq8::rt

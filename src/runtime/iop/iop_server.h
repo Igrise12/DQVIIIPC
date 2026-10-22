@@ -39,6 +39,11 @@ struct IopCallContext {
     std::uint32_t fno = 0;
     std::uint32_t recv_address = 0; // EE address of the reply buffer
     std::uint32_t recv_size = 0;
+    // M4: the request's number, and whether the server answers it later through IopRpcLayer::complete (the
+    // loadfile server while an interpreted module starts, an interpreted module's server); a deferring server
+    // sets `deferred` and returns an empty reply.
+    std::uint64_t request = 0;
+    bool deferred = false;
 };
 
 class IopRpcServer {

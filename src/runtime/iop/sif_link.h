@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -73,8 +74,10 @@ class SifLink {
     // IOP -> EE. `writes` land first, then `packet` (when not empty) in the EE receive buffer, then DMAC
     // channel 5 is raised and SIF0 is disarmed until the EE re-arms it with sceSifSetDChain. An empty packet
     // is a data-only transfer: no interrupt, SIF0 stays armed. Deliveries go in (ready_at, submission)
-    // order, never before ready_at and never while SIF0 is not armed.
-    void send_to_ee(std::vector<std::uint8_t> packet, std::vector<EeWrite> writes, Cycles ready_at);
+    // order, never before ready_at and never while SIF0 is not armed. `delivered`, when set, runs once the
+    // delivery happened (the interpreted IOP's sceSifDmaStat).
+    void send_to_ee(std::vector<std::uint8_t> packet, std::vector<EeWrite> writes, Cycles ready_at,
+                    std::function<void(Cycles)> delivered = {});
     // Drops every queued delivery (an IOP reboot).
     void discard_to_ee();
 
@@ -95,6 +98,7 @@ class SifLink {
     struct Sif0Delivery {
         std::vector<std::uint8_t> packet;
         std::vector<EeWrite> writes;
+        std::function<void(Cycles)> delivered;
     };
     struct Landing {
         std::uint32_t dest = 0; // IOP address

@@ -30,7 +30,14 @@ class IopMemory {
 
     // 16-byte aligned blocks from [heap_base, heap_end); nullopt when full.
     std::optional<std::uint32_t> allocate(std::uint32_t bytes);
-    void free(std::uint32_t addr);
+    // M4 (the interpreted IOP's sysmem): blocks of `bytes` rounded up to `align` (a power of two), first fit
+    // from the lowest address or, with `high`, from the highest; or exactly at `addr`.
+    std::optional<std::uint32_t> allocate(std::uint32_t bytes, std::uint32_t align, bool high);
+    std::optional<std::uint32_t> allocate_at(std::uint32_t addr, std::uint32_t bytes, std::uint32_t align);
+    // Frees the block that starts at `addr`; false when none does.
+    bool free(std::uint32_t addr);
+    // The size of the block that starts at `addr`.
+    std::optional<std::uint32_t> block_size(std::uint32_t addr) const;
     void reset(); // zero RAM, empty heap
 
   private:
