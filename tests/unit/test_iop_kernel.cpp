@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <variant>
 #include <vector>
@@ -52,8 +53,7 @@ std::uint32_t base_of(IopRig& rig, std::string_view name) {
             return mod.base;
         }
     }
-    FAIL("module " << name << " is not loaded");
-    return 0;
+    throw std::logic_error("module " + std::string(name) + " is not loaded");
 }
 
 std::vector<std::uint32_t> read_log(IopRig& rig, std::uint32_t at) {
@@ -674,4 +674,263 @@ TEST_CASE("iop printf: the conversions IOP modules use", "[iop][kernel]") {
     // A 64-bit argument takes an even-aligned pair: slot 1 is skipped after the format in slot 0.
     CHECK(fmt("%lld", {0, 0xFFFFFFFEu, 0xFFFFFFFFu}) == "-2");
     CHECK(fmt("%q %", {}) == "%q %");
+}
+
+TEST_CASE("iop hle: status queries, error returns and the C library", "[iop][kernel]") {
+    IrxBuilder b("MISC");
+    const Label log = b.zeros(256);
+    const Label info = b.zeros(0x40);
+    const Label state = b.zeros(8);
+    const Label clk = b.words({0, 0});
+    const Label clk2 = b.words({92'160'000u, 0}); // 2.5 s of the system clock
+    const Label sec = b.zeros(8);
+    const Label buf = b.zeros(16);
+    const Label buf2 = b.zeros(16);
+    const Label num = b.string("  -0x1F");
+    const Label oct = b.string("777");
+    const Label end = b.zeros(4);
+    const Label sema_param = b.words({0, 0, 1, 1});
+    const Label evf_param = b.words({0, 0, 0xF0});
+    const Label far = b.words({0x10000000u, 0});
+    const Label res = b.zeros(4);
+    b.imports("thbase", {4, 5, 6, 10, 14, 20, 22, 28, 36, 37, 38, 39, 40});
+    b.imports("intrman", {4, 5, 6, 7, 17, 18, 23});
+    b.imports("sysclib", {8, 12, 14, 17, 27, 29, 36});
+    b.imports("thsemap", {4, 5, 6, 8});
+    b.imports("thevent", {4, 5, 8, 10});
+    b.imports("timrman", {4, 6, 24});
+    b.imports("loadcore", {7});
+    const Label idle = b.label();
+    const Label handler = b.label();
+    const Label p_idle = thread_param(b, idle, 50);
+    const auto logged = [&](std::string_view lib, std::uint16_t ord,
+                            std::initializer_list<std::uint32_t> args) {
+        b.call(b.stub(lib, ord), args);
+        b.append(log, m::v0);
+    };
+    const auto logged_word = [&](Label at, std::uint32_t off) {
+        b.load(m::t0, at, off);
+        b.append(log, m::t0);
+    };
+    const auto la_call = [&](std::string_view lib, std::uint16_t ord, Label a0, std::uint32_t a1 = 0,
+                             std::uint32_t a2 = 0, std::uint32_t a3 = 0) {
+        b.la(m::a0, a0);
+        b.li(m::a1, a1);
+        b.li(m::a2, a2);
+        b.li(m::a3, a3);
+        b.jal(b.stub(lib, ord));
+        b.append(log, m::v0);
+    };
+
+    const Label start = b.here();
+    b.enter(48);
+    // Threads: create, query, start, re-prioritise, terminate, delete.
+    b.la(m::a0, p_idle);
+    b.jal(b.stub("thbase", 4));
+    b.emit(m::move(m::s0, m::v0));
+    b.emit(m::move(m::a0, m::s0));
+    b.la(m::a1, info);
+    b.jal(b.stub("thbase", 22));
+    b.append(log, m::v0);  // 0
+    logged_word(info, 8);  // dormant 0x10
+    logged_word(info, 28); // initial priority 50
+    b.emit(m::move(m::a0, m::s0));
+    b.li(m::a1, 40);
+    b.jal(b.stub("thbase", 14));
+    b.append(log, m::v0); // dormant: -413
+    b.emit(m::move(m::a0, m::s0));
+    b.li(m::a1, 0);
+    b.jal(b.stub("thbase", 6));
+    b.append(log, m::v0); // 0
+    b.emit(m::move(m::a0, m::s0));
+    b.li(m::a1, 40);
+    b.jal(b.stub("thbase", 14));
+    b.append(log, m::v0); // 0
+    b.emit(m::move(m::a0, m::s0));
+    b.la(m::a1, info);
+    b.jal(b.stub("thbase", 22));
+    logged_word(info, 8);  // ready 2
+    logged_word(info, 32); // current priority 40
+    b.emit(m::move(m::a0, m::s0));
+    b.jal(b.stub("thbase", 10));
+    b.append(log, m::v0); // 0
+    b.emit(m::move(m::a0, m::s0));
+    b.jal(b.stub("thbase", 5));
+    b.append(log, m::v0); // 0
+    b.emit(m::move(m::a0, m::s0));
+    b.jal(b.stub("thbase", 5));
+    b.append(log, m::v0);          // -407
+    logged("thbase", 10, {0});     // self: -406
+    logged("thbase", 28, {0});     // wakeup count 0
+    logged("thbase", 20, {});      // thread id 1
+    logged("intrman", 23, {});     // not an interrupt: 0
+    la_call("intrman", 17, state); // 0
+    logged_word(state, 0);         // 1
+    la_call("intrman", 17, state); // -102
+    logged("intrman", 18, {1});    // 0
+    // Time conversions.
+    b.li(m::a0, 1000);
+    b.la(m::a1, clk);
+    b.jal(b.stub("thbase", 39));
+    logged_word(clk, 0); // 36864
+    b.la(m::a0, clk2);
+    b.la(m::a1, sec);
+    b.la(m::a2, sec);
+    b.emit(m::addiu(m::a2, m::a2, 4));
+    b.jal(b.stub("thbase", 40));
+    logged_word(sec, 0); // 2
+    logged_word(sec, 4); // 500000
+    // sysclib.
+    la_call("sysclib", 14, buf, 0x41, 5); // memset returns buf
+    la_call("sysclib", 27, buf);          // 5
+    b.la(m::a0, buf2);
+    b.la(m::a1, buf);
+    b.li(m::a2, 3);
+    b.jal(b.stub("sysclib", 12));
+    b.la(m::a0, buf);
+    b.la(m::a1, buf2);
+    b.li(m::a2, 3);
+    b.jal(b.stub("sysclib", 29));
+    b.append(log, m::v0); // 0
+    b.la(m::a0, buf);
+    b.la(m::a1, buf2);
+    b.li(m::a2, 4);
+    b.jal(b.stub("sysclib", 29));
+    b.append(log, m::v0); // 'A' - 0 = 65
+    b.la(m::a0, buf);
+    b.li(m::a1, 2);
+    b.jal(b.stub("sysclib", 17)); // bzero returns nothing
+    la_call("sysclib", 27, buf);  // 0
+    logged("sysclib", 8, {'a'});  // lower | hex: 0x42
+    logged("sysclib", 8, {' '});  // space | blank: 0x88
+    b.la(m::a0, num);
+    b.la(m::a1, end);
+    b.li(m::a2, 0);
+    b.jal(b.stub("sysclib", 36));
+    b.append(log, m::v0); // -31
+    b.load(m::t0, end);
+    b.la(m::t1, num);
+    b.emit(m::subu(m::t0, m::t0, m::t1));
+    b.append(log, m::t0); // 7
+    b.la(m::a0, oct);
+    b.li(m::a1, 0);
+    b.li(m::a2, 8);
+    b.jal(b.stub("sysclib", 36));
+    b.append(log, m::v0); // 511
+    // Semaphores.
+    b.la(m::a0, sema_param);
+    b.jal(b.stub("thsemap", 4));
+    b.emit(m::move(m::s1, m::v0));
+    b.emit(m::move(m::a0, m::s1));
+    b.jal(b.stub("thsemap", 6));
+    b.append(log, m::v0); // overflow: -420
+    b.emit(m::move(m::a0, m::s1));
+    b.jal(b.stub("thsemap", 8));
+    b.append(log, m::v0); // 0
+    b.emit(m::move(m::a0, m::s1));
+    b.jal(b.stub("thsemap", 5));
+    b.append(log, m::v0); // 0
+    b.emit(m::move(m::a0, m::s1));
+    b.jal(b.stub("thsemap", 8));
+    b.append(log, m::v0); // -408
+    // Event flags.
+    b.la(m::a0, evf_param);
+    b.jal(b.stub("thevent", 4));
+    b.emit(m::move(m::s1, m::v0));
+    b.emit(m::move(m::a0, m::s1));
+    b.li(m::a1, 0x30);
+    b.jal(b.stub("thevent", 8));
+    b.emit(m::move(m::a0, m::s1));
+    b.li(m::a1, 0x10);
+    b.li(m::a2, 1);
+    b.la(m::a3, res);
+    b.jal(b.stub("thevent", 10));
+    b.append(log, m::v0); // 0
+    logged_word(res, 0);  // 0x30
+    b.emit(m::move(m::a0, m::s1));
+    b.li(m::a1, 0);
+    b.li(m::a2, 0);
+    b.li(m::a3, 0);
+    b.jal(b.stub("thevent", 10));
+    b.append(log, m::v0); // -423
+    b.emit(m::move(m::a0, m::s1));
+    b.jal(b.stub("thevent", 5));
+    b.append(log, m::v0); // 0
+    // Alarms.
+    b.la(m::a0, handler);
+    b.li(m::a1, 5);
+    b.jal(b.stub("thbase", 37));
+    b.append(log, m::v0); // -105
+    b.la(m::a0, far);
+    b.la(m::a1, handler);
+    b.li(m::a2, 5);
+    b.jal(b.stub("thbase", 36));
+    b.la(m::a0, handler);
+    b.li(m::a1, 5);
+    b.jal(b.stub("thbase", 38));
+    b.append(log, m::v0); // 0
+    // Interrupt handlers.
+    b.li(m::a0, 9);
+    b.li(m::a1, 1);
+    b.la(m::a2, handler);
+    b.li(m::a3, 0);
+    b.jal(b.stub("intrman", 4));
+    b.append(log, m::v0); // 0
+    b.li(m::a0, 9);
+    b.li(m::a1, 1);
+    b.la(m::a2, handler);
+    b.li(m::a3, 0);
+    b.jal(b.stub("intrman", 4));
+    b.append(log, m::v0);      // -104
+    logged("intrman", 6, {9}); // 0
+    b.li(m::a0, 9);
+    b.la(m::a1, res);
+    b.jal(b.stub("intrman", 7));
+    b.append(log, m::v0);                  // 0
+    logged_word(res, 0);                   // 9
+    logged("intrman", 7, {9, 0});          // -103
+    logged("intrman", 5, {9});             // 0
+    logged("intrman", 5, {9});             // -105
+    logged("intrman", 4, {0x40, 1, 0, 0}); // -101
+    // Timers.
+    logged("timrman", 4, {1, 16, 1}); // an id
+    b.emit(m::move(m::s1, m::v0));
+    b.emit(m::move(m::a0, m::s1));
+    b.jal(b.stub("timrman", 6));
+    b.append(log, m::v0); // 0
+    b.emit(m::move(m::a0, m::s1));
+    b.jal(b.stub("timrman", 6));
+    b.append(log, m::v0);                // -151
+    logged("timrman", 24, {0x12345678}); // -151
+    logged("timrman", 4, {2, 32, 1});    // -150
+    logged("loadcore", 7, {0x00100000}); // -213
+    b.li(m::v0, 0);
+    b.leave(48);
+    b.bind(idle);
+    b.ret();
+    b.bind(handler);
+    b.li(m::v0, 0);
+    b.ret();
+    b.entry(start);
+
+    IopRig rig = make_rig({{"MISC", &b}});
+    rig.client.init_rpc();
+    REQUIRE(dq8::test::loadfile_module(rig.client, path_of("MISC")).done);
+    const std::uint32_t base = base_of(rig, "MISC");
+    const auto v = read_log(rig, base + b.offset_of(log));
+    const std::uint32_t buf_at = base + b.offset_of(buf);
+    const std::uint32_t timer_id = (3u << 28) | (0xBF801120u >> 4);
+    const std::vector<std::uint32_t> expected{
+        0,         0x10,      50,        s32(-413), 0,         0,         2,        40,        0,
+        0,         s32(-407), s32(-406), 0,         1,         0,         0,        1,         s32(-102),
+        0,         36864,     2,         500000,    buf_at,    5,         0,        65,        0,
+        0x42,      0x88,      s32(-31),  7,         511,       s32(-420), 0,        0,         s32(-408),
+        0,         0x30,      s32(-423), 0,         s32(-105), 0,         0,        s32(-104), 0,
+        0,         9,         s32(-103), 0,         s32(-105), s32(-101), timer_id, 0,         s32(-151),
+        s32(-151), s32(-150), s32(-213)};
+    REQUIRE(v.size() == expected.size());
+    for (std::size_t i = 0; i < v.size(); ++i) {
+        INFO("log entry " << i);
+        CHECK(v[i] == expected[i]);
+    }
 }

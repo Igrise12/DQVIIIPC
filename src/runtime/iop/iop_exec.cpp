@@ -378,6 +378,7 @@ void IopExec::stop(StopReason reason, const std::string& message, std::uint32_t 
     info.pc = pc;
     info.address = address;
     machine_.stop(std::move(info));
+    std::abort(); // stop() never returns
 }
 
 void IopExec::finish_module_start(IopThread& t) {
@@ -631,6 +632,7 @@ void IopExec::fault(const IopCpuState& cpu, IopThread* t, const IopCpuStop& f) {
     info.has_number = true;
     info.number = iop_exception_code(f.fault);
     machine_.stop(std::move(info));
+    std::abort(); // stop() never returns
 }
 
 void IopExec::thread_exit(IopThread& t) {

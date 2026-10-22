@@ -73,8 +73,7 @@ std::uint32_t base_of(IopRig& rig, std::string_view name) {
             return mod.base;
         }
     }
-    FAIL("module " << name << " is not loaded");
-    return 0;
+    throw std::logic_error("module " + std::string(name) + " is not loaded");
 }
 
 std::uint32_t ram32(IopRig& rig, std::uint32_t address) {
@@ -106,8 +105,7 @@ template <typename T> T get(const rt::MachineEvent& e, std::string_view key) {
             return std::get<T>(v);
         }
     }
-    FAIL("no field " << key);
-    return T{};
+    throw std::logic_error("no field " + std::string(key));
 }
 
 // A server for 0x7E57 on its own thread: the reply is the sum of the argument words, the function number and
