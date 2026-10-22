@@ -283,6 +283,7 @@ TEST_CASE("spu2 device: IRQs arrive at the exact sample, as the chip stepped alo
         r.write32(core_reg(0, irqa_hi), irqa, t0);
         r.write(core_reg(0, attr), 0x8040, t0);
         r.write(core_reg(0, kon), 1u << 5, t0);
+        r.spu2.advance_to(t0); // a full prediction while the KON is still pending
         std::vector<std::uint64_t> hits;
         std::size_t seen = 0;
         while (const auto next = r.machine.events().next_time()) {
@@ -299,7 +300,8 @@ TEST_CASE("spu2 device: IRQs arrive at the exact sample, as the chip stepped alo
         }
         return hits;
     };
-    for (const std::uint32_t irqa : {address + 8 * 2 + 3, address + 8 * 3, 0x800u + 0x40, 0x2000u + 0x123}) {
+    for (const std::uint32_t irqa :
+         {address, address + 1, address + 8 * 2 + 3, address + 8 * 3, 0x800u + 0x40, 0x2000u + 0x123}) {
         INFO("IRQA " << irqa);
         const auto expected = reference(irqa);
         CHECK_FALSE(expected.empty());

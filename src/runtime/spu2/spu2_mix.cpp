@@ -675,7 +675,8 @@ std::uint32_t Chip::samples_to_signal(std::uint32_t limit, bool predict_voices) 
     if (n_armed == 0 || k <= 1) {
         return k;
     }
-    if (!predict_voices) {
+    // A pending KON moves its voices at the next sample: predict once it has been applied.
+    if (!predict_voices || (cores_[0].key_on | cores_[1].key_on) != 0) {
         return 1;
     }
     // Voices: walk each voice's addresses as if it advanced one word every sample (never slower than it can).

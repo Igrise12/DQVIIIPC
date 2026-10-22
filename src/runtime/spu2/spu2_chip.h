@@ -278,8 +278,8 @@ class Chip {
 
     // A lower bound k, 1 <= k <= limit, on the samples until one may leave a signal: mixing k - 1 samples
     // leaves none. Exact for AutoDMA completions and the input and output areas; conservative for voices (as
-    // if each advanced one word every sample) and for reverb (1). Without `predict_voices`, 1 whenever an IRQ
-    // is armed.
+    // if each advanced one word every sample) and for reverb (1). Without `predict_voices`, or with a KON
+    // pending, 1 whenever an IRQ is armed.
     std::uint32_t samples_to_signal(std::uint32_t limit, bool predict_voices = true) const;
 
     std::span<const std::uint16_t> ram() const noexcept { return ram_; }
