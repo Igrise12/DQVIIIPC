@@ -191,6 +191,26 @@ TEST_CASE("custom bindings: several sources, axes as buttons, unknown names repo
     CHECK((q.buttons & pad_cross) == 0);
 }
 
+TEST_CASE("a resting pad stick never cancels a held stick key (M3's rule)", "[display_sdl]") {
+    const input::Profile profile = input::default_profile();
+    const sdl::DeviceMap keys = sdl::keyboard_map(profile.keyboard);
+    const sdl::DeviceMap pad = sdl::gamepad_map(profile.gamepad);
+    const auto with = [&](bool w_held, float lefty) {
+        PadState state;
+        sdl::apply_map(state, keys, [w_held](const sdl::Source& s) {
+            return w_held && s.code == SDL_SCANCODE_W ? 1.0f : 0.0f;
+        });
+        sdl::GamepadReading reading;
+        reading.axes[SDL_GAMEPAD_AXIS_LEFTY] = lefty;
+        sdl::apply_map(state, pad, [&reading](const sdl::Source& s) { return reading.amount(s); });
+        return state.ly;
+    };
+    CHECK(with(true, 0.05f) == 0x00);  // W held, the pad stick at rest: the key wins
+    CHECK(with(true, 0.9f) > 0xF0);    // a clear deflection replaces it
+    CHECK(with(false, 0.05f) == 0x86); // no key: the pad's own value, small as it is
+    CHECK(with(false, 0.0f) == 0x80);
+}
+
 TEST_CASE("port assignment: a replugged pad gets its port back", "[display_sdl]") {
     sdl::PortAssigner ports;
     CHECK(ports.connect(10, "guid-a", "") == 0u);

@@ -22,6 +22,7 @@ What exists (milestone M1, the disc intake; M2, the recompilation stages of the 
 | diagnostics | `setup/diagnostics.cpp`, `diagnostics.h` | The diagnostics report: system, toolchain, settings, builds and manifests, the setup log's event lines; never game data or tool output. |
 | toolchain | `toolchain/`, `toolchain.h` | `detect()` (CC/CXX, the bundled root, beside the program, PATH; `--version` of each), `check()` with advice per platform and Linux distribution family (`/etc/os-release`), `cmake_arguments()` for the module build; the download is session E's (`download.*`). |
 | registry | `registry/`, `registry.h` | `installs.toml` in the user data directory: which disc was built where, read and written atomically. |
+| input profiles | `input/`, `input_profile.h` | Controller bindings per profile, `<config>/input/<name>.toml` (`Docs/formats/input-profile.md`; M5 session C): the DualShock 2 controls as our own fixed list (`control_names`), sources kept as SDL3's own name strings (no SDL here), the built-in M3 bindings, per-device entries by GUID with an optional pinned port. Loading never fails on an entry: unknown or invalid entries are warnings with `file:line`, as for settings files; only text that is not TOML throws `settings_parse`. The writer is atomic. Shared by `dq8-game` and the launcher. |
 
 Rules:
 

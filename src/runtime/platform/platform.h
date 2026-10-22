@@ -20,9 +20,10 @@ namespace dq8::rt {
 enum class WindowMode { windowed, borderless, fullscreen }; // fullscreen: exclusive, at the desktop's mode
 enum class ScaleFilter { linear, nearest };
 
+// The defaults are M4's behaviour: the M3 bindings, no dead zone, full rumble.
 struct InputConfig {
     core::input::Profile profile = core::input::default_profile(); // keyboard and gamepad bindings
-    std::uint32_t deadzone_percent = 8;                            // radial, on each gamepad stick
+    std::uint32_t deadzone_percent = 0;                            // radial, on each gamepad stick
     std::uint32_t rumble_percent = 100;                            // scales what set_rumble asks for
 };
 

@@ -459,7 +459,23 @@ on the disc; the launcher drives none of this yet (B).
 
 ### Session C: display, input, audio and widescreen (2026-10-22)
 
-**dq8-game flags for the C rows** (`src/host/options.*`, one marked block; defaults are the schema's):
+**Coordinator decisions (2026-10-22).** Approved outside C's file list:
+1. `WindowConfig` in `src/runtime/platform/platform.h` gains the window mode, filter, integer scaling and an
+   `InputConfig` (bindings, dead zone, rumble strength), with defaults equal to M4's behaviour (windowed, linear,
+   no integer scaling, no dead zone, full rumble, the M3 bindings), so the null platform, the test fakes and every
+   golden stay unchanged.
+2. The shared input-profile code lives in core, `include/dq8/core/input_profile.h` and
+   `src/core/input/input_profile.cpp`, rather than in a copy in the launcher, since the launcher links only core.
+   Conditions: no SDL types or headers in core (sources stay strings, exactly SDL3's spellings); toml11 stays
+   private to the .cpp; the pad controls are our own fixed list in the header (`control_names`); unknown or
+   invalid entries come back as warnings, not exceptions, as settings files load; tests in
+   `m5_display_tests.cmake`; a row in `src/core/README.md`.
+3. One-line or one-row additions: `src/game/CMakeLists.txt`, `src/game/README.md`, `data/README.md`,
+   `src/host/README.md`, `src/host/CMakeLists.txt` (`display_wiring.cpp`, which keeps C's logic out of
+   `run_machine.cpp`). Session A also adds a line to `src/core/CMakeLists.txt` and two to
+   `src/host/CMakeLists.txt`; C resolves those one-line conflicts at its rebase onto A.
+
+**dq8-game flags for the C rows** (`src/host/options.*`, one marked block; defaults are M4's behaviour):
 
 | Key | Flag | Notes for the settings step |
 |---|---|---|
@@ -478,9 +494,11 @@ on the disc; the launcher drives none of this yet (B).
 
 Also new: `--pipeline-cache FILE|none` (default `<user data>/cache/parallel-gs.pipelines` with `--window`, none
 headless) and `--dump-window N:PATH` (with `--window`: a PNG of what the window shows at the first frame of vblank N
-or later; how the checks below were made). The flag defaults differ from M4 in two host-side ways only: `--aspect
-auto` (M4 always presented 4:3) and an 8 % radial stick dead zone, rescaled (M4 dropped a gamepad stick byte
-between 0x70 and 0x90, a square dead zone of about 12 % without rescaling).
+or later; how the checks below were made). The flag defaults are M4's behaviour, following the goldens rule
+(without `--config` or `--set` a run is M4's): `--aspect 4:3` and `--deadzone 0`; the schema's own defaults (`auto`,
+8 %) come through `--config`, so the settings step sets every C key from the store, defaults included. With no dead
+zone a pad stick passes through as it is; M3's rule that a stick byte between 0x70 and 0x90 does not replace a held
+stick key is kept (`sdl_bindings.h`), so a resting stick never cancels a key.
 
 **Widescreen.** The profile's new `[display]` table (`widescreen_variable = 0x003D275C`, `widescreen_width = 1`,
 `widescreen_value = 1`; spike S6b's selector byte) feeds `game::DisplayWatcher`, attached only with `--window`; it

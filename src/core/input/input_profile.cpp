@@ -7,6 +7,7 @@
 #include "platform/files.h"
 
 #include <algorithm>
+#include <optional>
 #include <sstream>
 #include <toml.hpp>
 
@@ -14,38 +15,18 @@ namespace dq8::core::input {
 
 namespace {
 
-constexpr std::array<std::string_view, control_count> control_names = {
-    "up",
-    "down",
-    "left",
-    "right",
-    "triangle",
-    "circle",
-    "cross",
-    "square",
-    "l1",
-    "r1",
-    "l2",
-    "r2",
-    "l3",
-    "r3",
-    "start",
-    "select",
-    "left_stick_up",
-    "left_stick_down",
-    "left_stick_left",
-    "left_stick_right",
-    "right_stick_up",
-    "right_stick_down",
-    "right_stick_left",
-    "right_stick_right",
-};
+// Collects "<file>:<line>: message" warnings for one file.
+class Problems {
+  public:
+    Problems(std::string_view origin, std::vector<std::string>& out) : origin_(origin), out_(out) {}
+    void add(const toml::value& at, const std::string& message) const {
+        out_.push_back(origin_ + ":" + std::to_string(at.location().first_line_number()) + ": " + message);
+    }
 
-[[noreturn]] void fail(std::string_view origin, const toml::value& at, const std::string& message) {
-    throw Error(ErrorCode::settings_invalid, std::string(origin) + ":" +
-                                                 std::to_string(at.location().first_line_number()) + ": " +
-                                                 message);
-}
+  private:
+    std::string origin_;
+    std::vector<std::string>& out_;
+};
 
 bool is_guid(std::string_view s) {
     return s.size() == 32 && std::all_of(s.begin(), s.end(), [](char c) {
@@ -53,17 +34,26 @@ bool is_guid(std::string_view s) {
            });
 }
 
-// The sources of one control: an array of non-empty strings without control characters.
-std::vector<std::string> sources(std::string_view origin, const toml::value& v, const std::string& label) {
+bool is_source_name(const toml::value& item) {
+    return item.is_string() && !item.as_string().empty() && item.as_string().size() <= 64 &&
+           std::none_of(item.as_string().begin(), item.as_string().end(),
+                        [](char c) { return static_cast<unsigned char>(c) < 0x20; });
+}
+
+// The sources of one control: an array of source names (non-empty strings of up to 64 printable characters).
+// Not an array: nothing (the caller keeps what it had); an invalid entry is left out.
+std::optional<std::vector<std::string>> sources(const Problems& problems, const toml::value& v,
+                                                const std::string& label) {
     if (!v.is_array()) {
-        fail(origin, v, label + " must be an array of source names, e.g. [\"K\"]");
+        problems.add(v, label + " is not an array of source names, e.g. [\"K\"]; ignored");
+        return std::nullopt;
     }
     std::vector<std::string> out;
     for (const toml::value& item : v.as_array()) {
-        if (!item.is_string() || item.as_string().empty() || item.as_string().size() > 64 ||
-            std::any_of(item.as_string().begin(), item.as_string().end(),
-                        [](char c) { return static_cast<unsigned char>(c) < 0x20; })) {
-            fail(origin, item, label + " entries must be source names (1 to 64 printable characters)");
+        if (!is_source_name(item)) {
+            problems.add(item, label + ": an entry that is not a source name (1 to 64 printable characters); "
+                                       "left out");
+            continue;
         }
         if (std::find(out.begin(), out.end(), item.as_string()) == out.end()) {
             out.push_back(item.as_string());
@@ -73,21 +63,65 @@ std::vector<std::string> sources(std::string_view origin, const toml::value& v, 
 }
 
 // [keyboard] or [gamepad]: the controls it lists replace the built-in ones.
-void read_bindings(std::string_view origin, const toml::value& root, const char* key, Bindings& bindings) {
+void read_bindings(const Problems& problems, const toml::value& root, const char* key, Bindings& bindings) {
     if (!root.contains(key)) {
         return;
     }
     const toml::value& table = root.at(key);
     if (!table.is_table()) {
-        fail(origin, table, std::string("[") + key + "] must be a table");
+        problems.add(table, std::string("[") + key + "] is not a table; the built-in bindings apply");
+        return;
     }
     for (const auto& [name, value] : table.as_table()) {
         const auto control = control_from_name(name);
         if (!control) {
-            fail(origin, value, std::string("[") + key + "]: '" + name + "' is not a pad control");
+            problems.add(value, std::string("[") + key + "]: '" + name + "' is not a pad control; ignored");
+            continue;
         }
-        bindings[*control] = sources(origin, value, std::string("[") + key + "]." + name);
+        if (auto list = sources(problems, value, std::string("[") + key + "]." + name)) {
+            bindings[*control] = std::move(*list);
+        }
     }
+}
+
+// One [devices."<guid>"] table, or nothing when it cannot be used.
+std::optional<DeviceProfile> read_device(const Problems& problems, const std::string& guid,
+                                         const toml::value& table) {
+    const std::string label = "[devices.\"" + guid + "\"]";
+    if (!is_guid(guid)) {
+        problems.add(table,
+                     "[devices]: '" + guid + "' is not a gamepad GUID (32 lowercase hex digits); ignored");
+        return std::nullopt;
+    }
+    if (!table.is_table()) {
+        problems.add(table, label + " is not a table; ignored");
+        return std::nullopt;
+    }
+    DeviceProfile d;
+    d.guid = guid;
+    for (const auto& [key, value] : table.as_table()) {
+        if (key == "name") {
+            if (value.is_string()) {
+                d.name = value.as_string();
+            } else {
+                problems.add(value, label + ".name is not a string; ignored");
+            }
+        } else if (key == "port") {
+            // Counted as players count them: 1 or 2.
+            if (value.is_integer() && value.as_integer() >= 1 && value.as_integer() <= 2) {
+                d.port = static_cast<unsigned>(value.as_integer() - 1);
+            } else {
+                problems.add(value, label + ".port is not 1 or 2; ignored");
+            }
+        } else if (const auto control = control_from_name(key)) {
+            if (auto list = sources(problems, value, label + "." + key)) {
+                d.overrides[static_cast<std::size_t>(*control)] = std::move(*list);
+            }
+        } else {
+            problems.add(value, label + ": '" + key + "' is not a pad control, name or port; ignored");
+        }
+    }
+    return d;
 }
 
 // A TOML basic string: quotes and backslashes escaped, control characters as \uXXXX.
@@ -212,7 +246,7 @@ Profile default_profile() {
     return p;
 }
 
-Profile parse_profile(std::string_view text, std::string_view origin) {
+Profile parse_profile(std::string_view text, std::string_view origin, std::vector<std::string>& warnings) {
     std::istringstream stream{std::string(text)};
     auto parsed = toml::try_parse(stream, std::string(origin));
     if (parsed.is_err()) {
@@ -226,73 +260,49 @@ Profile parse_profile(std::string_view text, std::string_view origin) {
         throw Error(ErrorCode::settings_parse, message);
     }
     const toml::value root = std::move(parsed.unwrap());
+    const Problems problems(origin, warnings);
     if (!root.contains("schema_version") || !root.at("schema_version").is_integer()) {
-        fail(origin, root, "an input profile needs 'schema_version = 1'");
-    }
-    if (root.at("schema_version").as_integer() != profile_schema_version) {
-        fail(origin, root.at("schema_version"),
-             "schema_version " + std::to_string(root.at("schema_version").as_integer()) +
-                 " is not supported (this build reads " + std::to_string(profile_schema_version) + ")");
+        problems.add(root, "no 'schema_version = 1'; read as version 1");
+    } else if (root.at("schema_version").as_integer() != profile_schema_version) {
+        problems.add(root.at("schema_version"),
+                     "schema_version " + std::to_string(root.at("schema_version").as_integer()) +
+                         " is not the version this build reads (" + std::to_string(profile_schema_version) +
+                         "); read as version 1");
     }
     for (const auto& [key, value] : root.as_table()) {
         if (key != "schema_version" && key != "keyboard" && key != "gamepad" && key != "devices") {
-            fail(origin, value, "unknown key '" + key + "' (schema_version, keyboard, gamepad, devices)");
+            problems.add(value,
+                         "unknown key '" + key + "' (schema_version, keyboard, gamepad, devices); ignored");
         }
     }
 
     Profile p = default_profile();
-    read_bindings(origin, root, "keyboard", p.keyboard);
-    read_bindings(origin, root, "gamepad", p.gamepad);
+    read_bindings(problems, root, "keyboard", p.keyboard);
+    read_bindings(problems, root, "gamepad", p.gamepad);
     if (root.contains("devices")) {
         const toml::value& devices = root.at("devices");
         if (!devices.is_table()) {
-            fail(origin, devices, "[devices] must be a table of [devices.\"<guid>\"] tables");
-        }
-        for (const auto& [guid, table] : devices.as_table()) {
-            if (!is_guid(guid)) {
-                fail(origin, table,
-                     "[devices]: '" + guid + "' is not a gamepad GUID (32 lowercase hex digits)");
-            }
-            if (!table.is_table()) {
-                fail(origin, table, "[devices.\"" + guid + "\"] must be a table");
-            }
-            DeviceProfile d;
-            d.guid = guid;
-            const std::string label = "[devices.\"" + guid + "\"]";
-            for (const auto& [key, value] : table.as_table()) {
-                if (key == "name") {
-                    if (!value.is_string()) {
-                        fail(origin, value, label + ".name must be a string");
-                    }
-                    d.name = value.as_string();
-                } else if (key == "port") {
-                    // Counted as players count them: 1 or 2.
-                    if (!value.is_integer() || value.as_integer() < 1 || value.as_integer() > 2) {
-                        fail(origin, value, label + ".port must be 1 or 2");
-                    }
-                    d.port = static_cast<unsigned>(value.as_integer() - 1);
-                } else if (const auto control = control_from_name(key)) {
-                    d.overrides[static_cast<std::size_t>(*control)] =
-                        sources(origin, value, label + "." + key);
-                } else {
-                    fail(origin, value, label + ": '" + key + "' is not a pad control, name or port");
+            problems.add(devices, "[devices] is not a table of [devices.\"<guid>\"] tables; ignored");
+        } else {
+            for (const auto& [guid, table] : devices.as_table()) {
+                if (auto d = read_device(problems, guid, table)) {
+                    p.devices.push_back(std::move(*d));
                 }
             }
-            p.devices.push_back(std::move(d));
+            // The file's tables are unordered; keep a stable order.
+            std::sort(p.devices.begin(), p.devices.end(),
+                      [](const DeviceProfile& x, const DeviceProfile& y) { return x.guid < y.guid; });
         }
-        // The file's tables are unordered; keep a stable order.
-        std::sort(p.devices.begin(), p.devices.end(),
-                  [](const DeviceProfile& a, const DeviceProfile& b) { return a.guid < b.guid; });
     }
     return p;
 }
 
-Profile load_profile(const std::filesystem::path& file) {
+Profile load_profile(const std::filesystem::path& file, std::vector<std::string>& warnings) {
     std::error_code ec;
     if (!std::filesystem::is_regular_file(file, ec)) {
         throw Error(ErrorCode::io_open, "no input profile at '" + file.string() + "'");
     }
-    return parse_profile(platform::read_text_file(file, 1u << 20), file.string());
+    return parse_profile(platform::read_text_file(file, 1u << 20), file.string(), warnings);
 }
 
 std::string format_profile(const Profile& profile) {

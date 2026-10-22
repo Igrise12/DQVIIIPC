@@ -15,8 +15,10 @@
 // DualShock 2 control, stored per profile in user_config_dir()/input/<name>.toml. The format is
 // Docs/formats/input-profile.md. This file only reads and writes the data: sources are SDL3's own names,
 // kept as strings, so that dq8-game (src/runtime/platform/sdl) and the launcher both turn them into SDL codes
-// with SDL itself. Errors are Error(settings_parse) for a file that is not TOML and Error(settings_invalid)
-// for one that breaks the format, with "<file>:<line>:" first.
+// with SDL itself (no SDL type or header here; toml11 stays inside the .cpp). Like settings files, a profile
+// never fails on its entries: an unknown or invalid entry is left out and reported as a warning starting with
+// "<file>:<line>:", and the rest of the file applies. Only a missing file (Error(io_open)) and text that is
+// not TOML (Error(settings_parse)) throw.
 namespace dq8::core::input {
 
 inline constexpr int profile_schema_version = 1;
@@ -51,7 +53,35 @@ enum class Control : std::uint8_t {
 };
 inline constexpr std::size_t control_count = 24;
 
-// "up", "cross", "left_stick_up", ... (the keys of the file).
+// How the file spells each control, in Control's order: our own fixed list.
+inline constexpr std::array<std::string_view, control_count> control_names = {
+    "up",
+    "down",
+    "left",
+    "right",
+    "triangle",
+    "circle",
+    "cross",
+    "square",
+    "l1",
+    "r1",
+    "l2",
+    "r2",
+    "l3",
+    "r3",
+    "start",
+    "select",
+    "left_stick_up",
+    "left_stick_down",
+    "left_stick_left",
+    "left_stick_right",
+    "right_stick_up",
+    "right_stick_down",
+    "right_stick_left",
+    "right_stick_right",
+};
+
+// control_names[control], and the reverse lookup.
 std::string_view control_name(Control control) noexcept;
 std::optional<Control> control_from_name(std::string_view name) noexcept;
 inline constexpr Control control_at(std::size_t index) noexcept {
@@ -99,13 +129,16 @@ struct Profile {
 // The built-in bindings (M3's fixed table, src/runtime/platform/sdl/sdl_mapping.h).
 Profile default_profile();
 
-// A file's text. `origin` names it in errors. A missing [keyboard] or [gamepad] table, or a control a table
-// does not list, keeps the built-in bindings; an empty list unbinds the control.
-Profile parse_profile(std::string_view text, std::string_view origin);
-// Reads a file (Error(io_open) when it is missing).
-Profile load_profile(const std::filesystem::path& file);
+// A file's text. `origin` names it in warnings. A missing [keyboard] or [gamepad] table, or a control a table
+// does not list, keeps the built-in bindings; an empty list unbinds the control. Problems are appended to
+// `warnings`: a missing or newer schema_version (the file is still read), an unknown key, a value of the
+// wrong type (the built-in binding stays), an invalid source name (left out of its list), a device entry with
+// a bad GUID (left out).
+Profile parse_profile(std::string_view text, std::string_view origin, std::vector<std::string>& warnings);
+// Reads a file: Error(io_open) when it is missing, Error(settings_parse) when it is not TOML.
+Profile load_profile(const std::filesystem::path& file, std::vector<std::string>& warnings);
 // The text of a whole profile: every control of both tables, then the devices; parse_profile() of it gives
-// `profile` back.
+// `profile` back without warnings. Keys the format does not know are not written.
 std::string format_profile(const Profile& profile);
 // Writes format_profile() atomically, creating the directory.
 void save_profile(const std::filesystem::path& file, const Profile& profile);

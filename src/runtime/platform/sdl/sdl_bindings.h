@@ -54,8 +54,9 @@ std::uint8_t stick_byte_of(float value) noexcept;
 void apply_deadzone(float& x, float& y, float deadzone) noexcept;
 
 // Applies `map` to `state`: buttons are OR-ed in; a stick whose deflection is not zero replaces what the
-// state had, a centred one leaves it alone (so a gamepad on port 0 overrides the keyboard's stick keys only
-// while it is deflected).
+// state had, a centred one leaves it alone. When the state's stick is already deflected (port 0's stick keys,
+// applied first) only a clear deflection replaces it, outside 0x70..0x90 as in M3, so that a resting pad
+// stick with no dead zone never cancels a held key.
 template <typename Amount> void apply_map(PadState& state, const DeviceMap& map, Amount&& amount) {
     using core::input::Control;
     static constexpr std::array<std::pair<Control, std::uint16_t>, 16> buttons = {{
@@ -99,9 +100,14 @@ template <typename Amount> void apply_map(PadState& state, const DeviceMap& map,
     };
     const auto stick = [&](Control negative, Control positive, std::uint8_t& value) {
         const float v = most(positive) - most(negative);
-        if (v != 0.0f) {
-            value = stick_byte_of(v);
+        if (v == 0.0f) {
+            return;
         }
+        const std::uint8_t byte = stick_byte_of(v);
+        if (value != 0x80 && byte >= 0x70 && byte <= 0x90) {
+            return;
+        }
+        value = byte;
     };
     stick(Control::left_stick_left, Control::left_stick_right, state.lx);
     stick(Control::left_stick_up, Control::left_stick_down, state.ly);

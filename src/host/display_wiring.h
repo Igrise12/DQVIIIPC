@@ -40,8 +40,9 @@ std::filesystem::path pipeline_cache_file(const Options& o);
 std::filesystem::path input_profile_file(const Options& o, const std::filesystem::path& config_dir);
 
 // The bindings --input-profile names. A missing "default" profile is the built-in bindings without a warning;
-// a missing or broken other one is the built-in bindings with a warning. Throws UsageError for a name that is
-// not a valid profile name.
+// a missing other one, or a file that is not TOML, is the built-in bindings with a warning; entries the file
+// cannot use are left out with a warning each (dq8/core/input_profile.h). Throws UsageError for a name that
+// is not a valid profile name.
 core::input::Profile load_input_profile(const Options& o, std::vector<std::string>& warnings);
 
 // The window from the options and the input profile.

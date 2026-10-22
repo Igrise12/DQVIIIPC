@@ -55,6 +55,14 @@ std::string with_display(const std::string& table) {
     return text.substr(0, at) + table + text.substr(end + 1);
 }
 
+// parse_profile() of a text that must give no warnings.
+input::Profile parse_clean(const std::string& text, const char* origin) {
+    std::vector<std::string> warnings;
+    input::Profile p = input::parse_profile(text, origin, warnings);
+    CHECK(warnings.empty());
+    return p;
+}
+
 host::Options parse(std::initializer_list<const char*> args) {
     std::vector<const char*> argv{"dq8-game", "--iso", "x.iso", "--module-dir", "m"};
     argv.insert(argv.end(), args.begin(), args.end());
@@ -85,9 +93,12 @@ TEST_CASE("input profiles: the built-in profile round-trips through the format",
     CHECK_FALSE(input::control_from_name("jump"));
 
     const std::string text = input::format_profile(defaults);
-    CHECK(input::parse_profile(text, "defaults.toml") == defaults);
+    CHECK(parse_clean(text, "defaults.toml") == defaults);
     // Only the version: everything is the built-in bindings.
-    CHECK(input::parse_profile("schema_version = 1\n", "empty.toml") == defaults);
+    CHECK(parse_clean("schema_version = 1\n", "empty.toml") == defaults);
+    // The header's list is the file's spelling.
+    CHECK(input::control_names[static_cast<std::size_t>(input::Control::right_stick_left)] ==
+          "right_stick_left");
 }
 
 TEST_CASE("input profiles: tables replace the controls they list, devices override [gamepad]",
@@ -106,7 +117,7 @@ port = 2
 cross = ["x"]
 left_stick_up = ["righty-"]
 )";
-    const input::Profile p = input::parse_profile(text, "custom.toml");
+    const input::Profile p = parse_clean(text, "custom.toml");
     CHECK(p.keyboard[input::Control::cross] == std::vector<std::string>{"Space", "K"});
     CHECK(p.keyboard[input::Control::circle].empty());                          // unbound
     CHECK(p.keyboard[input::Control::square] == std::vector<std::string>{"J"}); // not listed: built-in
@@ -123,34 +134,55 @@ left_stick_up = ["righty-"]
     CHECK(own[input::Control::circle] == p.gamepad[input::Control::circle]);
 
     // The writer keeps everything, the device's quotes, backslashes and control characters included.
-    CHECK(input::parse_profile(input::format_profile(p), "again.toml") == p);
+    CHECK(parse_clean(input::format_profile(p), "again.toml") == p);
     input::Profile odd = p;
     odd.devices[0].name = "tab\there\\ \x7f end";
-    CHECK(input::parse_profile(input::format_profile(odd), "odd.toml") == odd);
+    CHECK(parse_clean(input::format_profile(odd), "odd.toml") == odd);
 }
 
-TEST_CASE("input profiles: problems name the file and line", "[display][input]") {
-    const auto fails = [](const std::string& text, const std::string& what, core::ErrorCode code) {
-        try {
-            input::parse_profile(text, "bad.toml");
-            FAIL("accepted: " << text);
-        } catch (const core::Error& e) {
-            CHECK(e.code() == code);
-            CHECK_THAT(e.what(), ContainsSubstring("bad.toml:") && ContainsSubstring(what));
-        }
+TEST_CASE("input profiles: problems are warnings with the file and line; the rest applies",
+          "[display][input]") {
+    const auto warns = [](const std::string& text, const std::string& what) {
+        std::vector<std::string> warnings;
+        const input::Profile p = input::parse_profile(text, "bad.toml", warnings);
+        REQUIRE(warnings.size() == 1);
+        CHECK_THAT(warnings[0], ContainsSubstring("bad.toml:") && ContainsSubstring(what));
+        return p;
     };
-    fails("schema_version = 1\n[keyboard\n", "", core::ErrorCode::settings_parse);
-    fails("[keyboard]\ncross = [\"K\"]\n", "schema_version", core::ErrorCode::settings_invalid);
-    fails("schema_version = 2\n", "not supported", core::ErrorCode::settings_invalid);
-    fails("schema_version = 1\n[keyboard]\njump = [\"K\"]\n", "not a pad control",
-          core::ErrorCode::settings_invalid);
-    fails("schema_version = 1\n[keyboard]\ncross = \"K\"\n", "array", core::ErrorCode::settings_invalid);
-    fails("schema_version = 1\n[keyboard]\ncross = [\"\"]\n", "source names",
-          core::ErrorCode::settings_invalid);
-    fails("schema_version = 1\n[mouse]\n", "unknown key", core::ErrorCode::settings_invalid);
-    fails("schema_version = 1\n[devices.\"xyz\"]\n", "GUID", core::ErrorCode::settings_invalid);
-    fails("schema_version = 1\n[devices.\"0300000000000000000000000000ab01\"]\nport = 0\n", "1 or 2",
-          core::ErrorCode::settings_invalid);
+    const input::Profile defaults = input::default_profile();
+    // Version problems: read anyway.
+    CHECK(warns("[keyboard]\ncross = [\"Space\"]\n", "schema_version").keyboard[input::Control::cross] ==
+          std::vector<std::string>{"Space"});
+    CHECK(warns("schema_version = 2\n", "read as version 1") == defaults);
+    // Unknown keys and controls: ignored, the rest applies.
+    const input::Profile jump =
+        warns("schema_version = 1\n[keyboard]\njump = [\"K\"]\nstart = [\"Space\"]\n", "not a pad control");
+    CHECK(jump.keyboard[input::Control::start] == std::vector<std::string>{"Space"});
+    CHECK(warns("schema_version = 1\n[mouse]\n", "unknown key") == defaults);
+    CHECK(warns("schema_version = 1\nkeyboard = 3\n", "not a table") == defaults);
+    // A value of the wrong type keeps the built-in binding; a bad entry is left out of its list.
+    CHECK(warns("schema_version = 1\n[keyboard]\ncross = \"K\"\n", "array") == defaults);
+    CHECK(warns("schema_version = 1\n[keyboard]\ncross = [\"\", \"Space\"]\n", "source name")
+              .keyboard[input::Control::cross] == std::vector<std::string>{"Space"});
+    // Device entries: a bad GUID is left out, a bad port ignored.
+    CHECK(warns("schema_version = 1\n[devices.\"xyz\"]\n", "GUID").devices.empty());
+    const input::Profile port = warns(
+        "schema_version = 1\n[devices.\"0300000000000000000000000000ab01\"]\nport = 0\ncross = [\"b\"]\n",
+        "1 or 2");
+    REQUIRE(port.devices.size() == 1);
+    CHECK_FALSE(port.devices[0].port);
+    CHECK(port.gamepad_for("0300000000000000000000000000ab01")[input::Control::cross] ==
+          std::vector<std::string>{"b"});
+
+    // Text that is not TOML is the one error.
+    std::vector<std::string> warnings;
+    try {
+        input::parse_profile("schema_version = 1\n[keyboard\n", "bad.toml", warnings);
+        FAIL("parsed text that is not TOML");
+    } catch (const core::Error& e) {
+        CHECK(e.code() == core::ErrorCode::settings_parse);
+        CHECK_THAT(e.what(), ContainsSubstring("bad.toml:"));
+    }
 
     CHECK(input::valid_profile_name("default"));
     CHECK(input::valid_profile_name("Pad-2_b"));
@@ -166,9 +198,11 @@ TEST_CASE("input profiles: saved files load back, missing ones are io_open", "[d
     p.keyboard[input::Control::start] = {"Space"};
     const auto file = input::profile_file(tmp.path(), "saved");
     input::save_profile(file, p); // creates input/
-    CHECK(input::load_profile(file) == p);
+    std::vector<std::string> warnings;
+    CHECK(input::load_profile(file, warnings) == p);
+    CHECK(warnings.empty());
     try {
-        input::load_profile(tmp.path() / "none.toml");
+        input::load_profile(tmp.path() / "none.toml", warnings);
         FAIL("loaded a missing file");
     } catch (const core::Error& e) {
         CHECK(e.code() == core::ErrorCode::io_open);
@@ -234,7 +268,7 @@ TEST_CASE("host options: the display, input and audio options", "[display][host]
     CHECK(defaults.window_width == 1280);
     CHECK(defaults.window_height == 960);
     CHECK(defaults.vsync);
-    CHECK(defaults.aspect == "auto");
+    CHECK(defaults.aspect == "4:3"); // M4's
     CHECK_FALSE(defaults.integer_scaling);
     CHECK(defaults.filter == "linear");
     CHECK(defaults.internal_resolution == 1);
@@ -242,7 +276,7 @@ TEST_CASE("host options: the display, input and audio options", "[display][host]
     CHECK(defaults.audio_device.empty());
     CHECK(defaults.volume == 100);
     CHECK(defaults.input_profile == "default");
-    CHECK(defaults.deadzone == 8);
+    CHECK(defaults.deadzone == 0); // M4's
     CHECK(defaults.rumble_strength == 100);
     CHECK_FALSE(defaults.uses_machine);
 
@@ -321,6 +355,8 @@ TEST_CASE("display wiring: internal resolution, pipeline cache, aspect and the i
     game::DisplayWatcher watcher(core::RegionProfile::Display{0x00200000, 1, 1});
     machine.attach(watcher);
     host::Options a = parse({});
+    CHECK(host::present_aspect(a, &watcher) == 4.0 / 3.0); // the default is M4's 4:3
+    a.aspect = "auto";
     CHECK(host::present_aspect(a, nullptr) == 4.0 / 3.0);
     CHECK(host::present_aspect(a, &watcher) == 4.0 / 3.0);
     const std::uint8_t one[1] = {1};
@@ -341,8 +377,9 @@ TEST_CASE("display wiring: internal resolution, pipeline cache, aspect and the i
     p.input_profile = "bad name";
     CHECK_THROWS_AS(host::input_profile_file(p, "/cfg"), host::UsageError);
 
-    // A missing file is the built-in bindings: silently for "default", with a warning otherwise; a broken
-    // file too, with the parser's message.
+    // A missing file is the built-in bindings: silently for "default", with a warning otherwise. A file
+    // with an entry it cannot use applies the rest, with the parser's warning; one that is not TOML is the
+    // built-in bindings with a warning.
     test::TempDir tmp;
     std::vector<std::string> warnings;
     p.input_profile = (tmp.path() / "missing.toml").string();
@@ -351,10 +388,17 @@ TEST_CASE("display wiring: internal resolution, pipeline cache, aspect and the i
     CHECK_THAT(warnings[0], ContainsSubstring("no input profile"));
     warnings.clear();
     p.input_profile =
-        write(tmp.path(), "broken.toml", "schema_version = 1\n[keyboard]\njump = []\n").string();
-    CHECK(host::load_input_profile(p, warnings) == input::default_profile());
+        write(tmp.path(), "odd.toml", "schema_version = 1\n[keyboard]\njump = []\nstart = [\"Space\"]\n")
+            .string();
+    CHECK(host::load_input_profile(p, warnings).keyboard[input::Control::start] ==
+          std::vector<std::string>{"Space"});
     REQUIRE(warnings.size() == 1);
     CHECK_THAT(warnings[0], ContainsSubstring("not a pad control"));
+    warnings.clear();
+    p.input_profile = write(tmp.path(), "broken.toml", "schema_version = 1\n[keyboard\n").string();
+    CHECK(host::load_input_profile(p, warnings) == input::default_profile());
+    REQUIRE(warnings.size() == 1);
+    CHECK_THAT(warnings[0], ContainsSubstring("built-in bindings"));
     warnings.clear();
     p.input_profile =
         write(tmp.path(), "good.toml", "schema_version = 1\n[keyboard]\nstart = [\"Space\"]\n").string();

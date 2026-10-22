@@ -112,12 +112,13 @@ struct Options {
 
     // --- M5 session C: display, input and audio (Docs/milestones/M5-launcher.md, the C rows of "Settings to
     // dq8-game"). Host side only: none of them reaches the machine or moves a deterministic output. The
-    // defaults are the schema's (config/settings/schema.toml).
+    // defaults are M4's behaviour (the goldens rule: without --config or --set a run is M4's); the schema's
+    // own defaults (aspect auto, an 8 % dead zone) arrive through the settings.
     std::string window_mode = "windowed"; // --window-mode windowed|borderless|fullscreen
     int window_width = 1280;              // --window-size WxH: the windowed size at start
     int window_height = 960;
     bool vsync = true;                         // --vsync on|off
-    std::string aspect = "auto";               // --aspect auto|4:3|16:9|stretch
+    std::string aspect = "4:3";                // --aspect auto|4:3|16:9|stretch
     bool integer_scaling = false;              // --integer-scaling on|off
     std::string filter = "linear";             // --filter linear|nearest
     std::uint32_t internal_resolution = 1;     // --internal-resolution 1x..4x (with --gs parallel)
@@ -126,7 +127,7 @@ struct Options {
     std::string audio_device;                  // --audio-device NAME; empty: the default device
     std::uint32_t volume = 100;                // --volume 0..100
     std::string input_profile = "default";     // --input-profile NAME|FILE.toml
-    std::uint32_t deadzone = 8;                // --deadzone 0..50 (percent)
+    std::uint32_t deadzone = 0;                // --deadzone 0..50 (percent)
     std::uint32_t rumble_strength = 100;       // --rumble-strength 0..100 (percent)
     std::vector<AtVblank> dump_window;         // --dump-window N:PATH (repeatable): what the window shows
     // --- end of M5 session C

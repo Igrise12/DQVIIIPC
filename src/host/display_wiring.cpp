@@ -70,9 +70,9 @@ core::input::Profile load_input_profile(const Options& o, std::vector<std::strin
         return core::input::default_profile();
     }
     try {
-        return core::input::load_profile(file);
+        return core::input::load_profile(file, warnings); // entries it cannot use are warnings
     } catch (const std::exception& e) {
-        warnings.push_back(std::string(e.what()) + "; using the built-in bindings");
+        warnings.push_back(std::string(e.what()) + "; using the built-in bindings"); // not TOML
         return core::input::default_profile();
     }
 }
