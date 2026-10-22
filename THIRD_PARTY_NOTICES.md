@@ -24,6 +24,12 @@ repositories are never fetched.
 | [volk](https://github.com/zeux/volk) (nested in Granite) | 1.4.350-4 | `47cddf7ed97b94118a08aacb548a411188e016cc` | MIT | Vulkan loader for `dq8-gs-parallel` |
 | [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) (nested in Granite) | v1.4.358 | `11d6898377797e07dbd543aaaa367e4465074597` | Apache-2.0 or MIT | Vulkan API headers for `dq8-gs-parallel` |
 
+## Adapted into first-party source files (not submodules)
+
+| Component | Version | Commit | License | Used for |
+|---|---|---|---|---|
+| [PCSX2](https://github.com/PCSX2/pcsx2) `pcsx2/SPU2/` | v2.7.524 | `3e29183a37e74cbc8c17bda8afb63c2d9bc6fd14` | GPL-3.0-or-later | The SPU2 model in `src/runtime/spu2/` (ADR-0014): registers, ADPCM, the decode FIFO and Gaussian table, envelopes, volume sweeps, noise, the mix, reverb and its resampling filters, DMA and AutoDMA; each adapted file keeps GPL-3.0-or-later and names the PCSX2 Dev Team |
+
 ## Tools used during development, not bundled or redistributed
 
 | Tool | License | Role |

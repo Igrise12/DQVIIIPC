@@ -45,7 +45,7 @@ struct CostModel {
     // The SPU2 (session B): samples per output block when nothing touches the SPU2; manual DMA per halfword
     // (session B sets it from PCSX2's timing).
     std::uint32_t spu2_block_samples = 32;
-    Cycles spu2_dma_per_halfword = 0;
+    Cycles spu2_dma_per_halfword = 192; // 24 IOP cycles per 16-bit word (PCSX2 SPU2/Dma.cpp)
     // A movie picture the sceMpeg HLE delivers (session C): about 4 ms.
     Cycles movie_picture = 1'179'648;
     // Memory-card replies (session D): fixed part and data part.

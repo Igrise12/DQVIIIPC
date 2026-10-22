@@ -2,10 +2,7 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 // The audio output path of M4 day 0 (platform/audio.h): the lock-free ring between the machine thread and the
 // audio thread, and AudioOutput's audio hash, which must not depend on how writes are split.
-#include "runtime/ee/guest_stop.h"
 #include "runtime/platform/audio.h"
-#include "runtime/spu2/spu2.h"
-#include "support/fake_iop_host.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
@@ -95,21 +92,4 @@ TEST_CASE("audio output: the hash is the same for one write and for many small o
     sink->start(one.ring());
     sink->stop();
     CHECK(sink->stats().frames_played == 0);
-}
-
-TEST_CASE("spu2 day-0 stub: maps on the IOP bus and stops on any access", "[audio][spu2]") {
-    dq8::test::FakeMachine machine;
-    dq8::test::FakeIopHost host(machine);
-    AudioOutput out;
-    Spu2 spu2(Spu2Config{&out});
-    spu2.attach(machine);
-    spu2.connect(host);
-    const IopDeviceMapping m = spu2.mapping();
-    CHECK(m.base == 0x1F900000u);
-    CHECK(m.device == &spu2);
-    CHECK(m.dma_channels == std::vector<std::uint32_t>{4, 7});
-    std::uint32_t value = 0;
-    CHECK_THROWS_AS(spu2.read(0x19A, 2, value, IopAccess{}), GuestStop);
-    CHECK_THROWS_AS(spu2.dma_start(IopDmaRequest{4, 0, 0, 0, 0}), GuestStop);
-    CHECK_FALSE(machine.events().next_time()); // the stub schedules nothing
 }

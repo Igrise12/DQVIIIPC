@@ -2,10 +2,14 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #include "runtime/platform/audio.h"
 
+#include "runtime/machine/clock.h"
+
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cstdio>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace dq8::rt {
@@ -98,10 +102,112 @@ class NullAudioSink final : public IAudioSink {
     Stats stats() const override { return {}; }
 };
 
+// A canonical 44-byte RIFF/WAVE header for 48 kHz stereo 16-bit PCM; the sizes are patched on finish().
+class WavTap final : public IAudioTap {
+  public:
+    explicit WavTap(const std::string& path) : path_(path), file_(std::fopen(path.c_str(), "wb")) {
+        if (file_ == nullptr) {
+            throw std::runtime_error("cannot write the audio dump '" + path + "'");
+        }
+        write_header(0);
+    }
+    WavTap(const WavTap&) = delete;
+    WavTap& operator=(const WavTap&) = delete;
+    ~WavTap() override {
+        try {
+            finish();
+        } catch (...) { // a destructor reports nothing; finish() is called explicitly at the end of a run
+        }
+    }
+
+    void write(std::span<const StereoFrame> frames) override {
+        if (file_ == nullptr) {
+            return;
+        }
+        std::array<std::uint8_t, 4 * 1024> bytes{};
+        for (std::size_t done = 0; done < frames.size();) {
+            const std::size_t n = std::min<std::size_t>(1024, frames.size() - done);
+            for (std::size_t i = 0; i < n; ++i) {
+                put16(bytes.data() + i * 4, static_cast<std::uint16_t>(frames[done + i].left));
+                put16(bytes.data() + i * 4 + 2, static_cast<std::uint16_t>(frames[done + i].right));
+            }
+            if (std::fwrite(bytes.data(), 1, n * 4, file_) != n * 4) {
+                failed_ = true;
+            }
+            done += n;
+        }
+        frames_ += frames.size();
+    }
+
+    void finish() override {
+        if (file_ == nullptr) {
+            return;
+        }
+        // RIFF sizes are 32-bit: a dump longer than about six hours keeps its data but not its length.
+        const std::uint64_t data = std::min<std::uint64_t>(frames_ * 4, 0xFFFFFFFFu - 36);
+        if (std::fseek(file_, 0, SEEK_SET) != 0) {
+            failed_ = true;
+        } else {
+            write_header(static_cast<std::uint32_t>(data));
+        }
+        if (std::fclose(file_) != 0) {
+            failed_ = true;
+        }
+        file_ = nullptr;
+        if (failed_) {
+            throw std::runtime_error("writing the audio dump '" + path_ + "' failed");
+        }
+    }
+
+  private:
+    static void put16(std::uint8_t* p, std::uint16_t v) {
+        p[0] = static_cast<std::uint8_t>(v);
+        p[1] = static_cast<std::uint8_t>(v >> 8);
+    }
+    static void put32(std::uint8_t* p, std::uint32_t v) {
+        put16(p, static_cast<std::uint16_t>(v));
+        put16(p + 2, static_cast<std::uint16_t>(v >> 16));
+    }
+
+    void write_header(std::uint32_t data_bytes) {
+        std::array<std::uint8_t, 44> h{};
+        const auto tag = [&h](std::size_t at, const char* four) {
+            for (std::size_t i = 0; i < 4; ++i) {
+                h[at + i] = static_cast<std::uint8_t>(four[i]);
+            }
+        };
+        tag(0, "RIFF");
+        put32(&h[4], 36 + data_bytes);
+        tag(8, "WAVE");
+        tag(12, "fmt ");
+        put32(&h[16], 16);
+        put16(&h[20], 1); // PCM
+        put16(&h[22], 2); // channels
+        put32(&h[24], spu2_sample_rate);
+        put32(&h[28], spu2_sample_rate * 4); // bytes per second
+        put16(&h[32], 4);                    // bytes per frame
+        put16(&h[34], 16);                   // bits per sample
+        tag(36, "data");
+        put32(&h[40], data_bytes);
+        if (std::fwrite(h.data(), 1, h.size(), file_) != h.size()) {
+            failed_ = true;
+        }
+    }
+
+    std::string path_;
+    std::FILE* file_ = nullptr;
+    std::uint64_t frames_ = 0;
+    bool failed_ = false;
+};
+
 } // namespace
 
 std::unique_ptr<IAudioSink> make_null_audio_sink() {
     return std::make_unique<NullAudioSink>();
+}
+
+std::unique_ptr<IAudioTap> make_wav_tap(const std::string& path) {
+    return std::make_unique<WavTap>(path);
 }
 
 } // namespace dq8::rt
