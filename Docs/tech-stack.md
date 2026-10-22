@@ -21,7 +21,7 @@
 | Windowing, input, audio | **SDL3** | One portable library for window, gamepad, haptics and audio |
 | Graphics API | **Vulkan 1.3+** | Required by the first GS backend, portable across Windows and Linux |
 | First GS backend | **paraLLEl-GS** (LGPL-3.0-or-later), shared library | Accurate and already supports 2x to 16x supersampling |
-| Launcher UI | **Dear ImGui** over SDL3 and Vulkan, behind a front-end abstraction | Shares a toolkit with the in-game overlay and adds no runtime |
+| Launcher UI | **Dear ImGui** over SDL3 (SDL's renderer backend for the launcher, ADR-0010), behind a front-end abstraction | Shares a toolkit with the in-game overlay and adds no runtime |
 | Config | **TOML** (JSON-lines for process events) | Human-editable, comments allowed, PS2Recomp already uses it |
 | Tests | **Catch2 + CTest**, sanitizers, libFuzzer | Standard, CI-friendly |
 | CI | **GitHub Actions**: Linux GCC and Clang, Windows MSVC | Free for public repositories |
@@ -103,9 +103,9 @@ Versions: use the **latest stable release at the time each dependency is added**
 | **GS backend, first** | **paraLLEl-GS** `cc6184a` (2026-10-06) with Granite `16e7395` | LGPL-3.0-or-later (Granite: MIT) | **Shared library**, so the LGPL relinking terms hold: one `dq8-gs-parallel` library containing our wrapper, parallel-gs and the four Granite archives it needs (`granite-vulkan`, `-util`, `-math`, `-volk`) with hidden visibility, exporting only our C ABI. Embedding API is the `GSInterface` class (about 25 methods, all calls from one thread); wrapper estimated at 1,000–1,500 lines (spike S5a). C++14, precompiled SPIR-V header, so the library build needs three submodules and no shader toolchain; the contributor-only tools (replayer, stream, repro) need ten more plus SDL3 and build the SPIR-V toolchain. The author currently does not accept outside contributions. |
 | **ELF parsing** | ELFIO | MIT | Also used by PS2Recomp. |
 | **Configuration** | toml11 | BSL-1.0 | Also used by PS2Recomp, so no second TOML library. |
-| **JSON** | nlohmann/json | MIT | Process events and small data files. |
+| **JSON** | nlohmann/json v3.12.0 (submodule, M5) | MIT | Process events and small data files. |
 | **Formatting and logging** | fmt, spdlog | MIT | fmt is also a PS2Recomp dependency. |
-| **Launcher and overlay UI** | **Dear ImGui** (SDL3 and Vulkan backends) | MIT | One toolkit for launcher and in-game overlay. File pickers use SDL3's native dialogs. |
+| **Launcher and overlay UI** | **Dear ImGui** v1.92.9 (submodule, M5; SDL3 platform and SDL renderer backends for the launcher, Vulkan for the overlay later) | MIT | One toolkit for launcher and in-game overlay. File pickers use SDL3's native dialogs. |
 | **Upscaling shader** | AMD FidelityFX FSR 1 (EASU and RCAS) | MIT | Presentation pass (architecture.md §6.3). |
 | **Fibers** | **minicoro** `02dad0f` (fallbacks behind `rt::Fiber`: ucontext, Win32 fibers) | MIT-0 or Unlicense | Guest threads (architecture.md §12.3, ADR-0007, accepted 2026-10-21). Annotates fiber switches for AddressSanitizer itself and saves the Windows thread-information block. Evaluate cost with deep guest stacks. |
 | **Fast hashing** | xxHash | BSD-2-Clause | Cache keys, texture hashes. |

@@ -48,4 +48,23 @@ fs::path user_data_dir() {
     return user_data_dir_from(&environment);
 }
 
+fs::path user_config_dir_from(std::string_view (*get)(std::string_view name)) {
+#if defined(_WIN32) || defined(__APPLE__)
+    return user_data_dir_from(get);
+#else
+    // XDG: a relative XDG_CONFIG_HOME is invalid and ignored.
+    if (const std::string_view xdg = get("XDG_CONFIG_HOME"); !xdg.empty() && xdg.front() == '/') {
+        return fs::path(std::string(xdg)) / "dq8-native";
+    }
+    if (const std::string_view home = get("HOME"); !home.empty()) {
+        return fs::path(std::string(home)) / ".config" / "dq8-native";
+    }
+    throw Error(ErrorCode::io_open, "no home directory is set, so there is no user configuration directory");
+#endif
+}
+
+fs::path user_config_dir() {
+    return user_config_dir_from(&environment);
+}
+
 } // namespace dq8::core::platform

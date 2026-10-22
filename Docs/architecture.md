@@ -736,7 +736,7 @@ This table is the practical meaning of "scalable". Each row says what to add and
 
 ## 18. Decision log
 
-Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are accepted. The first batch is proposed here. ADR-0009 was accepted on 2026-10-19, ADRs 0003, 0004 and 0008 on 2026-10-20, ADRs 0005, 0007, 0011 and 0012 on 2026-10-21 at the start of M3, and ADRs 0014, 0015 and 0016 on 2026-10-21 at the start of M4 (files in `Docs/adr/`). ADR-0013 is proposed. The others still await the project owner's confirmation of the corresponding items in the brief (§14).
+Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are accepted. The first batch is proposed here. ADR-0009 was accepted on 2026-10-19, ADRs 0003, 0004 and 0008 on 2026-10-20, ADRs 0005, 0007, 0011 and 0012 on 2026-10-21 at the start of M3, ADRs 0014, 0015 and 0016 on 2026-10-21 at the start of M4, and ADRs 0006, 0010, 0017 and 0018 on 2026-10-22 at the start of M5 (files in `Docs/adr/`). ADR-0013 is proposed. The others still await the project owner's confirmation of the corresponding items in the brief (§14).
 
 | ADR | Decision | Status | Rationale in one line |
 |---|---|---|---|
@@ -745,17 +745,19 @@ Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are acc
 | 0003 | PS2Recomp as a pinned dependency with a patch queue, own runtime | **Accepted** (2026-10-20; `Docs/adr/0003-ps2recomp-pinned-dependency.md`) | Experimental upstream, no overlay support, we need control of the runtime. |
 | 0004 | GS behind an interface, parallel-gs first, native renderer later, trace backend early | **Accepted** (2026-10-20; `Docs/adr/0004-parallel-gs-first-backend.md`) | Accuracy and resolution scaling now, flexibility later, testability throughout. |
 | 0005 | SDL3 for window, input and audio | **Accepted** (2026-10-21; `Docs/adr/0005-sdl3-window-input-audio.md`) | Cross-platform, gamepad API, already used by sibling projects. |
-| 0006 | Schema-driven settings and launcher | Proposed | New features add settings without UI code. |
+| 0006 | Schema-driven settings and launcher | **Accepted** (2026-10-22; `Docs/adr/0006-schema-driven-settings.md`) | New features add settings without UI code. |
 | 0007 | One deterministic machine thread with fibers, separate render, audio and I/O threads | **Accepted** (2026-10-21; `Docs/adr/0007-machine-thread-fibers.md`; minicoro behind `rt::Fiber`, virtual clock, cost model) | Determinism and testability before parallelism. |
 | 0008 | Local setup build from the user's disc | **Accepted** (2026-10-20; `Docs/adr/0008-local-game-module-build.md`) | Only approach consistent with the legal stance. |
 | 0009 | GPL-3.0-or-later | **Accepted** (2026-10-19) | Follows from using PS2Recomp. |
-| 0010 | Launcher is a thin front end over `libdq8core`, Dear ImGui first | Proposed | One toolkit with the in-game overlay, replaceable later. |
+| 0010 | Launcher is a thin front end over `libdq8core`, in Dear ImGui over SDL3 | **Accepted** (2026-10-22; `Docs/adr/0010-launcher-dear-imgui.md`) | One toolkit with the in-game overlay, replaceable later. |
 | 0011 | IOP as native RPC servers first (SIF protocol, file I/O, disc, modules, pad, memory card; null servers for the sound modules); interpreting the IRX modules deferred | **Accepted** (2026-10-21; amended by 0014 for the sound modules; `Docs/adr/0011-iop-native-servers-first.md`) | Every SDK library is recompiled game code, so the SIF protocol is needed either way; the title screen needs no audio. |
 | 0012 | Overlay residency through the loader hook, with the game's own loader over native file I/O | **Accepted** (2026-10-21; `Docs/adr/0012-overlay-residency-loader-hook.md`; confirmed by the M3a bring-up on 2026-10-21) | One file-I/O path for archives and overlays; the hook fires between "bytes in RAM" and "code live". |
 | 0013 | Guarded guest-state writes from the game layer: profile data, guarded by guest state read at a vblank safe point, only values the game itself writes, an event per write, enabled by a policy (first use: `--movies skip` skips TITLE's flyover timeline) | Proposed (2026-10-21; `Docs/adr/0013-guarded-guest-state-writes.md`; implemented behind `--movies skip`, off with `--movies blank`) | No override fits a scene that steps its own clock while its movie is skipped; a write needs rules before the patch system exists. |
 | 0014 | The game's sound modules run on an IOP interpreter (stage A for sound), with HLE IOP kernel libraries and a register-level SPU2 mixed into SDL3 audio | **Accepted** (2026-10-21; `Docs/adr/0014-sound-modules-interpreted.md`; amends 0011 for the sound modules) | Sound without reverse-engineering the undocumented `SK*` protocol; a small kernel surface (66 imports). |
 | 0015 | Movies through an `sceMpeg` HLE (GetPicture, IsEnd, the video stream callback) with a dynamically loaded libavcodec decoder (`dq8-movie`) | **Accepted** (2026-10-21; `Docs/adr/0015-movies-scempeg-hle.md`) | The game keeps its own reader, demux and audio feed; IPU emulation avoided; runs without FFmpeg still work. |
 | 0016 | The memory card is a host folder behind the native mcserv, with a virtual real-time clock | **Accepted** (2026-10-21; `Docs/adr/0016-memory-card-host-folder.md`) | Plain, backed-up saves; deterministic runs; card-image import stays P1. |
+| 0017 | Function maps published as address-only data (`data/maps/`); jump-table entries read from the user's disc at setup | **Accepted** (2026-10-22; `Docs/adr/0017-published-function-maps.md`) | End users never run Ghidra; nothing game-derived is committed. |
+| 0018 | On Windows the host and the user's game modules are both built with a pinned llvm-mingw (host cross-compiled in CI, toolchain downloaded on demand for users) | **Accepted** (2026-10-22; `Docs/adr/0018-windows-llvm-mingw.md`) | One exception model across the module boundary; MSVC cannot be redistributed. |
 
 ---
 

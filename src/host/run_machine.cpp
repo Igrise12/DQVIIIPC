@@ -98,14 +98,10 @@ std::unique_ptr<gs::IGsBackend> make_backend(const Options& o, const char* argv0
             return gs::make_trace_gs_backend(o.gs_trace.value_or(fs::path()));
         case GsKind::parallel: {
 #ifdef DQ8_HOST_HAVE_GS_PARALLEL
-            gs::ParallelGsConfig config;
-            // The target dq8_gs_parallel: output name dq8-gs-parallel with the platform's prefix and suffix.
-#ifdef _WIN32
-            const std::string prefix;
-#else
-            const std::string prefix = "lib";
-#endif
-            config.library = executable_dir(argv0) / rt::shared_library_file_name(prefix + "dq8-gs-parallel");
+            gs::ParallelGsConfig
+                config; // library empty: gs::default_parallel_gs_library() (the environment,
+                        // next to the executable, ../lib for an installed tree, the build path)
+            (void)argv0;
             config.super_sampling = o.ssaa;
             return gs::make_parallel_gs_backend(config);
 #else
@@ -232,7 +228,22 @@ struct Outcome {
 
 } // namespace
 
+// M5 options whose subsystem has not arrived on this build yet (Docs/milestones/M5-launcher.md): the session
+// that brings each one removes its line. Refused at start-up rather than silently ignored.
+std::optional<std::string> unwired_m5_option(const Options& o) {
+    if (o.config || !o.sets.empty()) {
+        return std::string("--config and --set arrive with the settings store (M5 session A)");
+    }
+    if (o.status) {
+        return std::string("--status arrives with the launcher's status channel (M5 session A)");
+    }
+    return std::nullopt;
+}
+
 int run_game(const Options& o, const char* argv0) {
+    if (const auto unwired = unwired_m5_option(o)) {
+        throw UsageError(*unwired);
+    }
     Session s;
     setup_session(o, argv0, s);
     const core::RegionProfile* profile = s.profile();

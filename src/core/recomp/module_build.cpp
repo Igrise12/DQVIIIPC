@@ -180,7 +180,7 @@ ModuleBuildResult build_module(const ModuleBuildOptions& o, const ModuleUnit& u)
     if (!fs::is_regular_file(o.abi_include_dir / "dq8" / "abi" / "game_module.h", ec)) {
         throw Error(ErrorCode::tool_missing,
                     "'" + path_utf8(o.abi_include_dir) +
-                        "' does not hold dq8/abi/game_module.h (pass --abi-include DIR)");
+                        "' does not hold dq8/abi/game_module.h (pass --abi-include-dir DIR)");
     }
     if (!fs::is_directory(u.generated_dir, ec)) {
         throw Error(ErrorCode::work_stale, "no generated sources for unit '" + u.name + "' in '" +

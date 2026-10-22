@@ -19,6 +19,8 @@ repositories are never fetched.
 | [minicoro](https://github.com/edubart/minicoro) | v0.1.3+3 | `02dad0f8b7cbb12fe6e216ae7a76db15ca55cd7b` | MIT-0 or Unlicense | Fibers for guest threads (ADR-0007), header-only |
 | [SDL](https://github.com/libsdl-org/SDL) | release-3.4.18 | `829a65d769d935c4852f8159e964312c0957260a` | Zlib | Window, input and gamepads in `dq8-game` (ADR-0005); `DQ8_USE_SYSTEM_SDL3` uses an installed SDL3 instead |
 | [stb](https://github.com/nothings/stb) | master | `a7d4c2175630e1ea5b6f8dd00ab96fed0b97b96d` | MIT or Unlicense | `stb_image_write.h` for frame dumps, header-only |
+| [Dear ImGui](https://github.com/ocornut/imgui) | v1.92.9 | `01380c579715e62fb9a8d6ec0502c4ea83bfde6e` | MIT | The `dq8-launcher` UI (ADR-0010) with its SDL3 platform and SDL renderer backends; the demo is not built |
+| [nlohmann/json](https://github.com/nlohmann/json) | v3.12.0 | `55f93686c01528224f448c19128836e7df245f72` | MIT | Reading `dq8-game`'s status lines and the setup's events in `dq8-launcher`, header-only |
 | [paraLLEl-GS](https://github.com/Arntzen-Software/parallel-gs) | cc6184a | `cc6184af7e0c03da603045ca371ffa5dae9b0655` | LGPL-3.0-or-later | First GS backend (ADR-0004), built into the separate shared library `dq8-gs-parallel` so the LGPL relinking terms hold |
 | [Granite](https://github.com/Themaister/Granite) (nested in paraLLEl-GS) | 16e7395 | `16e7395f6a4858c1783dbf6f521f90b9d5f82ac5` | MIT | Vulkan device layer of paraLLEl-GS; only the vulkan, util and math parts are built |
 | [volk](https://github.com/zeux/volk) (nested in Granite) | 1.4.350-4 | `47cddf7ed97b94118a08aacb548a411188e016cc` | MIT | Vulkan loader for `dq8-gs-parallel` |

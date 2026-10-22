@@ -50,6 +50,16 @@ enum class ErrorCode {
     tool_missing,          // a required program or template (ps2_recomp, cmake, cmake/module) was not found
     work_stale,            // the work directory lacks a stage's inputs or was prepared for another disc
     invalid_argument,      // a caller-supplied option names something that does not exist (a unit, ...)
+    // M5 (setup, settings, launcher):
+    settings_parse,       // a settings schema or settings file is not valid TOML
+    settings_invalid,     // a setting is unknown, of the wrong type or out of range
+    toolchain_incomplete, // the C++ compiler, cmake or ninja the setup needs was not found
+    download_failed,      // the bundled toolchain could not be downloaded or failed its checksum
+    insufficient_space,   // the work or data directory lacks the free space the setup needs
+    setup_cancelled,      // the user cancelled the setup; running it again resumes
+    smoke_failed,         // the freshly built game did not reach the title screen in the smoke test
+    maps_missing,         // no function maps (published or contributor) exist for a unit of this disc
+    registry_parse,       // the build registry (installs.toml) is malformed
 };
 
 // Stable kebab-case spelling of a code, e.g. "unknown-image". Used in --json output.

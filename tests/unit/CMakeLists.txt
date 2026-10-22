@@ -77,12 +77,19 @@ add_executable(dq8_unit_tests
     test_game_layer.cpp
     test_input_script.cpp
     test_host_options.cpp
+    test_m5_contracts.cpp
 )
 # M4: one test list per session, so the sessions never edit this file.
 include(${CMAKE_CURRENT_SOURCE_DIR}/m4_iop_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/m4_spu2_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/m4_movie_tests.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/m4_save_tests.cmake)
+# M5: the same, one list per session (Docs/milestones/M5-launcher.md).
+include(${CMAKE_CURRENT_SOURCE_DIR}/m5_core_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/m5_launcher_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/m5_display_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/m5_maps_tests.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/m5_windows_tests.cmake)
 target_include_directories(dq8_unit_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 target_include_directories(dq8_unit_tests SYSTEM PRIVATE "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp")
 target_compile_definitions(dq8_unit_tests PRIVATE

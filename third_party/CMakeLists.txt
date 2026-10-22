@@ -30,6 +30,10 @@ target_include_directories(dq8_minicoro SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE
 add_library(dq8_stb INTERFACE)
 add_library(dq8::stb ALIAS dq8_stb)
 target_include_directories(dq8_stb SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/stb")
+# nlohmann/json: the launcher reads dq8-game's and the setup's JSON-line events with it (M5), header-only.
+add_library(dq8_nlohmann_json INTERFACE)
+add_library(dq8::nlohmann_json ALIAS dq8_nlohmann_json)
+target_include_directories(dq8_nlohmann_json SYSTEM INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/nlohmann_json/single_include")
 # SDL3 (DQ8_BUILD_WINDOW) and paraLLEl-GS (DQ8_BUILD_GS_PARALLEL) are wired up in cmake/Sdl3.cmake and
 # cmake/ParallelGs.cmake (M3 session D).
 if(DQ8_BUILD_WINDOW)
@@ -37,4 +41,23 @@ if(DQ8_BUILD_WINDOW)
 endif()
 if(DQ8_BUILD_GS_PARALLEL)
     include(ParallelGs)
+endif()
+# Dear ImGui with its SDL3 platform and SDL renderer backends (ADR-0010), for dq8-launcher only. A static library
+# without our warning set or sanitizers; its headers are system headers for our code.
+if(DQ8_BUILD_LAUNCHER)
+    set(_dq8_imgui_dir "${CMAKE_CURRENT_SOURCE_DIR}/imgui")
+    add_library(dq8_imgui STATIC
+        "${_dq8_imgui_dir}/imgui.cpp"
+        "${_dq8_imgui_dir}/imgui_draw.cpp"
+        "${_dq8_imgui_dir}/imgui_tables.cpp"
+        "${_dq8_imgui_dir}/imgui_widgets.cpp"
+        "${_dq8_imgui_dir}/backends/imgui_impl_sdl3.cpp"
+        "${_dq8_imgui_dir}/backends/imgui_impl_sdlrenderer3.cpp"
+    )
+    add_library(dq8::imgui ALIAS dq8_imgui)
+    target_include_directories(dq8_imgui SYSTEM PUBLIC "${_dq8_imgui_dir}" "${_dq8_imgui_dir}/backends")
+    # imgui_demo.cpp is not built (the demo and style-editor windows are not shipped).
+    target_compile_definitions(dq8_imgui PUBLIC IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
+    target_link_libraries(dq8_imgui PUBLIC SDL3::SDL3)
+    set_target_properties(dq8_imgui PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()

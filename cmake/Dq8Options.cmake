@@ -42,3 +42,9 @@ else()
 endif()
 option(DQ8_BUILD_GS_PARALLEL "Build the paraLLEl-GS backend library dq8-gs-parallel (needs Vulkan at run time)"
        ${_dq8_gs_parallel_default})
+# The GUI launcher dq8-launcher (M5, ADR-0010): Dear ImGui over SDL3, so it needs the SDL3 build of the window.
+option(DQ8_BUILD_LAUNCHER "Build the dq8-launcher GUI (Dear ImGui over SDL3; needs DQ8_BUILD_WINDOW)" ON)
+if(DQ8_BUILD_LAUNCHER AND NOT DQ8_BUILD_WINDOW)
+    message(STATUS "DQ8_BUILD_LAUNCHER is ignored: it needs DQ8_BUILD_WINDOW=ON")
+    set(DQ8_BUILD_LAUNCHER OFF CACHE BOOL "" FORCE)
+endif()

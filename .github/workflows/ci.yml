@@ -53,7 +53,7 @@ jobs:
       - name: Smoke-run dq8ctl and dq8-game
         shell: bash
         run: |
-          for tool in dq8ctl dq8-game; do
+          for tool in dq8ctl dq8-game dq8-launcher; do
             exe=$(find build/${{ matrix.preset }} -name "$tool" -o -name "$tool.exe" | head -1)
             "$exe" --version
           done

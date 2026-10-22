@@ -2,7 +2,7 @@
 
 Platform-neutral foundation: configuration and settings schema, logging, paths, hashing, disc-image access, game verification, feature registry. No PS2 knowledge beyond file formats, and no UI. Public headers live in `include/dq8/core/`; everything is in namespace `dq8::core`.
 
-What exists (milestone M1, the disc intake; M2, the recompilation stages of the setup pipeline):
+What exists (milestone M1, the disc intake; M2, the recompilation stages of the setup pipeline; M5, the settings and setup APIs):
 
 | Area | Files | Purpose |
 |---|---|---|
@@ -12,10 +12,15 @@ What exists (milestone M1, the disc intake; M2, the recompilation stages of the 
 | elf | `elf/` | Minimal ELF32 little-endian header and program-header parser (no section or symbol parsing), and `ElfWriter` (`elf_writer.h`): ELF32 LE `ET_EXEC` files with one PT_LOAD per allocated section, a `.shstrtab` and section headers; overlapping, misaligned or duplicate sections are refused (`elf_layout`). |
 | overlay | `overlay/` | The `MWo3` overlay-container parser (`mwo3.h`): validates the 64-byte header against the file size and an optional window (magic, id, load address, size identity, constructor-table bounds inside the data range, NUL-padded ASCII name) and exposes the fields, the derived addresses and `image()`, the whole text+data range. `text_size` is a link-map hint, not a code boundary (spike S3). |
 | overlay unit ELF | `overlay/overlay_elf.cpp`, `overlay_elf.h` | `make_overlay_unit_elf()`: the ELF the recompiler reads for one overlay: the whole container, header included, as one `SHF_ALLOC\|SHF_EXECINSTR\|SHF_WRITE` `.text` at its load address, a NOBITS `.bss`, `e_entry` 0, the boot ELF's `e_flags`, no symbols. |
-| platform | `platform/` | `process.h`: `run_process()` (argument vector, no shell; working directory, environment overrides, separate stdout/stderr capture and streaming, timeout, cancellation; `posix_spawn` with its own process group, or `CreateProcessW` in a job object, so a stop reaches the whole tool tree), `find_program()`, Windows argument quoting. Internal: `files.h` (atomic and write-if-changed file writes, SHA-1 of files), `system_info.h` (threads, available memory). `paths.h`: the per-user data directory (memory-card folders). |
+| platform | `platform/` | `process.h`: `run_process()` (argument vector, no shell; working directory, environment overrides, separate stdout/stderr capture and streaming, timeout, cancellation; `posix_spawn` with its own process group, or `CreateProcessW` in a job object, so a stop reaches the whole tool tree), `find_program()`, Windows argument quoting. Internal: `files.h` (atomic and write-if-changed file writes, SHA-1 of files), `system_info.h` (threads, available memory). `paths.h`: the per-user data directory (memory-card folders, the build registry) and configuration directory (settings). |
 | recomp | `recomp/`, `recomp.h` | Stages 3 to 6 (architecture.md §3). `function_map`: reads and validates `<unit>.csv`, `<unit>.jump_tables.toml`, `<unit>.stats.toml` (`map_parse`/`map_invalid` with `file:line`). `recomp_config`: one TOML per unit with toml11 in the shape PS2Recomp's ConfigManager reads; `Name@0xADDR` stub bindings from the emitter's call list. `recomp_driver`: runs `ps2_recomp`, parses its report, swaps the output in only on success and keeps unchanged files' times. `module_build`: `cmake/module` configure and build per unit, job count from free memory. `pipeline`: code units from the disc or from given unit ELFs, the work layout, the chained prepare/generate/build stages with their records (`units.toml`, generate stamps, `build-manifest.toml`). |
 | profile | `profile/` | Loads `data/regions/*.toml` with toml11 and validates the schema with `file:line` errors, including the overlay window's loader facts and each overlay row's header integrity values against its segment. |
 | intake | `intake/` | `verify_image()` (SYSTEM.CNF, boot-file hash, profile match, ELF cross-check by `segment_index`, then every overlay's container header parsed from the image and checked against its row and segment) and `extract()` (boot file, overlays and listed modules into `baserom/<profile id>/`, 1 MiB streaming, manifest with the overlay headers under `[files.mwo3]`, idempotent). |
+| error texts | `error_text.cpp`, `error_text.h` | A message and an action for every `ErrorCode`, for the launcher and `dq8ctl` (M5). |
+| settings | `settings/`, `settings.h` | The settings schema, string tables and the layered store (defaults → user → profile → `--set`). M5 day 0: the API and a stub; M5 session A implements it. |
+| setup | `setup/`, `setup.h` | The setup's stages and their JSON-line events (implemented); `run()` over intake and recomp is M5 session A's. |
+| toolchain | `toolchain/`, `toolchain.h` | Detecting the compiler, cmake and ninja, and the advice when one is missing (M5 session A; the download is session E's); `default_jobs()`. |
+| registry | `registry/`, `registry.h` | `installs.toml` in the user data directory: which disc was built where (M5; `load`/`save` are session A's). |
 
 Rules:
 

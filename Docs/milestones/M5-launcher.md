@@ -1,0 +1,317 @@
+# M5: Launcher MVP
+
+| | |
+|---|---|
+| **Status** | Planned 2026-10-22 with the project owner; day 0 on `main` 2026-10-22; sessions A–E not started |
+| **Exit (brief §11)** | First-run wizard, verification, setup with progress, settings UI, controller mapping, resolution scaling: a new user goes from the ISO to playing without a terminal |
+| **Owner choices (2026-10-22)** | Function maps published address-only, jump-table entries read from the user's disc (ADR-0017, D9) · launcher in Dear ImGui over SDL3 (ADR-0010, D6) · schema-driven settings (ADR-0006) · Linux **and** Windows, both host and modules built with llvm-mingw on Windows (ADR-0018) · day-0 contracts, five parallel sessions, then integration; full speed stays in M6 |
+| **Still open** | M4's town, shop and battle route (B3, B4) is the owner's playtest; ADR-0013 stays a proposal |
+
+Sessions read this file. Contract changes go through the coordinator. Every rule in CLAUDE.md applies; the most
+important is that **no game-derived content** goes into commits: published maps hold addresses, sizes and table
+shapes only; settings, string tables, fonts and images are our own; diagnostics exports never carry game data.
+
+## What exploration established
+
+**Launcher, settings and features were design only.** `src/launcher/` and `src/features/` held READMEs; there was no
+settings schema, no settings file and no `--set`. Architecture §9 (layering, TOML, schema fields), §11 (separate
+processes, screens, stable error codes) and §3 (setup stages, structured progress, registration) were unimplemented.
+`libdq8core` already had the pieces the setup needs: `ProgressFn` (`intake.h`), the recompile pipeline's
+`on_progress` and `cancel` (`recomp/pipeline.h`), `run_process()` with streamed output and cancellation
+(`platform/process.h`), the `build-manifest.toml` record and `user_data_dir()`.
+
+**The setup's blocker was the function maps.** `dq8ctl recomp` reads `work/recomp/maps`, which only a contributor
+with Ghidra can produce (`tools/ghidra/export_maps.sh`). The maps were also refined by hand during M4 bring-up (MENU
+grew from 263 to 418 functions in B2), so regenerating them on a user's machine would not reproduce them. No toolchain
+check existed (a missing cmake or compiler surfaced as a failed step) and progress was free text on stderr.
+
+**The contributor maps (counts only).** Seven units, 12,302 functions in all (main 10,501, shop 454, menu 418,
+battle 617, casino 224, title 72, viewer 16). 235 of them carry a name other than Ghidra's placeholder patterns
+(`FUN_`, `thunk_FUN_`, `sub_` plus the address): kernel and SDK names such as the syscall wrappers. Whether
+`ps2_recomp` treats any name specially is for session D to establish before it replaces names.
+
+**dq8-game.** Every setting is a flag (`host/options.h`); the window is a fixed 1280×960 resizable window with vsync on
+and no fullscreen; the picture is presented at 4:3; `--ssaa` only anti-aliases: a real higher-resolution picture also
+needs `high_resolution_scanout`, `super_sampled_textures` and `backbuffer_promotion`, which `ParallelGsConfig`
+(`gs/gs_parallel_backend.h`) has but nothing sets (spike S5b). Bindings are switch tables (`sdl/sdl_mapping.cpp`),
+sticks are linear without dead zones, ports follow plug order, audio uses the default device without a volume.
+
+**Widescreen.** The game's own screen-size option (the byte at `0x003D275C`) was on in the M4 runs: the game drew
+anamorphic frames and played the `_W` movies while the presenter showed 4:3. That is M4's open "movie geometry" item;
+following the byte in the presenter (`display.aspect = auto`) resolves it.
+
+**Packaging.** None: `install()` missed `dq8ctl`, `data/regions`, `cmake/module` and the ABI headers and set no
+RPATH; `dq8-movie` links the system's libavcodec (ADR-0015 moved a bundled LGPL build to M5).
+
+**Windows.** CI builds the host with MSVC as a compile check (no GS, no movie library); the runtime has never run on
+Windows. Host exceptions unwind through module frames, so host and modules need one toolchain (ADR-0018).
+
+## Design rules every session follows
+
+- **Layering (architecture §13.2).** The launcher and `dq8ctl` link `core` only (the launcher also Dear ImGui, SDL3 and
+  nlohmann/json); they start `dq8-game` as a process. Settings, setup, toolchain, registry and diagnostics logic live
+  in `core` behind typed APIs with progress callbacks, so `dq8ctl` and the launcher share them.
+- **Determinism.** `dq8-game --events` stays deterministic. What the launcher needs from a running game (first frame,
+  frame rate, warnings, exit reason) goes on the separate, non-deterministic `--status` channel.
+- **Goldens.** `dq8-game` reads the settings store only when `--config` or `--set` is given; without them every run
+  behaves exactly as in M4, and the M3/M4 golden hashes and tests hold unchanged. The schema's defaults are M4's
+  `--window` defaults, so a default settings file plays as M4 did.
+- **Settings change behaviour only through the schema.** A new setting is a schema row, a string-table entry and the
+  code that reads it; the launcher needs no change (architecture §17).
+- **Host-side only.** Volume, rumble strength, dead zones, aspect, scaling and filtering act on the host side of the
+  machine (after the audio hash, before presentation), so they never move a deterministic hash.
+- **No game data** in maps (shape only), settings, diagnostics or release artifacts; the checker scans release trees.
+- **Errors carry stable codes** (`dq8/core/error.h`) and a message with an action (`dq8/core/error_text.h`).
+
+## Contracts (day 0, on `main`)
+
+| Area | Files | What it fixes |
+|---|---|---|
+| ADRs | `Docs/adr/0006`, `0010`, `0017`, `0018` | Schema-driven settings; Dear ImGui over SDL3; published address-only maps; llvm-mingw for Windows host and modules |
+| Error codes and texts | `include/dq8/core/error.h`, `error_text.h`, `src/core/error_text.cpp` | Nine codes (`settings-parse`, `settings-invalid`, `toolchain-incomplete`, `download-failed`, `insufficient-space`, `setup-cancelled`, `smoke-failed`, `maps-missing`, `registry-parse`); a message and an action for every code (a code without a text fails to compile) |
+| Settings | `config/settings/schema.toml`, `config/settings/strings/en.toml`, `include/dq8/core/settings.h`, stub `src/core/settings/settings.cpp` | The schema format and its 19 settings (below); `Schema`, `StringTable`, the layered `Store`, `find_settings_dir`, `default_user_file` |
+| Setup | `include/dq8/core/setup.h`, `src/core/setup/setup.cpp` | Stages, the event struct and its JSON line (implemented), `Options` with cancel flag and event sink, `Result`; `run()` is the stub |
+| Toolchain | `include/dq8/core/toolchain.h`, stub `src/core/toolchain/toolchain.cpp` | `detect()` (cc, cxx, cmake, ninja, versions, bundled root), `check()` → problems with codes and advice, `default_jobs()` (implemented: the RAM-based job count) |
+| Registry | `include/dq8/core/registry.h`, `src/core/registry/registry.cpp` | `installs.toml` in the user data directory: profile, ISO, module directory, manifest SHA-1, build time, host version; `find`/`upsert` implemented, `load`/`save` stubs |
+| Paths | `src/core/platform/paths.{h,cpp}` | `user_config_dir()`: `$XDG_CONFIG_HOME/dq8-native` (default `~/.config/dq8-native`), the user data directory on Windows and macOS |
+| dq8-game options | `src/host/options.{h,cpp}`, `src/host/run_machine.cpp` | `--config FILE`, `--set KEY=VALUE` (repeatable), `--status FILE\|-` parsed and documented; refused at start-up until session A wires them (`unwired_m5_option`) |
+| Launcher | `src/launcher/` | `dq8-launcher`: a placeholder Dear ImGui window (`--frames N` for smoke tests, `--version`) |
+| Dependencies | `third_party/imgui` (v1.92.9), `third_party/nlohmann_json` (v3.12.0), `third_party/CMakeLists.txt`, `THIRD_PARTY_NOTICES.md` | `dq8::imgui` (static, SDL3 platform and SDL renderer backends, no demo) and `dq8::nlohmann_json`; `DQ8_BUILD_LAUNCHER` (default on, needs `DQ8_BUILD_WINDOW`) |
+| Build | `tests/unit/m5_{core,launcher,display,maps,windows}_tests.cmake` | One test list per session; no session edits a shared CMake list |
+| Fixes | `src/host/run_machine.cpp`, `src/core/recomp/module_build.cpp` | The GS library is found through `default_parallel_gs_library()` (not hard-coded next to the executable, which breaks a `bin/` + `lib/` layout); a build failure names the right flag (`--abi-include-dir`) |
+| Tests | `tests/unit/test_m5_contracts.cpp`, `m5_core_tests.cmake`, `m5_launcher_tests.cmake` | Error texts, the schema and its strings, the event line, the config directory, the registry lookup, the option parsing and refusal, the launcher on SDL's dummy driver |
+
+### The settings schema (`config/settings/schema.toml`)
+
+`schema_version = 1`, then one `[[setting]]` per setting:
+
+| Field | Meaning |
+|---|---|
+| `key` | `category.name`, lower case, digits and `_`; added, never renamed or reused |
+| `type` | `boolean`, `integer`, `real`, `choice`, `text`, `path` |
+| `default` | Inside the range or among the choices; M4's `--window` behaviour |
+| `choices` / `min`, `max` | `choice` / `integer`, `real` (inclusive) |
+| `label`, `description` | String-table ids, always `<key>.label` and `<key>.description`; a choice's text is `<key>.choices.<value>` |
+| `category` | The settings page; its title is `category.<name>` in the string table |
+| `advanced`, `requires_restart`, `hot_reload` | Shown only with the page's advanced toggle; applies on the next start; applies live (none in M5) |
+| `requires` | `["key=value", ...]`: shown and applied only when all hold (`Setting::conditions` in C++, where `requires` is a keyword) |
+| `owner` | The component that reads it: `host`, `runtime.platform`, `runtime.gs` |
+
+String tables are `config/settings/strings/<language>.toml` with one `[strings]` table (English in M5). A user
+settings file is TOML with `schema_version` and one table per category (`[display]`, `[audio]`, ...); unknown keys
+are kept on save, invalid values are reported (`settings-invalid`) and replaced by the default, never fatal.
+
+**Layers** (architecture §9.1): schema defaults → user file (`user_config_dir()/settings.toml`, or next to the
+executable when a `portable` marker file is there) → per-profile overrides (`[profile.SLUS_21207.display]` ...) →
+`--set`. The system-wide layer waits for packagers.
+
+### Settings to dq8-game
+
+Explicit command-line flags win over `--set`, which wins over `--config`. Without `--config` and `--set` no setting
+applies (the goldens rule above).
+
+| Key | Default | dq8-game behaviour | Session |
+|---|---|---|---|
+| `display.window_mode` | `windowed` | windowed, borderless fullscreen, exclusive fullscreen; Alt+Enter toggles | C |
+| `display.width`, `display.height` | 1280, 960 | the window's size at start (windowed) | C |
+| `display.vsync` | true | presentation waits for vblank | C |
+| `display.internal_resolution` | `1x` | `1x`…`4x`: super-sampling plus high-resolution scanout, super-sampled textures and back-buffer promotion; `1x` is M4's picture | C |
+| `display.aspect` | `auto` | `auto` follows the game's 16:9 option; `4:3`, `16:9`, `stretch` force it | C |
+| `display.integer_scaling` | false | whole-number scale factors only | C |
+| `display.filter` | `linear` | `linear` or `nearest` scaling | C |
+| `audio.output` | `sdl` | `--audio sdl\|null` | A |
+| `audio.device` | `""` | the SDL device by name; empty is the default device | C |
+| `audio.volume` | 100 | output gain after the audio hash | C |
+| `audio.latency_ms` | 64 | `--audio-latency` | A |
+| `input.profile` | `default` | the bindings profile (`user_config_dir()/input/<name>.toml`) | C |
+| `input.deadzone` | 8 | stick dead zone in percent | C |
+| `input.rumble` | true | `--rumble on\|off` | A |
+| `input.rumble_strength` | 100 | rumble scale in percent (host side) | C |
+| `game.movies` | `auto` | `--movies auto\|play\|skip` | A |
+| `game.save_dir` | `""` | `--save-dir`; empty is the default folder in the user data directory | A |
+| `game.memory_card2` | `none` | `--memory-card2` | A |
+
+### The status channel (`dq8-game --status FILE|-`)
+
+One JSON object per line, for the launcher; wall-clock based and never part of a golden.
+
+| Line | Fields |
+|---|---|
+| `{"ev":"started", ...}` | `version`, `profile`, `pid`, `window` (bool) |
+| `{"ev":"first_frame", ...}` | `ms` since start |
+| `{"ev":"fps", ...}` | `fps`, `speed` (guest time / wall time), once a second |
+| `{"ev":"warning", ...}` | `code` (an error-code name or a session-defined kebab name), `message` |
+| `{"ev":"exit", ...}` | `status` (the exit status), `reason` (`window-closed`, `until`, `vblanks`, `stop`, `error`), and for errors `code` and `message` |
+
+### The setup's events
+
+`setup::run()` reports stages in this order: `verify`, `extract`, `toolchain`, `maps`, `prepare`, `generate`,
+`build`, `smoke`, `register`. Each stage sends `start`, any number of `progress`, then `done`, `skipped` (up to date)
+or `error` (with `code`). `dq8ctl setup --events -` prints them, one per line:
+
+```json
+{"ev":"stage","stage":"build","state":"progress","done":120,"total":845,"unit":"main","message":"..."}
+```
+
+`done` and `total` count the stage's own work (bytes for extract, units for generate, compile steps for build,
+taken from ninja's `[n/N]`); `total` 0 means unknown. Cancel (the `cancel` flag) stops child processes, ends with
+`setup-cancelled`, and a later run resumes: every stage is idempotent and skips what is up to date.
+
+### Published function maps (`data/maps/<profile>/<unit>.toml`)
+
+Format in [Docs/formats/function-map.md](../formats/function-map.md). In short: the unit's source SHA-1 from the
+region profile, each function as `[start, size]`, the link-return entries, each jump table as `{address,
+base_register, count}`; names only where they are kernel or SDK names; no value read from the game. The table entries
+are read from the user's unit image during `prepare`.
+
+## Sessions
+
+All five start together on the day-0 stubs, each in its own worktree, and touch disjoint files. A file outside a
+session's list is changed only through the coordinator. Every session runs dev-clang and its unit tests, asan, the
+checker (`--tree --deep`) and pre-commit before it reports, and records what it found under "Protocol notes".
+
+### A: Core APIs, settings and the CLI
+
+- **Settings:** the schema loader and validation, `StringTable`, the layered `Store` (defaults → user → profile →
+  `--set`), TOML persistence that keeps `schema_version` and unknown keys, the portable marker; `user_config_dir()`
+  use in `find_settings_dir`/`default_user_file`.
+- **dq8-game:** `--config` and `--set` applied through a settings-to-options step (the table above, A's rows; C's
+  rows arrive as fields C reads) and the `--status` channel (a writer the run loop calls; the window's first frame and
+  frame rate come from the existing limiter and present path). Remove `unwired_m5_option`.
+- **Setup:** `setup::run()` over the existing intake and recompile code with the stage events, ninja progress, cancel
+  and resume; `toolchain::detect()`/`check()` (Linux: actionable advice per distribution family, versions);
+  `insufficient-space` check; the registry's `load`/`save`; the smoke test (`dq8-game --headless --until title` with
+  the new modules).
+- **dq8ctl:** `setup <iso> [--events -] [--jobs N] [--force]`, `settings get|set|list|reset`, `run` (starts dq8-game
+  from the registry and the user settings), `diagnose [--out FILE]` (system information, toolchain, settings, logs,
+  build manifest; never game data).
+- **Owns:** `src/core/{settings,setup,toolchain,registry}/**` and their headers, `src/core/platform/paths.*`,
+  `src/cli/` (new command files), `src/host/options.*`, the settings and status parts of `src/host/run_machine.cpp`
+  plus new `src/host/settings_wiring.cpp` and `status_channel.{h,cpp}`, `config/settings/**`,
+  `tests/unit/m5_core_tests.cmake` and its tests.
+- **Done when:** `dq8ctl setup` takes a clean user data directory from the ISO to a registered, smoke-tested build
+  (contributor maps until D lands, published maps after); cancel and resume work; `dq8-game --config` reproduces the
+  M4 behaviour with a default file and every A row of the table changes behaviour; the status channel reports the
+  five lines; settings files round-trip with unknown keys kept.
+
+### B: The launcher
+
+- `dq8-launcher` in Dear ImGui over SDL3: first-run wizard (SDL3's file dialog for the ISO, verification, toolchain
+  check with advice, setup with per-stage progress, a log view, cancel and resume, through `setup::run()` on a worker
+  thread), Library/Play (starts `dq8-game --iso ... --module-dir ... --config <user file> --status -`, reads the
+  status lines, shows exit reasons with `error_text()`'s message and action), Settings (pages generated from the
+  schema and string table, `requires` conditions, restart hints, reset), Controllers (profiles per device, live
+  capture, a test view; the profile format comes from C), Diagnostics (export through A's API), About (version,
+  licences, `THIRD_PARTY_NOTICES.md`).
+- DPI-aware (SDL content scale), keyboard and gamepad navigation, a bundled open-licence font (record it in the
+  notices).
+- UI logic in view-models (wizard state machine, settings page model, process supervisor) testable without a window;
+  rendering stays thin.
+- **Owns:** `src/launcher/**`, `tests/unit/m5_launcher_tests.cmake`, `tests/unit/test_launcher_*`, a font under
+  `data/fonts/` if one is bundled.
+- **Done when:** on Linux a user picks the ISO, watches the setup, presses Play and plays, changes settings that
+  persist and take effect on the next start, rebinds a pad, and exports diagnostics, without a terminal; the
+  view-model tests run in CI.
+
+### C: Display, input, audio and widescreen
+
+- **Display:** window modes (windowed, borderless, exclusive fullscreen; Alt+Enter), start size, vsync; aspect
+  `auto`/`4:3`/`16:9`/`stretch` with `auto` following the game's 16:9 option through a game-layer watcher on the
+  profile's new `[display] widescreen_variable`; integer scaling; filter; `internal_resolution` driving super-sampling
+  and the three high-resolution options of `ParallelGsConfig`, with a pipeline cache in the user data directory.
+- **Input:** bindings from per-device profiles (keyboard and gamepad; format `user_config_dir()/input/<name>.toml`,
+  documented in `Docs/formats/`), dead zones, stable port assignment by device GUID, hot-plug, rumble strength.
+- **Audio:** device selection by name, volume after the audio hash.
+- **Owns:** `src/runtime/platform/sdl/**`, the `gs_parallel_backend` configuration wiring, the window and present
+  parts of `src/host/run_machine.cpp`, `src/host/audio_wiring.cpp`, new `src/game/display_watcher.*`, the profile's
+  `[display]` table (`data/regions/SLUS_21207.toml`, `region_profile.*` for that table only),
+  `tests/unit/m5_display_tests.cmake` and its tests.
+- **Done when:** each C row of the table changes behaviour on the disc; `auto` shows 16:9 frames and the `_W` movies
+  at 16:9 when the game's option is on; `2x` gives a real higher-resolution picture; a rebound pad keeps its port
+  across a replug; M3/M4 goldens unchanged.
+
+### D: Published maps and Linux packaging
+
+- `tools/ghidra/publish_maps.py` (contributor tool, `python3 -I`): `work/recomp/maps` → `data/maps/SLUS_21207/*.toml`.
+  The core loader reads published maps by default, fills the jump tables' entries from the unit image at `prepare`,
+  and checks the source SHA-1; `--maps DIR` keeps the contributor path. Names: kernel and SDK names only, everything
+  else generated from the address; first establish whether `ps2_recomp` treats any name specially.
+- Checker rules for `data/maps/` (only the published format's keys; no `entries`, no free text).
+- **Proof:** the published maps give the same generated C++ as today's maps (identical, or identical apart from
+  generated names, each difference explained) and modules that pass the M3/M4 checks on the disc.
+- Install layout: `dq8-game`, `dq8-launcher`, `dq8ctl`, `ps2_recomp`, the GS and movie libraries, `data/`,
+  `config/`, `cmake/module`, the ABI headers; RPATH `$ORIGIN/../lib`; `share/` lookups next to `bin/`.
+- A minimal LGPL FFmpeg build (mpeg2video only; submodule, `cmake/Ffmpeg.cmake`) bundled for `dq8-movie`.
+- The AppImage (`packaging/linux/`: launcher, game, tools, libraries, cmake and ninja bundled; the system compiler
+  builds the modules) with a desktop entry and icon; a CI job that builds it and scans it with the checker.
+- **Owns:** `data/maps/**`, `tools/ghidra/publish_maps.py`, `src/core/recomp/function_map.*` and the `prepare` table
+  fill, `scripts/check_no_game_data.py`, install rules in the CMake lists (`install()` lines only), `packaging/linux/**`,
+  `third_party/ffmpeg`, `cmake/Ffmpeg.cmake`, `cmake/Movie.cmake`, the CI packaging job,
+  `tests/unit/m5_maps_tests.cmake` and its tests, `Docs/formats/function-map.md`.
+- **Done when:** a clean checkout builds modules from the disc with no Ghidra and no `work/recomp/maps`; the proof
+  above holds; the AppImage runs on a clean Ubuntu 24.04 and passes the scan.
+
+### E: Windows
+
+- `cmake/toolchains/llvm-mingw.cmake`; the whole host (SDL3, paraLLEl-GS and Granite, minicoro fibers, the process
+  runner, paths, audio, `dq8-movie` with the LGPL FFmpeg DLLs) cross-built from Linux with a pinned llvm-mingw;
+  Windows fixes in the runtime (each in a `#ifdef _WIN32` section E adds); the unit tests under Wine in CI.
+- The module build on Windows with the same toolchain (bundled cmake and ninja); the launcher as a GUI-subsystem
+  executable.
+- The toolchain download: consent, pinned URL and SHA-256, resume, unpack into the user data directory
+  (`src/core/toolchain/download.*`, called by A's `detect()` through `DetectOptions::bundled_root`).
+- The Windows zip (`packaging/windows/`) and a CI job that cross-builds it, runs the tests under Wine and scans it.
+- **Owns:** `cmake/toolchains/**`, `src/core/toolchain/download.*`, the Windows sections it adds, `packaging/windows/**`,
+  the CI windows-cross job, `tests/unit/m5_windows_tests.cmake` and its tests. The MSVC job stays a compile check.
+- **Done when:** the cross-built host passes the unit tests under Wine and boots the disc to the title under Wine on
+  the dev box; the zip passes the scan; the owner's run on real Windows is the integration step I3.
+
+## Merge order and integration
+
+**Merge order:** A → C → D → B → E. Later sessions rebase on what is merged; contract changes go through the
+coordinator.
+
+| Step | Settles |
+|---|---|
+| I1 | The settings round trip: launcher Settings → settings file → `dq8-game` (window mode, 2× picture, aspect auto at 16:9, bindings, volume) |
+| I2 | A clean Linux profile: AppImage → wizard → setup (published maps, progress, cancel and resume) → Play → save → restart → Continue; no terminal |
+| I3 | Windows under Wine on the dev box (smoke), then the owner on real Windows: zip → wizard → toolchain download → setup → Play |
+| I4 | The legal scan of the AppImage and zip; `THIRD_PARTY_NOTICES.md` covers every bundled binary |
+
+## Acceptance
+
+1. Linux and Windows: a new user goes from the ISO to playing without a terminal (wizard, verification, setup with
+   progress, cancel and resume, Play), with the published maps and no Ghidra.
+2. The settings UI, generated from the schema, persists to TOML and drives `dq8-game`: window modes, vsync, internal
+   resolution 1×–4× giving a real higher-resolution picture, aspect including auto 16:9, integer scaling, filter,
+   audio device and volume, rumble.
+3. Controller mapping: per-device profiles, rebinding, dead zones, hot-plug with stable ports.
+4. The diagnostics export holds no game data; errors show stable codes with an action.
+5. The M3/M4 goldens are unchanged with default settings; deterministic events are unchanged (status is separate).
+6. CI is green on every job including the AppImage and Windows cross builds; checker, pre-commit and REUSE lint are
+   clean; release artifacts scan clean.
+
+## Risks
+
+| Risk | Handling |
+|---|---|
+| The runtime has never run on Windows (fibers, Vulkan through Granite under mingw, audio, paths) | E starts with the cross build and Wine smoke tests; the owner validates on real Windows at I3 |
+| Published maps are a legal question (D9) | Shape only: no invented names, no table values; ADR-0017 records it; the checker enforces the format |
+| The AppImage against the user's compiler and glibc | Built on an Ubuntu 24.04 base; the toolchain check reports versions; modules use the user's compiler only |
+| A 15–40 minute first build | Progress with an estimate from the manifest's timings, cancel and resume, RAM-based jobs, optional ccache |
+| A minimal LGPL FFmpeg on both platforms | mpeg2video-only configure; `auto` keeps skipping movies without the library |
+| Dear ImGui DPI, fonts and file dialogs | SDL3 content scale, SDL3's native dialogs, a bundled open font |
+
+## Protocol notes
+
+(Sessions append their findings here.)
+
+## Bring-up log
+
+| Date | Step | Result |
+|---|---|---|
+| 2026-10-22 | Day 0 | Contracts, stubs and the placeholder launcher on `main`; dev-clang and asan unit tests pass (596); the launcher runs three frames on SDL's dummy driver |
+
+## Results
+
+(Filled in at the end of M5.)

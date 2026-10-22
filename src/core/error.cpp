@@ -84,6 +84,24 @@ std::string_view to_string(ErrorCode code) noexcept {
         return "work-stale";
     case ErrorCode::invalid_argument:
         return "invalid-argument";
+    case ErrorCode::settings_parse:
+        return "settings-parse";
+    case ErrorCode::settings_invalid:
+        return "settings-invalid";
+    case ErrorCode::toolchain_incomplete:
+        return "toolchain-incomplete";
+    case ErrorCode::download_failed:
+        return "download-failed";
+    case ErrorCode::insufficient_space:
+        return "insufficient-space";
+    case ErrorCode::setup_cancelled:
+        return "setup-cancelled";
+    case ErrorCode::smoke_failed:
+        return "smoke-failed";
+    case ErrorCode::maps_missing:
+        return "maps-missing";
+    case ErrorCode::registry_parse:
+        return "registry-parse";
     }
     return "unknown";
 }

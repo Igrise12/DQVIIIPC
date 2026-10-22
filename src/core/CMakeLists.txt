@@ -25,6 +25,11 @@ add_library(dq8_core STATIC
     recomp/pipeline.cpp
     intake/verify.cpp
     intake/extract.cpp
+    error_text.cpp
+    settings/settings.cpp
+    setup/setup.cpp
+    toolchain/toolchain.cpp
+    registry/registry.cpp
 )
 add_library(dq8::core ALIAS dq8_core)
 target_include_directories(dq8_core PUBLIC "${PROJECT_SOURCE_DIR}/include")

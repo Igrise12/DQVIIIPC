@@ -11,7 +11,9 @@ static recompilation of the game's EE code to C++, run on a purpose-built runtim
 the title menu headless or in an SDL3 window, with paraLLEl-GS frames at PCSX2 parity. M4 (playable core) is in
 progress: sessions A–D are merged (2026-10-22); the field draws in 3D, the menu opens, saves are written to and
 reloaded from a host-folder card, the movies play, and the game's own sound modules run on an IOP interpreter
-with a register-level SPU2. Town, shop and battle await the owner's playtest.**
+with a register-level SPU2. Town, shop and battle await the owner's playtest. M5 (launcher MVP) is planned
+(2026-10-22) and its day 0 is on `main`: the settings, setup, toolchain and registry contracts and a placeholder
+`dq8-launcher` (Dear ImGui over SDL3).**
 - `src/core` (`libdq8core`): ISO 9660 reader, SHA-1/CRC-32, ELF32 reader and writer, `MWo3` parser, region profiles
   (`data/regions/SLUS_21207.toml`: hashes, sizes, addresses and the S3 loader facts, never bytes), `verify_image()` /
   `extract()`, a portable process runner, and the recompile pipeline (`core/recomp/`: function maps, per-unit
@@ -23,10 +25,11 @@ with a register-level SPU2. Town, shop and battle await the owner's playtest.**
   kernel, DMAC/VIF/GIF/VU1, the GS pipeline with null, trace and paraLLEl-GS backends, SIF and the native IOP servers,
   guest memory, ELF loader, dispatch tables, overrides and the overlay manager. `src/game`: the profile-driven game
   layer (residency hook, movie skip, title watcher, `--until`). `src/host`: `dq8-game`, headless or SDL3 window.
+  `src/launcher`: `dq8-launcher` (M5 placeholder). `config/settings/`: the settings schema and its string table.
 - `dq8-game --until title` boots the disc to the title menu in 1,200 vblanks, deterministically (the M3 input under
   `--movies blank`; the default `--movies skip` also skips the title's flyover timeline); `--window` plays it live
   (see `Docs/milestones/M3-boots.md` §Results).
-- Tests: 434 unit tests (CI on GCC, Clang, MSVC, ASan), local disc tests, a synthetic machine run pinned to golden
+- Tests: 596 unit tests (CI on GCC, Clang, MSVC, ASan), local disc tests, a synthetic machine run pinned to golden
   hashes, and a synthetic recompile end-to-end suite (label `e2e`, CI job on GCC 13).
 
 The plan of record is the three documents in `Docs/`; read them before
@@ -46,8 +49,10 @@ Decided in brief §14: D1 (name), D2 (license, ADR-0009), D3 (local game-module 
 plus patch queue, ADR-0003) and D5 (paraLLEl-GS first, ADR-0004); with M3 (2026-10-21) ADR-0005 (SDL3), 0007 (machine
 thread and fibers), 0011 (native IOP servers first) and 0012 (overlay residency through the loader hook); with M4
 (2026-10-21) ADR-0014 (sound modules on an IOP interpreter), 0015 (movies through an sceMpeg HLE with libavcodec) and
-0016 (host-folder memory card). D6 to D9 and ADR-0001, 0002, 0006, 0010 and 0013 (guarded guest-state writes,
-implemented behind `--movies skip`) are **proposals**; do not present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
+0016 (host-folder memory card); with M5 (2026-10-22) ADR-0006 (schema-driven settings), 0010 (Dear ImGui launcher,
+D6), 0017 (published address-only function maps, D9) and 0018 (llvm-mingw for Windows host and modules). D7, D8 and
+ADR-0001, 0002 and 0013 (guarded guest-state writes, implemented behind `--movies skip`) are **proposals**; do not
+present them as settled. Record a newly accepted decision as `Docs/adr/NNNN-title.md`, flip
 its row in architecture.md §18 and brief §14, and use absolute dates.
 
 ## Commands
@@ -166,6 +171,14 @@ ADRs 0014–0016):
   interpreted are done; B3/B4 (town, shop, battle) are left to the owner's playtest;
 - open: the movie scan-out geometry (4/3 horizontally against PCSX2), the menu's separator dots, two bright glows,
   WAV and frame parity tooling, VU1 speed (about 13 vblanks/s in the field, release preset).
+
+**M5 (launcher MVP) is planned** with the project owner on 2026-10-22 (`Docs/milestones/M5-launcher.md`; ADRs 0006,
+0010, 0017, 0018): Linux and Windows; a new user goes from the ISO to playing without a terminal.
+- day 0 is on `main`: error codes with texts, the settings schema (`config/settings/`) and `dq8/core/settings.h`,
+  the setup, toolchain and registry APIs (stubs), `dq8-game --config/--set/--status` (parsed, refused until wired),
+  the published map format (`Docs/formats/function-map.md`), Dear ImGui and nlohmann/json, a placeholder launcher;
+- next: sessions A (core APIs, settings, CLI), B (launcher), C (display, input, audio, widescreen), D (published
+  maps, Linux packaging) and E (Windows, llvm-mingw) in parallel, merged A → C → D → B → E, then integration I1–I4.
 
 M2's and M3's records are `Docs/milestones/M2-first-recompile.md` and `M3-boots.md`.
 Do not start implementation work the user has not asked for.

@@ -1,0 +1,226 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+#
+# The settings schema (ADR-0006, architecture.md §9): every user-facing setting, declared once. The launcher builds
+# its settings pages from this file; dq8-game and dq8ctl read values through dq8/core/settings.h.
+#
+# Each [[setting]] has: key ("category.name"), type (boolean, integer, real, choice, text, path), default, choices
+# (choice) or min and max (integer, real), label and description (string-table keys in strings/<language>.toml;
+# a choice value's text is "<key>.choices.<value>"), category (the page), and optionally advanced, requires_restart,
+# hot_reload, requires (["key=value", ...]: shown only when all hold) and owner (the component that reads it).
+# Defaults reproduce M4's behaviour, so default settings never move a golden hash.
+# A key may be added; it is never renamed or reused (old files keep their meaning). Bump schema_version and add a
+# migration when a value's meaning changes.
+
+schema_version = 1
+
+# --- display (owner: runtime.platform and the GS backend; M5 session C) ---
+
+[[setting]]
+key = "display.window_mode"
+type = "choice"
+choices = ["windowed", "borderless", "fullscreen"]
+default = "windowed"
+label = "display.window_mode.label"
+description = "display.window_mode.description"
+category = "display"
+owner = "runtime.platform"
+
+[[setting]]
+key = "display.width"
+type = "integer"
+min = 640
+max = 7680
+default = 1280
+label = "display.width.label"
+description = "display.width.description"
+category = "display"
+requires = ["display.window_mode=windowed"]
+owner = "runtime.platform"
+
+[[setting]]
+key = "display.height"
+type = "integer"
+min = 480
+max = 4320
+default = 960
+label = "display.height.label"
+description = "display.height.description"
+category = "display"
+requires = ["display.window_mode=windowed"]
+owner = "runtime.platform"
+
+[[setting]]
+key = "display.vsync"
+type = "boolean"
+default = true
+label = "display.vsync.label"
+description = "display.vsync.description"
+category = "display"
+owner = "runtime.platform"
+
+[[setting]]
+key = "display.internal_resolution"
+type = "choice"
+choices = ["1x", "2x", "3x", "4x"]
+default = "1x"
+label = "display.internal_resolution.label"
+description = "display.internal_resolution.description"
+category = "display"
+requires_restart = true
+owner = "runtime.gs"
+
+[[setting]]
+key = "display.aspect"
+type = "choice"
+choices = ["auto", "4:3", "16:9", "stretch"]
+default = "auto"
+label = "display.aspect.label"
+description = "display.aspect.description"
+category = "display"
+owner = "runtime.platform"
+
+[[setting]]
+key = "display.integer_scaling"
+type = "boolean"
+default = false
+label = "display.integer_scaling.label"
+description = "display.integer_scaling.description"
+category = "display"
+owner = "runtime.platform"
+
+[[setting]]
+key = "display.filter"
+type = "choice"
+choices = ["linear", "nearest"]
+default = "linear"
+label = "display.filter.label"
+description = "display.filter.description"
+category = "display"
+owner = "runtime.platform"
+
+# --- audio (owner: runtime.platform; M5 session C) ---
+
+[[setting]]
+key = "audio.output"
+type = "choice"
+choices = ["sdl", "null"]
+default = "sdl"
+label = "audio.output.label"
+description = "audio.output.description"
+category = "audio"
+advanced = true
+requires_restart = true
+owner = "host"
+
+[[setting]]
+key = "audio.device"
+type = "text"
+default = ""
+label = "audio.device.label"
+description = "audio.device.description"
+category = "audio"
+requires_restart = true
+owner = "runtime.platform"
+
+[[setting]]
+key = "audio.volume"
+type = "integer"
+min = 0
+max = 100
+default = 100
+label = "audio.volume.label"
+description = "audio.volume.description"
+category = "audio"
+owner = "runtime.platform"
+
+[[setting]]
+key = "audio.latency_ms"
+type = "integer"
+min = 10
+max = 1000
+default = 64
+label = "audio.latency_ms.label"
+description = "audio.latency_ms.description"
+category = "audio"
+advanced = true
+requires_restart = true
+owner = "host"
+
+# --- input (owner: runtime.platform; M5 session C) ---
+
+[[setting]]
+key = "input.profile"
+type = "text"
+default = "default"
+label = "input.profile.label"
+description = "input.profile.description"
+category = "input"
+owner = "runtime.platform"
+
+[[setting]]
+key = "input.deadzone"
+type = "integer"
+min = 0
+max = 50
+default = 8
+label = "input.deadzone.label"
+description = "input.deadzone.description"
+category = "input"
+owner = "runtime.platform"
+
+[[setting]]
+key = "input.rumble"
+type = "boolean"
+default = true
+label = "input.rumble.label"
+description = "input.rumble.description"
+category = "input"
+owner = "host"
+
+[[setting]]
+key = "input.rumble_strength"
+type = "integer"
+min = 0
+max = 100
+default = 100
+label = "input.rumble_strength.label"
+description = "input.rumble_strength.description"
+category = "input"
+requires = ["input.rumble=true"]
+owner = "runtime.platform"
+
+# --- game (owner: host; M5 session A) ---
+
+[[setting]]
+key = "game.movies"
+type = "choice"
+choices = ["auto", "play", "skip"]
+default = "auto"
+label = "game.movies.label"
+description = "game.movies.description"
+category = "game"
+requires_restart = true
+owner = "host"
+
+[[setting]]
+key = "game.save_dir"
+type = "path"
+default = ""
+label = "game.save_dir.label"
+description = "game.save_dir.description"
+category = "game"
+requires_restart = true
+owner = "host"
+
+[[setting]]
+key = "game.memory_card2"
+type = "choice"
+choices = ["none", "formatted", "unformatted"]
+default = "none"
+label = "game.memory_card2.label"
+description = "game.memory_card2.description"
+category = "game"
+advanced = true
+requires_restart = true
+owner = "host"

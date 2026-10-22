@@ -15,17 +15,47 @@ namespace dq8::host {
 namespace {
 
 // Options that take a value, and those of them that may be given more than once.
-const std::set<std::string, std::less<>> value_options{
-    "iso",           "elf",           "regions",        "module-dir",   "overlay-window",
-    "resident",      "disc",          "max-dispatches", "gs",           "vblanks",
-    "until",         "dump-frame",    "gs-trace",       "input-script", "record-input",
-    "speed",         "ssaa",          "movies",         "events",       "trace",
-    "stop-at-pc",    "stop-at-rpc",   "dump-ram-at",    "audio",        "audio-dump",
-    "audio-latency", "movie-decoder", "save-dir",       "memory-card",  "memory-card2",
-    "rtc",           "rumble",        "vu0-registers",  "dump-dir",     "dump-iop-ram-at",
-    "dump-spu2-at"};
-const std::set<std::string, std::less<>> repeatable{"dump-frame",  "stop-at-pc",      "stop-at-rpc",
-                                                    "dump-ram-at", "dump-iop-ram-at", "dump-spu2-at"};
+const std::set<std::string, std::less<>> value_options{"iso",
+                                                       "elf",
+                                                       "regions",
+                                                       "module-dir",
+                                                       "overlay-window",
+                                                       "resident",
+                                                       "disc",
+                                                       "max-dispatches",
+                                                       "gs",
+                                                       "vblanks",
+                                                       "until",
+                                                       "dump-frame",
+                                                       "gs-trace",
+                                                       "input-script",
+                                                       "record-input",
+                                                       "speed",
+                                                       "ssaa",
+                                                       "movies",
+                                                       "events",
+                                                       "trace",
+                                                       "stop-at-pc",
+                                                       "stop-at-rpc",
+                                                       "dump-ram-at",
+                                                       "audio",
+                                                       "audio-dump",
+                                                       "audio-latency",
+                                                       "movie-decoder",
+                                                       "save-dir",
+                                                       "memory-card",
+                                                       "memory-card2",
+                                                       "rtc",
+                                                       "rumble",
+                                                       "vu0-registers",
+                                                       "dump-dir",
+                                                       "dump-iop-ram-at",
+                                                       "dump-spu2-at",
+                                                       "config",
+                                                       "set",
+                                                       "status"};
+const std::set<std::string, std::less<>> repeatable{
+    "dump-frame", "stop-at-pc", "stop-at-rpc", "dump-ram-at", "dump-iop-ram-at", "dump-spu2-at", "set"};
 const std::set<std::string, std::less<>> flag_options{
     "stop-at-first-syscall", "trace-dispatch",  "trap-mmio",   "json", "help", "version", "headless",
     "strict-kernel",         "verify-overlays", "trace-events"};
@@ -62,7 +92,10 @@ const std::set<std::string, std::less<>> machine_options{"disc",
                                                          "vu0-registers",
                                                          "dump-dir",
                                                          "dump-iop-ram-at",
-                                                         "dump-spu2-at"};
+                                                         "dump-spu2-at",
+                                                         "config",
+                                                         "set",
+                                                         "status"};
 
 // YYYY-MM-DDTHH:MM:SS with a date the CDVD clock can hold (two-digit years from 2000).
 bool valid_rtc(std::string_view v) {
@@ -232,6 +265,11 @@ int usage(std::FILE* out) {
         "  --dump-frame N:PATH      write the scanout of vblank N as PNG (repeatable)\n"
         "  --dump-ram-at N:PATH     write the 32 MiB of RAM after N vblanks (repeatable)\n"
         "  --events FILE|-          JSON-lines events (deterministic fields only)\n"
+        "  --config FILE            a settings file (the keys of config/settings/schema.toml); command-line\n"
+        "                           flags win over it\n"
+        "  --set KEY=VALUE          one setting, applied after --config (repeatable)\n"
+        "  --status FILE|-          the launcher's status lines (not deterministic): started, first frame,\n"
+        "                           frame rate, warnings, exit\n"
         "  --trace LIST             trace categories, printed on stderr: "
         "kernel,sif,rpc,dma,gs,iop,spu2,audio\n"
         "  --trace-events           also write the trace events into --events\n"
@@ -481,6 +519,18 @@ Options parse_options(int argc, const char* const* argv) {
     }
     if (const auto* v = get("events")) {
         o.events = *v;
+    }
+    if (const auto* v = get("config")) {
+        o.config = *v;
+    }
+    for (const std::string& v : all("set")) {
+        if (v.find('=') == std::string::npos || v.front() == '=') {
+            throw UsageError("--set needs KEY=VALUE, not '" + v + "'");
+        }
+        o.sets.push_back(v);
+    }
+    if (const auto* v = get("status")) {
+        o.status = *v;
     }
     if (const auto* v = get("trace")) {
         o.trace = parse_trace(*v);
