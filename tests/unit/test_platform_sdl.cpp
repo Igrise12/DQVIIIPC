@@ -204,6 +204,15 @@ TEST_CASE("a second SDL platform can follow the first", "[platform_sdl]") {
 
 TEST_CASE("set_rumble drives the port's gamepad through SDL", "[platform][sdl]") {
     auto platform = dummy_platform();
+    // A gamepad already connected to the host takes port 0 first, and rumble would go to it.
+    platform->pump_events();
+    int present = 0;
+    if (SDL_JoystickID* pads = SDL_GetGamepads(&present)) {
+        SDL_free(pads);
+    }
+    if (present > 0) {
+        SKIP("a gamepad is connected to this host, so port 0 is not the virtual pad");
+    }
     struct Seen {
         int calls = 0;
         Uint16 low = 0;
