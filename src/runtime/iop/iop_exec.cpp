@@ -543,6 +543,7 @@ void IopExec::run_context(IopCpuState& cpu, IopThread* t) {
     const IopCpuExit exit = cpu_->run(cpu, now_, run_limit_, cost().iop_instruction, stop_info);
     if (exit == IopCpuExit::trap) {
         handle_trap(cpu, t, stop_info.trap);
+        refresh_limit(); // what the trap did may have scheduled an earlier event (an RPC reply, a wake)
     } else if (exit == IopCpuExit::fault) {
         fault(cpu, t, stop_info);
     }
@@ -564,7 +565,6 @@ void IopExec::handle_trap(IopCpuState& cpu, IopThread* t, std::uint32_t slot) {
         poll_count_ = 0;
         HleCall call(*this, cpu, t, f);
         f.fn(call);
-        refresh_limit();
         return;
     }
     case SlotKind::unimplemented: {
