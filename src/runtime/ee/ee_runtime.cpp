@@ -478,7 +478,9 @@ void EeRuntime::stop_missing(std::uint32_t pc, std::uint32_t target, std::uint32
     s.message = dispatcher_.describe_miss(target);
     // A jump (a jump table's target, typically) that leaves its own function names where it lands: the
     // function map splits one function into two, or misses a label.
-    if (how != "run-loop" && source != 0 && how.find("Call") == std::string_view::npos) {
+    // Generated code names its dispatches J, JAL, JR and JALR; host calls use the branch kind's name.
+    const bool call = how == "JAL" || how == "JALR" || how.find("Call") != std::string_view::npos;
+    if (how != "run-loop" && source != 0 && !call) {
         const DispatchTable* from = table_for(dispatcher_, source);
         const DispatchTable* to = table_for(dispatcher_, target);
         const std::optional<std::uint32_t> own =

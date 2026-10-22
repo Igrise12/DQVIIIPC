@@ -170,10 +170,13 @@ TEST_CASE("kernel M4: break and trap stops decode the instruction and name its f
 
 TEST_CASE("kernel M4: a jump that leaves its function says where it lands", "[kernel][m4]") {
     static std::uint32_t target = 0;
+    static const char* name = nullptr;
+    static PS2Runtime::GuestBranchKind kind = PS2Runtime::GuestBranchKind::IndirectJump;
+    name = nullptr;
+    kind = PS2Runtime::GuestBranchKind::IndirectJump;
     HostProgram p;
     p.set(k_main, [](std::uint8_t* rdram, R5900Context* ctx, PS2Runtime* rt) {
-        rt->dispatchGuestBranch(rdram, ctx, target, k_main + 8, k_main + 16,
-                                PS2Runtime::GuestBranchKind::IndirectJump, nullptr);
+        rt->dispatchGuestBranch(rdram, ctx, target, k_main + 8, k_main + 16, kind, name);
         guest_return(ctx);
     });
     p.set(k_other, [](std::uint8_t*, R5900Context* ctx, PS2Runtime*) { guest_return(ctx); });
@@ -185,6 +188,22 @@ TEST_CASE("kernel M4: a jump that leaves its function says where it lands", "[ke
         CHECK(
             stop.message.find("the jump at 0x00300008 in function 0x00300000 lands outside its function, in "
                               "function 0x00300040") != std::string::npos);
+    }
+    SECTION("a JR as generated code names it") {
+        target = k_other + 8;
+        name = "JR";
+        TestMachine m(p.table());
+        const StopInfo stop = stop_of(m.run_from(k_main));
+        CHECK(stop.message.find("lands outside its function") != std::string::npos);
+    }
+    SECTION("a call is not a jump-table target") {
+        target = k_other + 8;
+        name = "JALR";
+        kind = PS2Runtime::GuestBranchKind::IndirectCall;
+        TestMachine m(p.table());
+        const StopInfo stop = stop_of(m.run_from(k_main));
+        CHECK(stop.reason == StopReason::missing_function);
+        CHECK(stop.message.find("lands outside") == std::string::npos);
     }
     SECTION("inside its own function, at no label") {
         target = k_main + 0x20;
