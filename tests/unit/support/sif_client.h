@@ -8,6 +8,7 @@
 #include "runtime/io/disc_source.h"
 #include "runtime/io/pad_state.h"
 #include "runtime/iop/iop.h"
+#include "runtime/iop/iop_memory.h"
 #include "runtime/kernel/kernel_services.h"
 #include "runtime/machine/events.h"
 #include "runtime/machine/interrupts.h"
@@ -36,7 +37,8 @@
 // slot that the IOP's packets land in, a DMAC channel 5 interrupt per packet that this client services by
 // copying the packet, clearing its size byte, re-arming SIF0 and dispatching it, RPC packets in uncached
 // slots, and 0x28-byte client structures whose +0x24 word is the bound server. Time only moves when the
-// client waits, by running the FakeMachine's events.
+// client waits, by running the FakeMachine's events. M4: it also answers binds and calls the interpreted IOP
+// makes of EE servers (add_ee_server).
 namespace dq8::test {
 
 class SifClient {
@@ -271,6 +273,24 @@ class SifClient {
     // How many CALL ends the client has seen (its end function would have run this often).
     std::uint32_t ends(std::uint32_t client) { return ends_[client]; }
 
+    // ---- EE-side servers (the interpreted IOP as a client) ----------------------------------------------
+
+    // A server the IOP can bind and call: its data block and receive buffer live in EE memory at `data` and
+    // `buffer`; `fn` turns (function number, argument bytes) into the reply. Answers as the EE's RPC layer
+    // does: a bind's end packet names the server and buffer; a call's reply data travels ahead of its end
+    // packet to the IOP receive address the call gave.
+    using EeServerFn =
+        std::function<std::vector<std::uint8_t>(std::uint32_t fno, std::vector<std::uint8_t> args)>;
+    void add_ee_server(std::uint32_t sid, std::uint32_t data, std::uint32_t buffer, EeServerFn fn) {
+        ee_servers_[sid] = EeServer{data, buffer, std::move(fn), 0};
+    }
+    // Calls an EE server has answered.
+    std::uint32_t ee_calls(std::uint32_t sid) const {
+        const auto it = ee_servers_.find(sid);
+        return it == ee_servers_.end() ? 0 : it->second.calls;
+    }
+    std::uint32_t ee_binds() const { return ee_binds_; }
+
     // ---- what arrived ------------------------------------------------------------------------------------
 
     const std::array<std::uint32_t, 32>& ee_sregs() const { return sregs_; }
@@ -383,10 +403,69 @@ class SifClient {
         case 0x80000011u: // a fileio completion record is in EE memory
             fileio_done_.push_back(get(p, 0xC));
             break;
+        case 0x80000009u: // the IOP binds an EE server
+            answer_bind(p);
+            break;
+        case 0x8000000Au: // the IOP calls an EE server
+            answer_call(p);
+            break;
         default:
             unknown_.push_back(cid);
             break;
         }
+    }
+
+    struct EeServer {
+        std::uint32_t data = 0;
+        std::uint32_t buffer = 0;
+        EeServerFn fn;
+        std::uint32_t calls = 0;
+    };
+    static constexpr std::uint32_t reply_area = 0x00014000; // reply data the EE servers send
+    static constexpr std::uint32_t end_area = 0x00014800;   // their end packets
+
+    // The end packet for an IOP request: the request's words echoed, the command it ends, server and buffer.
+    static std::vector<std::uint8_t> end_for(const std::vector<std::uint8_t>& request, std::uint32_t cid,
+                                             std::uint32_t server, std::uint32_t buffer) {
+        std::vector<std::uint8_t> e(0x30, 0);
+        for (const std::size_t off : {0x10u, 0x14u, 0x18u, 0x1Cu}) {
+            put(e, off, get(request, off));
+        }
+        put(e, 0x20, cid);
+        put(e, 0x24, server);
+        put(e, 0x28, buffer);
+        return e;
+    }
+
+    void answer_bind(const std::vector<std::uint8_t>& p) {
+        ++ee_binds_;
+        const auto it = ee_servers_.find(get(p, 0x20));
+        const std::uint32_t server = it == ee_servers_.end() ? 0 : it->second.data;
+        const std::uint32_t buffer = it == ee_servers_.end() ? 0 : it->second.buffer;
+        send_command(0x80000008u, end_for(p, 0x80000009u, server, buffer), 0, 0, 0, 0, end_area);
+    }
+
+    void answer_call(const std::vector<std::uint8_t>& p) {
+        const std::uint32_t server = get(p, 0x34);
+        EeServer* s = nullptr;
+        for (auto& [sid, candidate] : ee_servers_) {
+            if (candidate.data == server) {
+                s = &candidate;
+            }
+        }
+        if (s == nullptr) {
+            throw std::runtime_error("the IOP called an EE server that is not registered");
+        }
+        ++s->calls;
+        std::vector<std::uint8_t> reply = s->fn(get(p, 0x20), read(s->buffer, get(p, 0x24)));
+        const std::uint32_t recv = get(p, 0x28);
+        const auto size = static_cast<std::uint32_t>(std::min<std::size_t>(reply.size(), get(p, 0x2C)));
+        reply.resize(size);
+        if (size != 0) {
+            write(reply_area, reply);
+        }
+        send_command(0x80000008u, end_for(p, 0x8000000Au, server, s->buffer), reply_area, recv, size, 0,
+                     end_area);
     }
 
     FakeMachine& m_;
@@ -399,6 +478,8 @@ class SifClient {
     std::vector<std::uint32_t> unknown_;
     std::map<std::uint32_t, std::uint32_t> ends_;
     std::uint64_t serviced_ = 0;
+    std::map<std::uint32_t, EeServer> ee_servers_;
+    std::uint32_t ee_binds_ = 0;
 };
 
 // ---- a ready-made IOP under test
@@ -442,9 +523,11 @@ inline IsoBuilder test_disc() {
 }
 
 struct IopRig {
+    // `configure` edits the configuration last (M4: devices, strict imports).
     explicit IopRig(const IsoBuilder& disc = test_disc(),
                     std::vector<rt::IopModuleSpec> modules = test_modules(),
-                    std::string reset_image = "MODULES/IOPRP.IMG")
+                    std::string reset_image = "MODULES/IOPRP.IMG",
+                    const std::function<void(rt::IopConfig&)>& configure = {})
         : image(core::iso::Image::from_bytes(disc.build(&layout))), source(rt::make_iso_disc_source(image)),
           iop(std::make_unique<rt::Iop>([&] {
               rt::IopConfig c;
@@ -452,6 +535,9 @@ struct IopRig {
               c.input = &input;
               c.modules = std::move(modules);
               c.reset_image = std::move(reset_image);
+              if (configure) {
+                  configure(c);
+              }
               return c;
           }())),
           client(m) {
@@ -466,5 +552,62 @@ struct IopRig {
     std::unique_ptr<rt::Iop> iop;
     SifClient client;
 };
+
+// ---- the interpreted IOP (M4 session A) ----------------------------------------------------------------
+
+// The test disc with synthetic IRX files added as /MODULES/<NAME>.IRX.
+inline IsoBuilder disc_with(const std::vector<std::pair<std::string, std::vector<std::uint8_t>>>& modules) {
+    IsoBuilder b = test_disc();
+    for (const auto& [name, bytes] : modules) {
+        b.add_file("/MODULES/" + name + ".IRX", bytes);
+    }
+    return b;
+}
+
+// The test module table plus one "interpret" row per name.
+inline std::vector<rt::IopModuleSpec> interpreted(std::initializer_list<std::string> names) {
+    std::vector<rt::IopModuleSpec> specs = test_modules();
+    for (const std::string& n : names) {
+        specs.push_back({n, {"interpret"}});
+    }
+    return specs;
+}
+
+struct LoadReply {
+    bool done = false;
+    std::int32_t id = 0;
+    std::int32_t start = 0;
+};
+
+// sceSifLoadModule through the loadfile server; waits at most `timeout` cycles for the reply.
+inline LoadReply loadfile_module(SifClient& c, std::string_view path, std::string_view args = {},
+                                 rt::Cycles timeout = rt::ee_clock_hz) {
+    constexpr std::uint32_t loader = 0x00012F00;
+    constexpr std::uint32_t request = 0x00030000;
+    constexpr std::uint32_t reply = 0x00031000;
+    if (c.read32(loader + 0x24) == 0 && c.bind(loader, 0x80000006u) == 0) {
+        throw std::runtime_error("the loadfile server does not bind");
+    }
+    std::vector<std::uint8_t> req(0x200, 0);
+    SifClient::put(req, 0, static_cast<std::uint32_t>(args.size()));
+    std::memcpy(req.data() + 8, path.data(), path.size());
+    std::memcpy(req.data() + 0x104, args.data(), args.size());
+    c.write(request, req);
+    c.write32(reply, 0xEEEEEEEEu);
+    c.write32(reply + 4, 0xEEEEEEEEu);
+    c.call(loader, 0, request, 0x200, reply, 8, false);
+    LoadReply r;
+    r.done = c.wait_for([&] { return c.call_done(loader); }, c.machine().clock().now() + timeout);
+    r.id = static_cast<std::int32_t>(c.read32(reply));
+    r.start = static_cast<std::int32_t>(c.read32(reply + 4));
+    return r;
+}
+
+inline std::uint32_t iop_ram32(const rt::Iop& iop, std::uint32_t address) {
+    const auto ram = iop.ram();
+    std::uint32_t v = 0;
+    std::memcpy(&v, ram.data() + (address & (rt::IopMemory::size - 1)), 4);
+    return v;
+}
 
 } // namespace dq8::test
