@@ -6,4 +6,6 @@ target_sources(dq8_unit_tests PRIVATE
     test_iop_cpu.cpp
     test_irx_loader.cpp
     test_iop_kernel.cpp
+    test_iop_sif.cpp
+    test_iop_hw.cpp
 )
