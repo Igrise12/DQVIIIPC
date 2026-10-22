@@ -60,7 +60,8 @@ and saves are not.
 **Upstream and reference code.** PS2Recomp (`eb8688b`): ps2xIOP (R3000A interpreter 497 lines, IOP kernel 744, IRX
 loader 561, sysclib 336, timrman 476; tests about 1,650), the VU0 micro bridge (`ps2_runtime.cpp:198-272`, adapted on
 day 0), `Kernel/Stubs/MPEG.cpp` (about 300 of 2,573 lines useful), `Kernel/Stubs/MemoryCard.cpp` (path
-normalisation, wildcards, attributes). PCSX2's SPU2 behaviour may be adapted (GPL-3.0-or-later, attributed). The dev
+normalisation, wildcards, attributes). PCSX2's SPU2 behaviour may be adapted (GPL-3.0-or-later, attributed); session B adapted
+`pcsx2/SPU2/` at v2.7.524 (`3e29183a37e74cbc8c17bda8afb63c2d9bc6fd14`, git-ignored clone in `work/ref/pcsx2`). The dev
 host has libavcodec 63 (FFmpeg 8); Ubuntu 24.04 CI has 60.
 
 **PCSX2 references on hand.** `work/pcsx2/new-game-field-20261019-204003/field.p2s`, `menu-20261019-203216/menu.p2s`
@@ -112,7 +113,7 @@ Battle has never been captured.
 | `iop_slice` | 16,384 | the longest IOP slice before the EE gets a turn (2,048 IOP cycles) |
 | `iop_spin_reads` | 64 | identical device reads before the IOP spin detector jumps |
 | `spu2_block_samples` | 32 | samples per output block when nothing touches the SPU2 |
-| `spu2_dma_per_halfword` | 0 (session B sets it) | manual SPU2 DMA time |
+| `spu2_dma_per_halfword` | 192 (24 IOP cycles) | manual SPU2 DMA time per 16-bit word: PCSX2's `CYCLES_PER_WORD` (`pcsx2/SPU2/Dma.cpp`), with its chunking (a write moves `min(R, 256 + R/24)` words at each chunk's start, a read 256 at each chunk's end plus one word's time) |
 | `movie_picture` | 1,179,648 (4 ms) | one picture the movie HLE delivers |
 | `mc_latency_us`, `mc_bytes_per_second` | 200, 1,000,000 | memory-card replies |
 
@@ -120,7 +121,7 @@ Battle has never been captured.
 `iop_link {module, hle, guest, unimplemented}`, `iop_import_unimplemented {module, library, ordinal}`,
 `iop_rpc_register {sid, module}`, `audio {frames, hash}` (only when frames changed), `movie {phase, name, pictures,
 slot_a, slot_b}`, `movie_decoder {available, reason}`, `mc_op {op, port, path, result}`, `pad_rumble {port, small,
-large}`, `mark {name}`. The `end` event gains fields through `M4Wiring::end_fields` (`audio_hash`, `card_sha1`).
+large}`, `mark {name}`, `spu2_dump {sha1}` (`--dump-spu2-at`). The `end` event gains fields through `M4Wiring::end_fields` (`audio_hash`, `card_sha1`).
 
 ## Sessions
 

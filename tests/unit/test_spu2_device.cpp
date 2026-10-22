@@ -422,3 +422,31 @@ TEST_CASE("spu2 device: stopping a manual transfer abandons its remaining chunks
     CHECK(r.ram(0x30000 + 297) == 0x7777);
     CHECK(r.ram(0x30000 + 298) == 0); // the second chunk never came
 }
+
+TEST_CASE("spu2 device: the status handshakes a sound library polls", "[spu2]") {
+    Rig r;
+    Cycles t = 4 * sample;
+    // Power-on: STATX shows only the DMA-ready bit. A core reset (ATTR 0, then on) leaves STATX's low eleven
+    // bits clear, which is what a driver waits for.
+    CHECK(r.read(core_reg(0, statx), t) == 0x80);
+    for (std::uint32_t c = 0; c < 2; ++c) {
+        r.write(core_reg(c, attr), 0x0000, t);
+        r.write(core_reg(c, attr), 0x8000, t);
+        CHECK((r.read(core_reg(c, statx), t) & 0x7FF) == 0);
+    }
+    // DMA write mode: ready; a transfer: busy, not ready; done: ready again.
+    r.write(core_reg(0, attr), 0x8020, t);
+    CHECK((r.read(core_reg(0, statx), t) & 0x480) == 0x80);
+    r.put_iop(0x3000, std::vector<std::uint16_t>(64, 0x1111));
+    r.write32(core_reg(0, tsa_hi), 0x5000, t);
+    const auto s = r.spu2.dma_start(IopDmaRequest{4, 0x3000, bcr_for(64), chcr_write, t});
+    CHECK((r.read(core_reg(0, statx), t) & 0x480) == 0x400);
+    CHECK((r.read(core_reg(0, statx), s.done_at - 1) & 0x480) == 0x400);
+    CHECK((r.read(core_reg(0, statx), s.done_at) & 0x480) == 0x80);
+    // ENDX: KON clears the started voice's bit at the next sample.
+    t = s.done_at + 10 * sample;
+    CHECK((r.read(core_reg(0, endx), t) & 1) == 1);
+    r.write(core_reg(0, kon), 1, t);
+    CHECK((r.read(core_reg(0, endx), t) & 1) == 1);
+    CHECK((r.read(core_reg(0, endx), t + sample) & 1) == 0);
+}
