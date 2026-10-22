@@ -9,8 +9,10 @@
 
 #include <array>
 #include <cstdint>
+#include <set>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // VU0 and VU1 as the EE and the VIFs see them (architecture §5.4): micro and data memory mapped at
@@ -19,9 +21,16 @@
 // VIF goes on: there is no VU timing in the machine, only in the interpreter's own pipeline model. VU1's
 // XGKICK packets go to the GIF's PATH1. A program that does not end within max_program_cycles(), or a
 // reserved instruction, stops the machine with a diagnostic.
+//
+// VU0's registers (M4 session D): EE code keeps them in its thread context (macro mode), so VCALLMS runs on
+// the calling context's VU0 block, and VIF0's MSCAL/MSCNT on the block the kernel says EE code sees now
+// (EeKernel::vu0_view: the running or interrupted thread's, or the one shared file). Without a kernel (device
+// tests) VIF0 runs on the unit's own register file. The first time a different thread (or a handler) runs a
+// VU0 program after another, a vu0_cross_thread event names both: the probe for VU0 use across threads.
 namespace dq8::rt {
 
 class Gif;
+class EeKernel;
 
 class VuUnits final : public IDevice, public IMmioDevice, public IVu0Runner {
   public:
@@ -109,9 +118,15 @@ class VuUnits final : public IDevice, public IMmioDevice, public IVu0Runner {
     };
     static Target locate(std::uint32_t offset) noexcept;
     void run(unsigned unit, bool fresh, std::uint32_t start_pc, std::uint32_t top, std::uint32_t itop);
+    // VIF0's MSCAL (fresh) or MSCNT on the kernel's VU0 view.
+    void run_vu0_view(bool fresh, std::uint32_t start_pc, std::uint32_t top, std::uint32_t itop);
+    void note_vu0_user();
 
     Gif& gif_;
     MachineServices* machine_ = nullptr;
+    EeKernel* kernel_ = nullptr; // the machine's EE kernel, when there is one
+    std::int64_t vu0_user_ = 0;  // the thread (-1: a handler) that ran the last VU0 program; 0: none yet
+    std::set<std::pair<std::int64_t, std::int64_t>> vu0_reported_; // (previous, thread) pairs reported
     std::uint64_t max_program_cycles_ = default_max_program_cycles;
     std::array<Unit, 2> units_;
 };

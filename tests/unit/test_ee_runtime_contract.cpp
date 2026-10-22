@@ -218,13 +218,14 @@ TEST_CASE("contract: a syscall no service implements stops with its number", "[c
     program.set(
         dq8::test::HostProgram::base, [](std::uint8_t* rdram, R5900Context* ctx, PS2Runtime* runtime) {
             ctx->pc = dq8::test::HostProgram::base + 8;
-            dq8::test::guest_syscall(rdram, ctx, runtime, 0x01, {0x7Fu}); // ResetEE: nobody registers it
+            dq8::test::guest_syscall(rdram, ctx, runtime, 0x7E, {0x7Fu}); // a number no kernel call has
             dq8::test::guest_return(ctx);
         });
     TestMachine m(program.table());
     const StopInfo stop = stop_of(m.run_from(dq8::test::HostProgram::base));
     CHECK(stop.reason == StopReason::syscall);
-    CHECK(stop.call_name == "ResetEE");
+    CHECK(stop.call_name.empty());
+    CHECK(stop.number == 0x7Eu);
     CHECK(stop.args[0] == 0x7Fu);
     CHECK(stop.message.find("has no handler for it") != std::string::npos);
 }

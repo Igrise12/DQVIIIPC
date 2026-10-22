@@ -31,6 +31,12 @@ std::uint32_t gpr_u32(const R5900Context& ctx, unsigned reg) noexcept;
 // Sets the low 64 bits (the high 64 bits are kept), as the recompiler's SET_GPR_U64 does.
 void set_gpr_lo(R5900Context& ctx, unsigned reg, std::uint64_t value) noexcept;
 
+// Copies the VU0 macro-mode block (VF, VI, ACC, Q, P, I, R, the flags and VU0 control registers, and the
+// COP2 control registers) from one context to another, leaving everything else of `to` alone: what an
+// interrupt handler inherits from the thread it interrupted, and what one VU0 register file shared by the
+// threads (--vu0-registers shared) carries across a switch.
+void copy_vu0_block(const R5900Context& from, R5900Context& to) noexcept;
+
 // A multi-line dump: pc, the 32 GPRs (all 128 bits when the upper half is non-zero), HI/LO, SA and the COP0
 // status. Lines end in '\n'.
 std::string format_context(const R5900Context& ctx);

@@ -17,7 +17,7 @@
 // module is the region profile's [iop] table (IopModuleSpec); this file only knows the services by name:
 //   fileio, iopheap, loadfile, cdvdfsv   the standard services every IOP boot provides
 //   padman.v1                            the pad server of the old pad library (two server ids)
-//   mcserv.v1                            the memory-card server: a card present and unformatted
+//   mcserv.v1                            the memory-card server over IopConfig::cards (M4)
 //   null:<sid>                           acknowledges every call with zeros (sound servers until M4)
 namespace dq8::rt {
 

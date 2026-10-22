@@ -434,7 +434,7 @@ TEST_CASE("kernel interrupts: a stop inside a handler reports the handler fiber 
     });
     p.set(k_handler, [](std::uint8_t* rdram, R5900Context* ctx, PS2Runtime* rt) {
         ctx->pc = k_handler + 0x10;
-        guest_syscall(rdram, ctx, rt, 0x01); // ResetEE: no service
+        guest_syscall(rdram, ctx, rt, 0x7E); // a number no kernel call has
         guest_return(ctx);
     });
     TestMachine m(p.table());

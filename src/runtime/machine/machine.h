@@ -32,6 +32,8 @@ struct MachineConfig {
     // The no-progress watchdog: stop with StopReason::no_progress after this many fields in which no guest
     // thread made a kernel call or switched (about 20 s at NTSC). 0 turns it off.
     std::uint32_t no_progress_fields = 1200;
+    // One VU0 register file for all guest threads (dq8-game --vu0-registers shared; EeKernel::Options).
+    bool vu0_shared = false;
 };
 
 struct RunLimits {

@@ -305,6 +305,92 @@ decode ms per picture, VU0 cycles, save latency.
 HLE; mcserv requests and replies; padman commands and the actuator layout. Offsets and ids only, re-derived; no
 ps2sdk text.)*
 
+### Session D: memory card, pad, CD clock (2026-10-22)
+
+Re-derived from the game's EE-side libmc, libpad and libcdvd and its save code in the local Ghidra project (M3
+session C's export plus new queries; raw output in `work/m3c/` and `work/m4d/`), and from the game's strings. Words
+are little-endian, "+N" a byte offset. M3-boots.md "Protocol notes" has the RPC framing and the M3 layouts; this
+adds what saving needs. Code: `src/runtime/iop/services/mcserv.cpp`, `padman.cpp`, `src/runtime/io/memcard/`.
+
+**libmc (server 0x80000400, client at `0x003DDC80`).**
+- Function numbers: 0xFE init (blocking, 12-byte reply: 0, mcserv version ≥ 0x20A, mcman version ≥ 0x20E), 1
+  GetInfo, 2 Open (also Mkdir: flags 0x40), 3 Close, 4 Seek, 5 Read, 6 Write, 0x0A Flush, 0x0C ChDir, 0x0D GetDir,
+  0x0E SetInfo (also Rename: flags 0x10), 0x0F Delete, 0x10 Format, 0x11 Unformat. The library also has wrappers
+  for 0x12 (GetEntSpace), 0x15 and 0x35 that nothing calls, and ChDir's wrapper is unreferenced; our server
+  translates ChDir anyway and stops on 0x12, 0x15, 0x35 and every other number.
+- Every call but init is no-wait with one 4-byte result word; `sceMcSync` returns it with the library's command
+  id (Mkdir 0x0B, Rename 0x13, otherwise the function number). The game checks the command id after Flush (0x0A),
+  Close (3), GetDir (0x0D) and Unformat (0x11).
+- Descriptor requests (0x30 bytes): +0 handle, +4 port, +8 slot, +0x0C size (GetInfo: "format wanted"), +0x10
+  offset (GetInfo: "free wanted"), +0x14 origin, inline byte count (GetInfo: "type wanted"), +0x18 EE buffer,
+  +0x1C EE parameter block, +0x20 16 inline bytes.
+- Path requests (0x414 bytes): +0 port, +4 slot, +8 flags or mode, +0x0C maxent, +0x10 EE table or record, +0x14
+  the path (0x400).
+- GetInfo: the server writes the 0xC0-byte block at +0x1C: +0 type (2 = PS2 card), +4 free clusters, +0x90
+  format (1 formatted, 0 not). Our results: the first GetInfo after insertion answers -1 (formatted) or -2
+  (unformatted), every later one 0; no card answers -12 with type 0. After Format and after Unformat the game
+  requires a result ≥ 0.
+- Read: data straight into +0x18; the fix-up block at +0x1C gets zero head and tail counts (16 bytes). Write: the
+  library sends `head = (16 - (buf & 15)) & 15` bytes inline at +0x20 with the count at +0x14, the rest (+0x0C
+  bytes) from EE +0x18; a write of at most 16 bytes travels inline whole. The result is the bytes written.
+- GetDir: up to maxent 0x40-byte records to +0x10: +0 created and +8 modified (each: +1 seconds, +2 minutes, +3
+  hours, +4 day, +5 month, +6 year as u16), +0x10 size, +0x14 attributes (u16), +0x20 the name (32 bytes). The
+  game reads only the size and the name. Mode +8 is always 0.
+- SetInfo: +8 = flags & 7 (1 created, 2 modified, 4 attributes); Rename sends 0x10 with the new name at +0x20 of
+  the 64-byte record whose EE address is at +0x10.
+- Results the game distinguishes: ≥ 0 success (a handle, a count, a position); -1 and -2 (GetInfo, above); -4
+  from Mkdir means "exists" and from Delete "already gone", both tolerated; < -10 means no card; -200 (the
+  library's own "busy") makes it retry; any other negative result is a failure.
+- Wildcards: the game finds its saves with `/BASLUS-21207dq8???` and expects `BASLUS-21207dq8_1` to match, so a
+  `?` that finds the name already ended matches nothing (otherwise one character).
+
+**The game's save files** (names from its strings and save context; sizes from its size table).
+- One directory per adventure log, `/BASLUS-21207dq8_N` (five on screen). It holds `icon.sys` (964 bytes),
+  `dq8ic.ico`, `dq8ic_c.ico` and `dq8ic_d.ico` (49,726 bytes each), and the data file `BASLUS-21207dq8_N` (23,776
+  bytes). A log is valid when GetDir of `.../icon.sys` gives size 964 and the data file has at least 23,712
+  bytes.
+- Creating a log: Mkdir, `icon.sys` with Open 0x202, the three icons with Open 0x203, each written in 0xC00-byte
+  chunks, flushed and closed. Saving over a log: Rename `icon.sys` to `icon.err` (the "write in progress"
+  marker), the data file with Open 0x202 (23,776 bytes, flush), Seek 4 and a one-byte write, Flush, Close; Open
+  `icon.err` with mode 3, rewrite its 964 bytes, Flush, Close, Rename back to `icon.sys`, GetInfo. Deleting:
+  GetDir `dir/*` (maxent 16), Delete from the third record on (the first two are `.` and `..`), Delete the
+  directory, GetInfo.
+- PCSX2 with an empty folder card (only an empty `_pcsx2_superblock`): the game sees an unformatted card, lists
+  five unused logs, and asks whether to format it now (No by default). The scripted run did not
+  get past that prompt reliably on the loaded host (states in `work/pcsx2/probe-20261022-*`), so the files
+  PCSX2 writes and a fresh card's free clusters are still to be compared in bring-up step B5. Our card reports
+  8,000 free clusters when freshly formatted (*inferred*).
+
+**libpad (servers 0x80000100 and 0x80000101).** Every call is function 1 with a 0x80-byte block (+0 command, +4
+port, +8 slot); the commands the library can send and our replies:
+
+| Command | Name (by behaviour) | Request | Reply |
+|---|---|---|---|
+| 0x01 | port open | +0x10 EE pad area | +0x0C 1; +0x14 IOP actuator buffer (0x40 bytes) |
+| 0x06 | set main mode | +0x0C mode index, +0x10 lock | +0x14 1 |
+| 0x08 | set actuator alignment | +0x0C..+0x11 six bytes | +0x14 1 |
+| 0x0A | set button info (pressure) | +0x0C button mask | +0x10 1 |
+| 0x0B | set reference parameters | +0x0C..+0x17 | +0x1C 1 |
+| 0x0C | port count | – | +0x0C 2 |
+| 0x0D | slot count | +0x04 port | +0x0C 1 (0 past the last port) |
+| 0x0F | end | – | +0x0C 1; the ports close |
+| 0x10 | init | – | +0x0C 1 |
+| 0x12 | module version | – | +0x0C 0x0400 |
+| 0x14 | not determined | +0x04 | stops (no caller) |
+| 0x18 | the library's SIF-command callback on or off | +0x04 0 or 1 | nothing |
+
+- The game itself sends 0x12, 0x10, 0x01, 0x06 (only for a digital pad) and 0x08 with the table {0, 1, 0xFF,
+  0xFF, 0xFF, 0xFF}: direct byte 0 drives actuator 0 (the small motor, on or off), byte 1 actuator 1 (the large
+  motor, 0..255).
+- The motors take no command: SetActDirect sends a 32-byte block with SIF DMA into half `counter & 1` of the IOP
+  actuator buffer: +0 a counter, +4 1, +8 6, +0x0C..+0x11 the six direct bytes. The half with the larger counter
+  is the newest. Our server reads it at every vblank and maps it through the alignment table.
+- Pressure: frames report id 0x79 and the twelve pressure bytes only after 0x0A with a non-zero mask; until then
+  0x73 (analog) or 0x41 (digital).
+
+**libcdvd.** The library has no ReadClock S-command (and no other clock or status S-command), so `cdvdfsv`
+needs none; the memory card's timestamps come from our virtual RTC (`--rtc`).
+
 ## Bring-up log
 
 | Unknown | Local evidence | Resolution (addresses, ids, offsets, chosen values) | Change |
@@ -315,6 +401,8 @@ ps2sdk text.)*
 | The field draws no 3D (B1, resolved 2026-10-22) | After the skipped opening movie: a blue screen with dialogue on top at 30 Hz; VU1 ran no program. A VIFcode histogram to vblank 2600 (temporary instrumentation): VIF1 uploads one 88-doubleword VU1 program at micro address 0 every frame (1,006 MPGs) and about 15 V4-32 UNPACKs per frame, but no MSCAL, MSCALF or MSCNT. One frame's VIF1 chain has 1,110 tags (224 `call`, 224 `ret`, 425 `cnt`, 236 `ref`, 1 `end`): per-object `call` sub-chains carrying UNPACKs, and call tags copied from the template at `0x00394A90`, whose upper half holds no VIFcode. (The earlier "254,000 call/ret sub-chains" was a misreading.) Dispatch counts: `FUN_00141EA0` runs 5 times per frame and returns early on empty lists ("reached once" came from `--stop-at-pc` stopping at the first hit); the per-object routine `FUN_00151180` runs about 81 times per frame but never calls `FUN_00149DD0`, which appends the object's matrix UNPACK and MSCAL 0 | `FUN_00151180` culls each object against the view volume with VU0 macro code (`FUN_00151960`, `FUN_001518F0`; matrix product `FUN_0013E790`) that scales by VF0.w. `R5900Context`'s constructor zeroed VF0, so VF0.w read 0 instead of 1 and every object failed the test. Upstream sets VF0 in its runtime, which we do not use | `R5900Context()` sets VF0 to (0, 0, 0, 1) (unit test "a new context's VF0 is (0, 0, 0, 1)"). Afterwards: 123,094 MSCALs and 301,100 MSCNTs by vblank 2600. The M3a RAM SHA-1 at the title becomes `a524a87d…` (the boot path reads VF0); the GS stream `af2abbd8…` is unchanged |
 | VU1 kicks only empty GIF tags (B1, resolved 2026-10-22) | After the VF0 fix: 116,521 XGKICKs by vblank 2600, every one from micro address 0x0008 kicking the empty GIF tag at VU1 data qword 0x13 (copied from the template at `0x00394A80`); the 3D programs never kick. Per-program histogram: MSCAL 0x64 runs 2 cycles and ends at 0x330; the MSCNT from 0x330 runs about 150 cycles and ends at 0x2B0, inside the program at address 0; later MSCNTs from 0x2B0 end at once. A pair trace of one MSCNT from 0x330: the program adds an offset to a VI register and jumps through it with JALR in the next pair; the target should be 0x960 (an uploaded routine), but the interpreter jumped to 0 | JR and JALR followed the conditional branches' rule (a VI register written by the previous instruction reads as its old value). In PCSX2 the rule covers IBEQ, IBNE, IBLTZ, IBGTZ, IBLEZ and IBGEZ only, in both the microVU recompiler (`analyzeBranchVI` is called from the conditional-branch analysis alone) and the interpreter (`_vuJR` and `_vuJALR` read VI directly) | JR and JALR read the current VI value (`vu_lower.cpp`); the inherited test "JR shares the one-instruction VI branch visibility rule" is replaced by "JR and JALR jump through the VI value the previous instruction wrote". The field draws: terrain, characters, the wagon and the forest (frames at vblanks 2050–2300) |
 | Field speed with VU1 drawing (B1, recorded 2026-10-22) | New Game probe, `--gs null`, `--movies blank`: the boot to vblank 1950 takes 4.6 s in the `release` preset (RelWithDebInfo); vblanks 1950–2300 in the field take 71 s, about 4.9 vblanks/s or 8 % of real time (Debug: about 0.6 vblanks/s). By vblank 2300 VU1 has run 185,685 programs, 383 M interpreter cycles and 879,802 XGKICKs. No profiler is installed (`perf` is missing), so the split between the VU1 interpreter and the PATH1 and GIF handling is not measured | The cost arrived with VU1's work; the interpreter models the pipeline cycle by cycle. Speed is recorded, not gated (owner, 2026-10-21) | None yet. Long segments (B3, B4) take tens of minutes a run |
+| GetInfo after the first call (session D, 2026-10-22) | M3a acceptance input, `--movies blank`, the `release` preset with D's branch merged with `11b5a6a`, RAM at vblank 1200 against `11b5a6a` alone | M3's card answered GetInfo -2 every time; D's answers -2 once (a new, unformatted card), then 0. At the title four RAM words differ: the game's per-port record at `0x00467324`/`0x00467328` and its copy at `0x01BC858C`/`0x01BC8590` hold result 0 and "changed" 0 instead of -2 and 1. The title still comes at vblank 1200, the GS stream is `af2abbd8…`, the RAM SHA-1 becomes `ff521066…` | Expected (Protocol notes, libmc). B0's RAM hash moves to `ff521066…` with D |
+| Stale-return check in every build (session D, 2026-10-22) | Six interleaved `release` runs each with and without the check, the M3a input to the title (`--gs null`), on a loaded 12-thread host | No measurable cost: best runs 2.220 s with, 2.227 s without for 1,200 vblanks; the spread between runs (2.2 to 4.4 s) is the host's load | The check stays on in Release |
 
 ## Results
 

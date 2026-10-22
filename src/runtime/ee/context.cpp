@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #include "runtime/ee/context.h"
 
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 
@@ -55,6 +56,19 @@ void set_gpr_lo(R5900Context& ctx, unsigned reg, std::uint64_t value) noexcept {
         return;
     }
     std::memcpy(&ctx.r[reg & 31u], &value, sizeof value);
+}
+
+void copy_vu0_block(const R5900Context& from, R5900Context& to) noexcept {
+    // vu0_vf up to the COP0 registers is the VU0 block in R5900Context's layout (static_asserts below).
+    constexpr std::size_t first = offsetof(R5900Context, vu0_vf);
+    constexpr std::size_t end = offsetof(R5900Context, cop0_index);
+    static_assert(offsetof(R5900Context, vu0_cf) < end && offsetof(R5900Context, vi) > first);
+    if (&from == &to) {
+        return;
+    }
+    std::memcpy(reinterpret_cast<unsigned char*>(&to) + first,
+                reinterpret_cast<const unsigned char*>(&from) + first, end - first);
+    std::memcpy(to.cop2_ccr, from.cop2_ccr, sizeof to.cop2_ccr);
 }
 
 std::string format_context(const R5900Context& ctx) {

@@ -8,6 +8,7 @@
 #include "runtime/gs/gs_pipeline.h"
 #include "runtime/iop/iop.h"
 #include "runtime/machine/machine_services.h"
+#include "runtime/platform/platform.h"
 
 #include <functional>
 #include <memory>
@@ -24,6 +25,8 @@ struct M4Wiring {
     const core::RegionProfile* profile; // null in developer mode (--elf)
     gs::GsPipeline& pipeline;
     rt::IopConfig& iop; // still editable here: devices, cards, rtc, pad_feedback, strict_imports
+    // The window (main thread only), or null headless and in builds without one.
+    rt::IPlatform* platform = nullptr;
     // Devices attached after the IOP and the game layer, in this order; run_game keeps them alive past the
     // machine.
     std::vector<std::unique_ptr<rt::IDevice>> devices;
@@ -32,7 +35,11 @@ struct M4Wiring {
     // Main thread: after every device is attached and before the machine thread starts; after it has joined.
     std::vector<std::function<void()>> on_start;
     std::vector<std::function<void()>> on_stop;
-    // Fields added to the `end` event (deterministic only), after the machine thread has joined.
+    // Main thread, with --window: once per pass of the window loop, after the platform's events.
+    std::vector<std::function<void()>> on_frame;
+    // Fields added to the `start` event (what a run chose that a later run needs to repeat it: --rtc host's
+    // date), and to the `end` event (deterministic only, after the machine thread has joined).
+    std::vector<std::function<void(rt::MachineEvent&)>> start_fields;
     std::vector<std::function<void(rt::MachineEvent&)>> end_fields;
 };
 

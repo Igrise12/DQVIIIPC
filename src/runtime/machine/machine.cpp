@@ -28,7 +28,8 @@ struct Machine::Impl {
         : memory(memory_), dispatcher(dispatcher_), config(std::move(config_)), spin(config.cost.spin_reads),
           ee(memory, dispatcher, self, kernel_services),
           kernel(self, ee,
-                 EeKernel::Options{config.max_call_depth, config.no_progress_fields, FiberStackSpec{}}) {}
+                 EeKernel::Options{config.max_call_depth, config.no_progress_fields, FiberStackSpec{},
+                                   config.vu0_shared}) {}
 
     void schedule_vblank_start(std::uint64_t field) {
         events.schedule(config.video.field_start(field), "vblank-start",
