@@ -117,6 +117,9 @@ struct alignas(16) R5900Context {
 
     R5900Context() {
         std::memset(static_cast<void*>(this), 0, sizeof(*this));
+        // VF0 is hard-wired to (0, 0, 0, 1); generated code reads it like any other register (upstream sets
+        // it in the runtime instead).
+        vu0_vf[0] = _mm_set_ps(1.0f, 0.0f, 0.0f, 0.0f);
         vu0_q = 1.0f;
         cop0_random = 47;
         cop0_status = 0x00010001u; // EIE | IE, as the EE kernel leaves it at hand-off
