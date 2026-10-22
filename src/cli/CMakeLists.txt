@@ -14,3 +14,6 @@ if(TARGET dq8-game)
 endif()
 dq8_set_warnings(dq8ctl)
 dq8_enable_sanitizers(dq8ctl)
+
+include(GNUInstallDirs)
+install(TARGETS dq8ctl RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT recompiler)

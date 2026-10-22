@@ -326,7 +326,12 @@ int run_recomp(const Args& args, const char* argv0) {
 
     recomp::PipelineOptions o;
     o.work_dir = value_or(args, "work", (fs::path("work") / "recomp").string());
-    o.maps_dir = value_or(args, "maps", (o.work_dir / "maps").string());
+    // --maps DIR: contributor maps (tools/ghidra/export_maps.sh); else the published maps (ADR-0017).
+    if (const auto it = args.values.find("maps"); it != args.values.end()) {
+        o.maps_dir = it->second;
+    } else {
+        o.published_maps_dir = recomp::find_maps_dir(executable_dir(argv0));
+    }
     o.units = split_list(value_or(args, "units", ""));
     if (const auto it = args.values.find("jobs"); it != args.values.end()) {
         o.jobs = parse_jobs(it->second);
