@@ -253,10 +253,6 @@ std::optional<std::string> unwired_m4_option(const Options& o) {
     if (!o.dump_iop_ram_at.empty()) {
         return std::string("--dump-iop-ram-at arrives with the interpreted IOP (M4 session A)");
     }
-    if (o.save_dir || o.memory_card != "unformatted" || o.memory_card2 != "none" || o.rtc) {
-        return std::string("--save-dir, --memory-card, --memory-card2 and --rtc arrive with the memory card "
-                           "(M4 session D)");
-    }
     if (o.vu0_registers != "per-thread") {
         return std::string("--vu0-registers shared arrives with M4 session D");
     }

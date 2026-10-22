@@ -5,3 +5,14 @@ target_sources(dq8_unit_tests PRIVATE
     test_memcard.cpp
     test_pad_feedback.cpp
 )
+# dq8-game's card options on the synthetic machine program (the inputs come from the host.machine_inputs
+# fixture of CMakeLists.txt).
+add_test(NAME host.dq8_game_card_wiring
+    COMMAND "${CMAKE_COMMAND}"
+        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DELF=${CMAKE_CURRENT_BINARY_DIR}/machine.elf"
+        "-DMODULE_DIR=$<TARGET_FILE_DIR:dq8_unit_machine>"
+        "-DISO=${CMAKE_CURRENT_BINARY_DIR}/machine.iso"
+        "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/card_wiring"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/run_card_wiring.cmake")
+set_tests_properties(host.dq8_game_card_wiring PROPERTIES FIXTURES_REQUIRED dq8_machine_inputs LABELS unit)

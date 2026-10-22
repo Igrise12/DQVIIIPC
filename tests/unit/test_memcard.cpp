@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+#include "core/platform/paths.h"
 #include "runtime/io/memcard/mc_path.h"
 #include "runtime/io/memcard/memory_card.h"
 #include "runtime/io/memcard/memory_card_store.h"
@@ -456,4 +457,41 @@ TEST_CASE("memcard folder: a folder that cannot be a card is refused", "[memcard
     fs::create_directories(dir.path() / "card");
     std::ofstream(dir.path() / "card" / "card.toml") << "version = 99\n";
     CHECK_THROWS_AS(rt::open_folder_card_store(dir.path() / "card", true, t0), std::runtime_error);
+}
+
+TEST_CASE("paths: the user data directory follows the platform's convention", "[memcard][paths]") {
+    namespace platform = dq8::core::platform;
+    static std::string xdg;
+    static std::string home;
+    static std::string appdata;
+    const auto env = [](std::string_view name) -> std::string_view {
+        if (name == "XDG_DATA_HOME") {
+            return xdg;
+        }
+        if (name == "HOME") {
+            return home;
+        }
+        if (name == "APPDATA") {
+            return appdata;
+        }
+        return {};
+    };
+    xdg.clear();
+    home.clear();
+    appdata.clear();
+    CHECK_THROWS(platform::user_data_dir_from(env));
+#if defined(_WIN32)
+    appdata = "C:\\Users\\u\\AppData\\Roaming";
+    CHECK(platform::user_data_dir_from(env) == fs::path(appdata) / "DQ8-Native");
+#elif defined(__APPLE__)
+    home = "/Users/u";
+    CHECK(platform::user_data_dir_from(env) == fs::path("/Users/u/Library/Application Support/DQ8-Native"));
+#else
+    home = "/home/u";
+    CHECK(platform::user_data_dir_from(env) == fs::path("/home/u/.local/share/dq8-native"));
+    xdg = "relative/ignored";
+    CHECK(platform::user_data_dir_from(env) == fs::path("/home/u/.local/share/dq8-native"));
+    xdg = "/data";
+    CHECK(platform::user_data_dir_from(env) == fs::path("/data/dq8-native"));
+#endif
 }
