@@ -311,6 +311,7 @@ TEST_CASE("spu2 device: output, RAM, state, IRQs and completions do not depend o
           "[spu2]") {
     struct Result {
         std::string frames;
+        std::string audio_hash;
         std::string ram;
         std::string state;
         std::vector<std::pair<IopIrq, Cycles>> irqs;
@@ -367,6 +368,7 @@ TEST_CASE("spu2 device: output, RAM, state, IRQs and completions do not depend o
         at(1000 * sample);
         r.spu2.advance_to(t);
         res.frames = frames_sha1(r.frames);
+        res.audio_hash = r.output.hash_hex();
         res.ram = r.spu2.ram_sha1();
         res.state = r.spu2.state_sha1();
         res.irqs = r.host.irqs;

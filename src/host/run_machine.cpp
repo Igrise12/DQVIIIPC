@@ -241,15 +241,6 @@ std::optional<std::string> unwired_m4_option(const Options& o) {
     if (o.movie_decoder) {
         return std::string("--movie-decoder arrives with the movie HLE (M4 session C)");
     }
-    if (o.audio == "sdl" && o.display == Display::headless) {
-        return std::string("--audio sdl arrives with the audio output (M4 session B)");
-    }
-    if (o.audio_dump) {
-        return std::string("--audio-dump arrives with the SPU2 (M4 session B)");
-    }
-    if (!o.dump_spu2_at.empty()) {
-        return std::string("--dump-spu2-at arrives with the SPU2 (M4 session B)");
-    }
     if (!o.dump_iop_ram_at.empty()) {
         return std::string("--dump-iop-ram-at arrives with the interpreted IOP (M4 session A)");
     }
