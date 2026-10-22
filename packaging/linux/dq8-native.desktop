@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+[Desktop Entry]
+Type=Application
+Name=DQ8-Native
+GenericName=Game launcher
+Comment=Native PC port of Dragon Quest VIII, built from your own disc
+Exec=dq8-launcher
+Icon=dq8-native
+Terminal=false
+Categories=Game;RolePlaying;
+Keywords=PS2;recompilation;port;

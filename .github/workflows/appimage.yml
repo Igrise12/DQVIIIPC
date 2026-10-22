@@ -1,0 +1,58 @@
+name: AppImage
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The Linux release (packaging/linux/README.md): the host, ps2_recomp and the bundled LGPL FFmpeg built on Ubuntu
+# 24.04, installed into an AppDir with CMake and Ninja, packed with appimagetool, and scanned for game data
+# (scripts/check_no_game_data.py --release) before and after packing. No game data is used or produced.
+
+env:
+  # SDL3's Linux backends (as in ci.yml), plus what the bundled FFmpeg and the packaging need.
+  SDL3_LINUX_DEPS: >-
+    libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev libxi-dev libxss-dev libxtst-dev
+    libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev
+    libgles2-mesa-dev libdrm-dev libgbm-dev libasound2-dev libpulse-dev libdbus-1-dev libudev-dev
+  PACKAGING_DEPS: ninja-build gcc-13 g++-13 make nasm curl unzip file desktop-file-utils
+
+jobs:
+  appimage:
+    name: Linux AppImage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Submodules (pinned subset, scripts/init_submodules.sh, and FFmpeg)
+        shell: bash
+        run: |
+          bash scripts/init_submodules.sh
+          git submodule update --init --checkout --depth 1 third_party/ffmpeg
+      - run: sudo apt-get update && sudo apt-get install -y ${{ env.SDL3_LINUX_DEPS }} ${{ env.PACKAGING_DEPS }}
+      - run: echo "::add-matcher::.github/problem-matchers/gcc.json"
+      - name: Configure (release, ps2_recomp, bundled FFmpeg, no tests)
+        run: >-
+          cmake --preset release -B build/appimage -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13
+          -DDQ8_BUILD_RECOMP=ON -DDQ8_FFMPEG=bundled -DDQ8_BUILD_TESTS=OFF
+      - name: Build
+        run: cmake --build build/appimage --parallel
+      - name: AppImage (install, CMake and Ninja, appimagetool, scans)
+        run: packaging/linux/build-appimage.sh --build-dir build/appimage --out build/appimage-out
+      - name: Smoke-run the AppImage's programs (SDL's dummy drivers, no FUSE)
+        shell: bash
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: 1
+          SDL_VIDEO_DRIVER: dummy
+          SDL_AUDIO_DRIVER: dummy
+        run: |
+          app=$(ls build/appimage-out/DQ8-Native-*-x86_64.AppImage)
+          "$app" dq8ctl --version
+          "$app" dq8-game --version
+          "$app" ps2_recomp --help > /dev/null || true
+          "$app" cmake --version
+          "$app" ninja --version
+          "$app" --frames 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DQ8-Native-AppImage
+          path: build/appimage-out/DQ8-Native-*-x86_64.AppImage
+          if-no-files-found: error

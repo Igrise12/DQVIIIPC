@@ -13,6 +13,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(Dq8Options)
 include(CompilerWarnings)
 include(Sanitizers)
+include(Install) # the install layout and RPATH, before the targets
 
 if(DQ8_BUILD_TESTS)
     enable_testing()
