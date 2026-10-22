@@ -58,8 +58,10 @@ struct MovieLibraryConfig {
 std::unique_ptr<IMovieDecoder> make_blank_movie_decoder();
 // Loads dq8-movie; throws MovieDecoderError when it is missing or has another ABI version.
 std::unique_ptr<IMovieDecoder> make_library_movie_decoder(const MovieLibraryConfig& config);
-// Why dq8-movie cannot be used (it does not load, has another ABI version or cannot create a decoder), or
-// nullopt when it can: --movies auto.
+// Why dq8-movie cannot be used (it does not load, has another ABI version or lacks a function), or nullopt
+// when it can: the --movies auto probe. It only loads the library and checks its ABI: no decoder is created
+// and no guest state is touched. A refused library is unloaded; an accepted one stays loaded for the HLE that
+// uses it next (movie_library.cpp says why it is never unloaded).
 std::optional<std::string> movie_library_problem(const MovieLibraryConfig& config);
 // "libdq8-movie.so", "libdq8-movie.dylib" or "dq8-movie.dll".
 std::filesystem::path movie_library_file_name();

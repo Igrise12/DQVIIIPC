@@ -52,8 +52,9 @@ std::vector<rt::OverrideSpec> movie_overrides(const core::RegionProfile& profile
 
 // The sceMpeg HLE's overrides at the profile's [movie.sce_mpeg] addresses (unit "main"): hooks before Create,
 // Delete, AddCallback, AddStrCallback, DemuxPssRing and Reset; GetPicture, IsEnd and the video stream
-// callback replaced; the SDK's inner IPU decode a stop. Empty when the profile has no table. `hle` must
-// outlive the overrides.
+// callback replaced; the SDK's inner IPU decode a stop; and, when the table names the game's player open, a
+// hook before it that gives the HLE the movie's name. Empty when the profile has no table. `hle` must outlive
+// the overrides.
 std::vector<rt::OverrideSpec> movie_hle_overrides(const core::RegionProfile& profile, rt::SceMpegHle& hle);
 
 } // namespace dq8::game

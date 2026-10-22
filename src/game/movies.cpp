@@ -151,6 +151,11 @@ std::vector<rt::OverrideSpec> movie_hle_overrides(const core::RegionProfile& pro
     add(m.is_end, K::replace, "is-end", [h](rt::OverrideCall& c) { h->is_end(c); });
     add(m.video_stream_callback, K::replace, "video-stream",
         [h](rt::OverrideCall& c) { h->video_stream(c); });
+    if (m.player_open != 0) {
+        const unsigned name_arg = m.player_open_name_arg;
+        add(m.player_open, K::hook_before, "player-open",
+            [h, name_arg](rt::OverrideCall& c) { h->hook_player_open(c, name_arg); });
+    }
     return out;
 }
 

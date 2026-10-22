@@ -6,6 +6,7 @@
 #include "game/movies.h"
 #include "runtime/movie/movie_decoder.h"
 #include "runtime/movie/sce_mpeg_hle.h"
+#include "runtime/platform/dynlib.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
@@ -26,6 +27,10 @@ TEST_CASE("movies: --movies values resolve to a policy", "[game][movie]") {
     CHECK(game::resolve_movie_policy("blank", std::nullopt) == game::MoviePolicy::blank);
     CHECK(game::resolve_movie_policy("stop", std::nullopt) == game::MoviePolicy::stop);
     CHECK_FALSE(game::resolve_movie_policy("fast", std::nullopt));
+    // Not a movie decoder (the contract game module): refused, so auto skips.
+    const std::filesystem::path contract =
+        std::filesystem::path(DQ8_CONTRACT_MODULE_DIR) / rt::shared_library_file_name("dq8_unit_contract");
+    CHECK(game::resolve_movie_policy("auto", contract) == game::MoviePolicy::skip);
     CHECK(game::to_string(game::MoviePolicy::hle) == "hle");
     if (!rt::movie_library_problem(rt::MovieLibraryConfig{})) {
         CHECK(game::resolve_movie_policy("auto", std::nullopt) == game::MoviePolicy::hle);
@@ -75,4 +80,13 @@ TEST_CASE("movies: the HLE's overrides sit at the profile's sceMpeg addresses", 
     }
     CHECK(by_address.at(m.get_picture).name == "sce-mpeg-get-picture");
     CHECK(by_address.count(m.ipu_init) == 0);
+
+    // With [movie.sce_mpeg].player_open, a hook before the player's open as well.
+    m.player_open = 0x00100E00u;
+    m.player_open_name_arg = 2;
+    const auto with_open = game::movie_hle_overrides(profile, hle);
+    REQUIRE(with_open.size() == 11);
+    CHECK(with_open.back().address == 0x00100E00u);
+    CHECK(with_open.back().kind == rt::OverrideKind::hook_before);
+    CHECK(with_open.back().name == "sce-mpeg-player-open");
 }

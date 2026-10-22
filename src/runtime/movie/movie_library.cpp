@@ -160,22 +160,10 @@ fs::path default_movie_library() {
     return file;
 }
 
-std::unique_ptr<IMovieDecoder> make_library_movie_decoder(const MovieLibraryConfig& config) {
-    const fs::path file = config.path.empty() ? default_movie_library() : fs::path(config.path);
-    DynamicLibrary library;
-    try {
-        library = DynamicLibrary::open(file);
-    } catch (const DynlibError& e) {
-        throw MovieDecoderError(std::string("cannot load the movie decoder library: ") + e.what());
-    }
-#if !defined(_WIN32)
-    // dq8-movie stays loaded for the rest of the process (one more reference, never closed, and no unload):
-    // FFmpeg's dependencies allocate in their load-time constructors, and unloading them would orphan that
-    // memory (LeakSanitizer reports it). The decoder is created again per movie, the library only once.
-    if (::dlopen(file.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD | RTLD_NODELETE) == nullptr) {
-        throw MovieDecoderError(file.string() + ": cannot keep the library loaded");
-    }
-#endif
+namespace {
+
+// Resolves dq8-movie's C ABI after checking its version; throws MovieDecoderError.
+Api load_api(const DynamicLibrary& library, const fs::path& file) {
     Api api;
     resolve(library, "dq8_mvd_abi_version", file, api.abi_version);
     if (const std::uint32_t version = api.abi_version(); version != DQ8_MVD_ABI_VERSION) {
@@ -189,6 +177,42 @@ std::unique_ptr<IMovieDecoder> make_library_movie_decoder(const MovieLibraryConf
     resolve(library, "dq8_mvd_send", file, api.send);
     resolve(library, "dq8_mvd_flush", file, api.flush);
     resolve(library, "dq8_mvd_receive", file, api.receive);
+    return api;
+}
+
+// Once accepted, dq8-movie stays loaded for the rest of the process (no unload when the last handle closes):
+// FFmpeg's dependency chain includes libgomp (libavcodec, libswresample, libsoxr on current distributions),
+// which allocates when it is loaded, and an unload orphans that memory, which LeakSanitizer reports at exit.
+// A library that is refused is unloaded as usual.
+DynamicLibrary open_library(const fs::path& file) {
+    try {
+        return DynamicLibrary::open(file);
+    } catch (const DynlibError& e) {
+        throw MovieDecoderError(std::string("cannot load the movie decoder library: ") + e.what());
+    }
+}
+
+void keep_loaded(const fs::path& file) {
+#if !defined(_WIN32)
+    if (::dlopen(file.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD | RTLD_NODELETE) == nullptr) {
+        throw MovieDecoderError(file.string() + ": cannot keep the library loaded");
+    }
+#else
+    (void)file;
+#endif
+}
+
+fs::path library_file(const MovieLibraryConfig& config) {
+    return config.path.empty() ? default_movie_library() : fs::path(config.path);
+}
+
+} // namespace
+
+std::unique_ptr<IMovieDecoder> make_library_movie_decoder(const MovieLibraryConfig& config) {
+    const fs::path file = library_file(config);
+    DynamicLibrary library = open_library(file);
+    const Api api = load_api(library, file);
+    keep_loaded(file);
 
     std::array<char, 128> backend{};
     api.backend_version(backend.data(), backend.size());
@@ -209,8 +233,11 @@ std::unique_ptr<IMovieDecoder> make_library_movie_decoder(const MovieLibraryConf
 }
 
 std::optional<std::string> movie_library_problem(const MovieLibraryConfig& config) {
+    const fs::path file = library_file(config);
     try {
-        make_library_movie_decoder(config);
+        const DynamicLibrary library = open_library(file);
+        load_api(library, file); // a refused library is unloaded when `library` goes
+        keep_loaded(file);
         return std::nullopt;
     } catch (const MovieDecoderError& e) {
         return std::string(e.what());

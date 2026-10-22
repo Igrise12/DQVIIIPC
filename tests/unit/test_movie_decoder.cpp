@@ -264,6 +264,16 @@ TEST_CASE("movie decoder: a missing or wrong library is reported", "[movie]") {
 #if defined(__linux__)
     CHECK(movie_library_file_name() == "libdq8-movie.so");
 #endif
+    // A shared library that is not dq8-movie (the contract game module): refused for its missing ABI, and the
+    // probe leaves nothing loaded.
+    const std::filesystem::path contract =
+        std::filesystem::path(DQ8_CONTRACT_MODULE_DIR) / shared_library_file_name("dq8_unit_contract");
+    const auto wrong = movie_library_problem(MovieLibraryConfig{contract.string()});
+    REQUIRE(wrong);
+    CHECK(wrong->find("does not export dq8_mvd_abi_version") != std::string::npos);
+#if !defined(_WIN32)
+    CHECK(::dlopen(contract.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD) == nullptr);
+#endif
 #if defined(DQ8_MOVIE_LIBRARY)
     CHECK_FALSE(movie_library_problem(MovieLibraryConfig{library_file.string()}));
     // The build tree's copy is the default search's last resort.

@@ -384,10 +384,23 @@ calls Reset itself, so the Reset hook also runs once inside Create.
   With no picture ready it calls the nodata callback with a data block whose type word is 1, as often as needed; a
   callback result of 0 makes GetPicture return -1. IsEnd is 1 once the stream's sequence end code has been seen and
   every picture delivered.
-- Events: `movie {phase, name, pictures, slot_a, slot_b}` with phase `open` (the player-open hook), `end` (IsEnd first
-  1) and `delete`; `slot_a` and `slot_b` are the physical addresses of the first two GetPicture destinations (each
-  holds macroblocks × 1 KiB), the RAM a play-against-nodecode comparison masks. `movie_decoder {available: false,
-  reason}` once at start-up when `--movies auto` falls back to skip.
+- Events (agreed with the coordinator 2026-10-22). `movie {phase, name, pictures, slot_a, slot_b}`:
+  - The phases are `open` (the player-open hook, before Create), `end` (the first IsEnd that returns 1) and `delete`
+    (the Delete hook); `name` is the open's name argument (empty without `player_open` in the profile) and
+    `pictures` the pictures delivered so far.
+  - `slot_a` and `slot_b` are the physical addresses (hex) of the first two GetPicture destinations, the game's two
+    decode slots (each holds macroblocks × 1 KiB): a play-against-nodecode RAM comparison masks them, and the
+    event logs of the two runs stay identical.
+  - `movie_decoder {available: false, reason}` is emitted once at start-up, from the main thread before the machine
+    thread starts, and only when `--movies auto` falls back to skip; `play`, `nodecode` and an `auto` that plays emit
+    none.
+- The `--movies auto` probe (`game::resolve_movie_policy`, `rt::movie_library_problem`) loads dq8-movie and checks its
+  ABI version and functions, nothing more: no decoder, no guest state. A library it refuses is unloaded. One it
+  accepts stays loaded, as the HLE's own loading does: FFmpeg's dependencies (libgomp through libavcodec,
+  libswresample and libsoxr) allocate when loaded, and an unload makes LeakSanitizer fail every ASan run.
+- The player-open hook is installed when `[movie.sce_mpeg].player_open` is set. On SLUS-21207 the open `0x001A1C60` is
+  entered by a tail jump from the player entry `0x001A2450`, which the dispatcher cannot intercept (a hook there ran 0
+  times), so the key names the open's first call, `0x0019E430` (its only caller is the open), whose `$a0` is the name.
 
 ## Bring-up log
 
@@ -402,9 +415,9 @@ calls Reset itself, so the Reset hook also runs once inside Create.
 | Does the movie player's nodata callback yield? (session C, 2026-10-22) | Ghidra: `0x001A0B00`, its callee `0x0019FD80`, the thread set-up `0x001A1A00` | Yes: RotateThreadReadyQueue at the player threads' common priority, then a staging-ring refill that starts DMA channel 4 only when the video callback has queued a slot, which the HLE never does | GetPicture calls it through `call_guest` (Protocol notes) |
 | Delete's address (session C) | Ghidra: `0x00111380` and its one caller | `0x00111380` is sceMpegDelete (returns 1; called once from the stop routine `0x001A13D0` with the player's mp) | `delete` in `[movie.sce_mpeg]` confirmed |
 | DemuxPssRing with a refusing callback (session C) | Ghidra: `0x001155C0`, the reader `0x001A0B40` | Stops at the refused packet and returns the bytes up to the last accepted one; the reader keeps the rest in its ring, so the packet is offered again | The video callback replacement refuses at four pending pictures |
-| The open's name argument (session C) | Ghidra: `0x001A2450`, `0x001A1C60`, `0x0019F2F0` | $a2 of the open, a C string (the name before the path and extension rewrite); $t0/$t1 width and height | The `movie` events carry it |
+| The open's name argument (session C) | Ghidra: `0x001A2450`, `0x001A1C60`, `0x0019F2F0`, `0x0019E430` | $a2 of the open, a C string (the name before the path and extension rewrite); $t0/$t1 width and height. The entry `0x001A2450` reaches the open with a tail jump, so a hook on the open never runs; the open's first call `0x0019E430` gets the name in $a0 | `[movie.sce_mpeg] player_open = 0x0019E430`, `player_open_name_arg = 0`; the `movie` events carry the name (`L5_CI_W.PSS` first) |
 | How `.MVI` data arrives (session C) | Ghidra: `0x0019F130` → the file layer `0x0024E990` → `0x00162980`, `0x00161ED0`, `0x00161880` | The `cdrom0:` device: sceCdSearchFile, then sceCdRead by LSN through libcdvd's N-commands; not fileio, not CD streaming | None: M3's cdvdfsv already serves both |
-| The flyover under the HLE (session C, 2026-10-22, real disc, Clang Debug, `boot-to-title-settings-only.dq8in`, `--gs trace`) | `--movies nodecode` and `play`; override call counts in `--json`; a temporary stderr log of the HLE (not committed) | The player opens at vblank 1143 (threads 11–13, priority 40): Create, five AddCallback, two AddStrCallback (video and PCM). The video arrives as expected (the first payload starts with the sequence header, 512 × 448, not low-delay; PES PTS every few packets), backpressure refuses while four pictures wait, and pictures are delivered every second vblank from 1146 in I B B P order; with `play` dq8-movie decodes them with 0 errors and 0 tag mismatches (the first eleven pictures are black). At vblank 1162 the video stops arriving: the PCM stream callback `0x001A0470` is called (the TAKA flyover carries the PCM stream), and with the sound modules as null servers the game's PCM ring never drains, so DemuxPssRing stops in front of it and the decoder waits in GetPicture's nodata loop for ever. Accepting and dropping the PCM packets instead (a local experiment) stalls earlier: the reader starts playback only when the audio preload threshold is reached | Open, B7 after A+B: movies need PCMPLAY's play position to advance (session A's interpreted PCMPLAY and session B's SPU2). Until then `--movies auto` with dq8-movie built (or `play`, `nodecode`) stops the title sequence at the flyover; use `--movies skip` or `blank` |
+| The first movie under the HLE (session C, 2026-10-22, real disc, Clang Debug, `boot-to-title-settings-only.dq8in`, `--gs trace`) | `--movies nodecode` and `play`; override call counts in `--json`; a temporary stderr log of the HLE (not committed) | The first movie is `L5_CI_W.PSS` (the developer logo, the 16:9 variant; the `movie` open event at vblank 1139 names it; the title flyover comes after it). The player starts its threads at vblank 1143 (threads 11–13, priority 40): Create, five AddCallback, two AddStrCallback (video and PCM). The video arrives as expected (the first payload starts with the sequence header, 512 × 448, not low-delay; PES PTS every few packets), backpressure refuses while four pictures wait, and pictures are delivered every second vblank from 1146 in I B B P order; with `play` dq8-movie decodes them with 0 errors and 0 tag mismatches (the first eleven pictures are black). At vblank 1162 the video stops arriving: the PCM stream callback `0x001A0470` is called (this movie has audio; S6a found 48,000 Hz PCM in the L5_CI pair), and with the sound modules as null servers the game's PCM ring never drains, so DemuxPssRing stops in front of it and the decoder waits in GetPicture's nodata loop for ever. Accepting and dropping the PCM packets instead (a local experiment) stalls earlier: the reader starts playback only when the audio preload threshold is reached | Open, B7 after A+B: movies need PCMPLAY's play position to advance (session A's interpreted PCMPLAY and session B's SPU2). Until then `--movies auto` with dq8-movie built (or `play`, `nodecode`) stops the boot at the developer logo; use `--movies skip` or `blank` |
 
 ## Results
 
