@@ -35,6 +35,12 @@ void VuInterpreter::execUpper(uint32_t instr) {
     uint8_t fs = FS(instr);
     uint8_t fd = FD(instr);
     uint8_t op = instr & 0x3F;
+    // NOP (special 0x2F and 0x30, below) reads nothing: skip the operand normalization.
+    if (op >= 0x3Cu) {
+        const uint8_t specialOp = static_cast<uint8_t>((instr & 0x3u) | ((instr >> 4) & 0x7Cu));
+        if (specialOp == 0x2Fu || specialOp == 0x30u)
+            return;
+    }
 
     float* vd = m_state.vf[fd];
     float normalizedVs[4];
@@ -50,6 +56,7 @@ void VuInterpreter::execUpper(uint32_t instr) {
     const float* acc = normalizedAcc;
     const float q = normalizeOperand(m_state.q);
     const float i = normalizeOperand(m_state.i);
+    m_fmacOperands = {vs, vt, acc, q, i};
     float result[4];
 
     // Upper opcode decoding (bits 5:0 of upper word)
