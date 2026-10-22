@@ -265,8 +265,10 @@ void VuInterpreter::execLower(uint32_t instr, uint8_t* vuData, uint32_t dataSize
     }
     case 0x24: // JR
     {
+        // JR and JALR read the current VI value: only the conditional branches see the value from before a
+        // write by the previous instruction (readBranchVi), as in both of PCSX2's VU implementations.
         uint8_t is = VIS(instr);
-        uint32_t target = (static_cast<uint32_t>(static_cast<uint16_t>(readBranchVi(is))) * 8u) & pcMask;
+        uint32_t target = (static_cast<uint32_t>(static_cast<uint16_t>(m_state.vi[is])) * 8u) & pcMask;
         m_state.branchPending = true;
         m_state.branchTarget = target;
         m_state.branchDelay = 1;
@@ -276,7 +278,7 @@ void VuInterpreter::execLower(uint32_t instr, uint8_t* vuData, uint32_t dataSize
     {
         uint8_t it = VIT(instr);
         uint8_t is = VIS(instr);
-        uint32_t target = (static_cast<uint32_t>(static_cast<uint16_t>(readBranchVi(is))) * 8u) & pcMask;
+        uint32_t target = (static_cast<uint32_t>(static_cast<uint16_t>(m_state.vi[is])) * 8u) & pcMask;
         if (it != 0)
             m_state.vi[it] = static_cast<int32_t>((m_state.pc + 16) / 8);
         m_state.branchPending = true;

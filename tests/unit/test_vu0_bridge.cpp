@@ -69,6 +69,17 @@ TEST_CASE("vu0 bridge: VCALLMS runs on the context's VU0 registers and reports t
     CHECK(rig.vu().stats(0).cycles == first + second);
 }
 
+TEST_CASE("vu0: a new context's VF0 is (0, 0, 0, 1) before any micro program runs", "[vu][vu0]") {
+    // Macro-mode code reads VF0 like any register (VMADDw by vf0w scales by 1): a zero VF0 made the field
+    // culling reject every object (M4 bring-up B1).
+    const R5900Context ctx{};
+    CHECK(vf(ctx, 0) == std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f});
+    R5900Context reused{};
+    reused.vu0_vf[0] = _mm_setzero_ps();
+    reused = R5900Context();
+    CHECK(vf(reused, 0) == std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f});
+}
+
 TEST_CASE("vu0 bridge: two contexts keep their own VU0 registers", "[vu][vu0]") {
     EeRig rig;
     load_program(rig.vu(), 0, {lower_nop, vadd(3, 1, 1) | e_bit, lower_nop, upper_nop});
