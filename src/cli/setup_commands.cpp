@@ -172,6 +172,7 @@ int run_setup(const Args& args, const char* argv0) {
     }
     o.force = args.flags.count("force") != 0;
     o.smoke_test = args.flags.count("no-smoke") == 0;
+    o.allow_toolchain_download = args.flags.count("allow-download") != 0;
     o.ps2_recomp = ps2_recomp(args);
     o.game_executable = game(args, exe_dir);
 

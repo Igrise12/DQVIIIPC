@@ -145,8 +145,9 @@ inline const std::set<std::string> value_options{
     "profile-id", "events", "config", "profile",   "registry",        "game",
     "smoke-input"};
 inline const std::set<std::string> list_options{"unit-elf"}; // may repeat; values collect in order
-inline const std::set<std::string> flag_options{"json",    "force",  "emit-profile", "no-verify-hashes",
-                                                "verbose", "no-pch", "debug-info",   "no-smoke"};
+inline const std::set<std::string> flag_options{"json",          "force",  "emit-profile", "no-verify-hashes",
+                                                "verbose",       "no-pch", "debug-info",   "no-smoke",
+                                                "allow-download"};
 
 inline bool parse_args(int argc, char** argv, Args& args, std::string& error) {
     args.command = argv[1];

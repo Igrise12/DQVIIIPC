@@ -3,7 +3,8 @@
 #
 # The setup's smoke test (dq8/core/setup.h, stage "smoke"): for each region profile, the input script that takes
 # the freshly built game from boot to its title screen, where `dq8-game --until title` ends the run. Our own
-# input (Docs/formats/dq8-input-script.md); a profile without a row gets a plain 600-vblank run instead.
+# input (Docs/formats/dq8-input-script.md). A profile without a row is run to its [title] overlay
+# (--until overlay:NAME), or for 600 vblanks when it has no [title] table.
 # Files are named for what they do, not by disc serial (the checker refuses serial-named files outside
 # data/regions).
 

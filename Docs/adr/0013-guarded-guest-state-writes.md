@@ -61,7 +61,7 @@ function. It follows these rules:
 - An input script written for the black flyover has one press too many: the press that ended the flyover now opens
   the title menu. `tests/local/input/boot-to-title.dq8in` (M3a acceptance 1) therefore runs with `--movies blank`, and
   meets at vblank 1200 with M3a's GS and RAM hashes. Under `skip` it meets at 1080. The settings-only script
-  `boot-to-title-settings-only.dq8in` covers `skip`.
+  (`data/smoke/dq8-us-boot-to-title.dq8in` since M5, also the setup's smoke input) covers `skip`.
 - This is the first runtime patch in the sense of §10.2. When the patch system lands, a timeline row should become one
   kind of patch: "conditional write at vblank", keyed by (profile, unit, address). It would carry our value and the
   same guards, and the patch engine would apply it. Until then the rows live under `[movie]`, because movies are their

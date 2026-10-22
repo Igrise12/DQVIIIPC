@@ -8,6 +8,13 @@
 #include "dq8/core/recomp/module_build.h"
 #include "platform/files.h"
 #include "platform/paths.h"
+// Session E's bundle layout (installed_toolchain), once its header is in the tree.
+#if __has_include("toolchain/download.h")
+#include "toolchain/download.h"
+#define DQ8_TOOLCHAIN_HAVE_DOWNLOAD 1
+#else
+#define DQ8_TOOLCHAIN_HAVE_DOWNLOAD 0
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -246,10 +253,26 @@ Toolchain detect(const DetectOptions& o) {
             // No home directory: no bundled toolchain either.
         }
     }
-    const fs::path bundled_bin = t.bundled_root.empty() ? fs::path() : t.bundled_root / "bin";
+    // The installed bundle: session E's <bundled_root>/<version>/ once its download code is in the tree,
+    // else <bundled_root> itself.
+    fs::path bundle = t.bundled_root;
+#if DQ8_TOOLCHAIN_HAVE_DOWNLOAD
+    if (!t.bundled_root.empty()) {
+        const std::optional<fs::path> installed = installed_toolchain(t.bundled_root);
+        bundle = installed ? *installed : fs::path();
+    }
+#endif
+    const fs::path bundled_bin = bundle.empty() ? fs::path() : bundle / "bin";
 
+    // The bundle first (on Windows the only toolchain host and modules may share, ADR-0018), then CC/CXX,
+    // then PATH.
     std::vector<fs::path> cxx;
     std::vector<fs::path> cc;
+    if (!bundled_bin.empty()) {
+        cxx.push_back(executable_name(bundled_bin, "clang++"));
+        cxx.push_back(executable_name(bundled_bin, "x86_64-w64-mingw32-clang++"));
+        cc.push_back(executable_name(bundled_bin, "clang"));
+    }
     if (o.use_environment) {
         if (const std::string v = environment("CXX"); !v.empty()) {
             cxx.emplace_back(v);
@@ -257,10 +280,6 @@ Toolchain detect(const DetectOptions& o) {
         if (const std::string v = environment("CC"); !v.empty()) {
             cc.emplace_back(v);
         }
-    }
-    if (!bundled_bin.empty()) {
-        cxx.push_back(executable_name(bundled_bin, "clang++"));
-        cc.push_back(executable_name(bundled_bin, "clang"));
     }
     if (o.use_path) {
         for (const char* name : {"c++", "g++", "clang++"}) {
@@ -295,6 +314,7 @@ Toolchain detect(const DetectOptions& o) {
         std::error_code ec;
         t.bundled = !bundled_bin.empty() && fs::equivalent(t.cxx.path.parent_path(), bundled_bin, ec);
         if (t.bundled) {
+            t.bundle_dir = bundle;
             t.compiler_id = "llvm-mingw";
         } else if (contains(cxx_text, "clang")) {
             t.compiler_id = "clang";

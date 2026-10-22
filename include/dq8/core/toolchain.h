@@ -42,13 +42,15 @@ struct Toolchain {
     std::string compiler_id; // the C++ compiler: "gnu", "clang", "llvm-mingw"; empty when unknown
     bool bundled = false;    // the compiler comes from the bundled toolchain
     std::filesystem::path bundled_root;
+    std::filesystem::path bundle_dir; // the installed bundle (<bundled_root>/<version>) when bundled
     Distribution distribution;
 };
 
 struct DetectOptions {
     std::filesystem::path
         executable_dir;                 // cmake and ninja shipped with the program are looked for here first
-    std::filesystem::path bundled_root; // empty: platform::user_data_dir() / "toolchain"
+    std::filesystem::path bundled_root; // empty: platform::user_data_dir() / "toolchain"; the bundle itself
+                                        // is installed_toolchain(bundled_root) (session E's download.h)
     bool use_path = true;               // also look on PATH
     bool use_environment = true;        // CC and CXX name the compilers when set (as cmake reads them)
 };

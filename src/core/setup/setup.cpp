@@ -13,6 +13,13 @@
 #include "dq8/core/version.h"
 #include "platform/files.h"
 #include "platform/paths.h"
+// Session E's toolchain download (Windows; ADR-0018), once its header is in the tree.
+#if defined(_WIN32) && __has_include("toolchain/download.h")
+#include "toolchain/download.h"
+#define DQ8_SETUP_HAVE_DOWNLOAD 1
+#else
+#define DQ8_SETUP_HAVE_DOWNLOAD 0
+#endif
 
 #include <algorithm>
 #include <cstdio>
@@ -460,6 +467,14 @@ class Runner {
         d.executable_dir = o_.executable_dir;
         d.bundled_root = o_.toolchain_root;
         toolchain_ = toolchain::detect(d);
+#if DQ8_SETUP_HAVE_DOWNLOAD
+        if (!toolchain_.bundled) {
+            // Windows builds host and modules with the bundled llvm-mingw only (ADR-0018): fetch it, with the
+            // user's consent, then look again.
+            download_bundle(d);
+            toolchain_ = toolchain::detect(d);
+        }
+#endif
         const auto describe = [](const char* name, const toolchain::Tool& t) {
             return std::string(name) + " " +
                    (t.found ? utf8(t.path) + (t.version.empty() ? "" : " " + t.version) : "missing");
@@ -501,6 +516,7 @@ class Runner {
                              "the module template (cmake/module) or the ABI headers were "
                              "not found; reinstall DQ8-Native");
         }
+        module_args_ = module_cmake_args();
         if (o_.smoke_test) {
             game_ = locate_program(o_.game_executable, o_.executable_dir, "dq8-game");
             if (game_.empty()) {
@@ -512,6 +528,68 @@ class Runner {
         finish(State::done, (toolchain_.compiler_id.empty() ? std::string("c++") : toolchain_.compiler_id) +
                                 " " + toolchain_.cxx.version + ", cmake " + toolchain_.cmake.version +
                                 ", ninja " + toolchain_.ninja.version);
+    }
+
+#if DQ8_SETUP_HAVE_DOWNLOAD
+    void download_bundle(const toolchain::DetectOptions& d) {
+        const toolchain::DownloadPin& pin = toolchain::pinned_llvm_mingw();
+        if (!o_.allow_toolchain_download) {
+            throw StageError(
+                ErrorCode::toolchain_incomplete,
+                "the setup builds with its own toolchain (llvm-mingw " + pin.version + ", " +
+                    std::to_string((pin.size + (1u << 20) - 1) >> 20) +
+                    " MB to download); allow the download (dq8ctl setup --allow-download, or the "
+                    "launcher's consent) and run the setup again");
+        }
+        toolchain::DownloadOptions dl;
+        dl.consent = true;
+        dl.bundled_root = d.bundled_root;
+        dl.cmake = toolchain_.cmake.found ? toolchain_.cmake.path : std::filesystem::path("cmake");
+        dl.cancel = o_.cancel;
+        int last_phase = -1;
+        std::uint64_t last_percent = ~std::uint64_t{0};
+        dl.on_progress = [&](const toolchain::DownloadProgress& p) {
+            static constexpr const char* names[] = {"download", "verify", "unpack"};
+            const int phase = static_cast<int>(p.phase);
+            const std::uint64_t percent = p.total != 0 ? p.done * 100 / p.total : p.done >> 20;
+            if (phase == last_phase && percent == last_percent && p.done != p.total) {
+                return;
+            }
+            last_phase = phase;
+            last_percent = percent;
+            progress(p.done, p.total, {}, names[phase]);
+        };
+        const toolchain::DownloadResult r = toolchain::download_toolchain(dl);
+        progress(0, 0, {},
+                 r.already_installed ? "llvm-mingw " + pin.version + " is installed"
+                                     : "llvm-mingw " + pin.version + " installed in " + utf8(r.root));
+    }
+#endif
+
+    // The module build's tool arguments: the detected compiler and ninja, or for the bundled llvm-mingw its
+    // cmake toolchain file (cmake/toolchains/llvm-mingw.cmake, session E).
+    std::vector<std::string> module_cmake_args() const {
+        if (!toolchain_.bundled) {
+            return toolchain::cmake_arguments(toolchain_);
+        }
+        const fs::path dir = platform::find_data_dir(
+            o_.executable_dir,
+            {fs::path("cmake") / "toolchains", fs::path("share") / "dq8" / "cmake" / "toolchains"},
+            "llvm-mingw.cmake");
+        if (dir.empty()) {
+            throw StageError(ErrorCode::tool_missing,
+                             "cmake/toolchains/llvm-mingw.cmake was not found; reinstall DQ8-Native");
+        }
+        const auto generic = [](const fs::path& p) {
+            const std::u8string s = p.generic_u8string();
+            return std::string(s.begin(), s.end());
+        };
+        std::vector<std::string> args{"-DCMAKE_TOOLCHAIN_FILE=" + generic(dir / "llvm-mingw.cmake"),
+                                      "-DLLVM_MINGW_ROOT=" + generic(toolchain_.bundle_dir)};
+        if (toolchain_.ninja.found) {
+            args.push_back("-DCMAKE_MAKE_PROGRAM=" + generic(toolchain_.ninja.path));
+        }
+        return args;
     }
 
     void stage_maps() {
@@ -535,11 +613,12 @@ class Runner {
         }
         if (!missing.empty()) {
             throw StageError(ErrorCode::maps_missing,
-                             contributor ? "the contributor maps in '" + utf8(maps_) + "' lack " + missing
+                             contributor ? "the maps given with --maps (" + utf8(maps_) + ") lack " + missing
                              : maps_.empty()
                                  ? "no published function maps for " + profile_id_ + " (data/maps/" +
-                                       profile_id_ + "); contributors pass --maps DIR"
-                                 : "the published maps in '" + utf8(maps_) + "' lack " + missing);
+                                       profile_id_ + "); a contributor can pass --maps DIR"
+                                 : "the published maps in '" + utf8(maps_) + "' lack " + missing +
+                                       "; a contributor can pass --maps DIR");
         }
         finish(State::done, std::to_string(units_.size()) + (contributor ? " contributor" : " published") +
                                 " maps in " + utf8(maps_));
@@ -554,7 +633,7 @@ class Runner {
         po.cmake_generator = "Ninja";
         po.module_source_dir = module_template_;
         po.abi_include_dir = abi_include_;
-        po.extra_cmake_args = toolchain::cmake_arguments(toolchain_);
+        po.extra_cmake_args = module_args_;
         po.jobs = jobs_;
         po.force = o_.force;
         po.cancel = o_.cancel;
@@ -704,6 +783,11 @@ class Runner {
             p.args.insert(p.args.end(),
                           {"--input-script", utf8(input), "--until", "title", "--vblanks", "3000"});
             what = "booting to the title screen";
+        } else if (const std::string& overlay = verified_->profile.title_screen.overlay; !overlay.empty()) {
+            // No input for this profile: the title's overlay becoming resident still proves the modules and
+            // the overlay residency work.
+            p.args.insert(p.args.end(), {"--until", "overlay:" + overlay, "--vblanks", "3000"});
+            what = "running until " + overlay + " is resident";
         } else {
             p.args.insert(p.args.end(), {"--vblanks", "600"});
             what = "running 600 vblanks";
@@ -794,6 +878,7 @@ class Runner {
     std::optional<VerifiedImage> verified_;
     std::string profile_id_;
     toolchain::Toolchain toolchain_;
+    std::vector<std::string> module_args_;
     fs::path ps2_recomp_;
     fs::path module_template_;
     fs::path abi_include_;

@@ -250,9 +250,8 @@ TEST_CASE("input script: the authored boot-to-title scripts parse", "[input]") {
     CHECK(s.lines[0].buttons == pad_down);
     CHECK(s.lines[1].buttons == pad_cross);
     CHECK(s.lines[2].buttons == pad_cross);
-    const InputScript settings_only =
-        load_input_script(std::filesystem::path(DQ8_SOURCE_DIR) / "tests" / "local" / "input" /
-                          "boot-to-title-settings-only.dq8in");
+    const InputScript settings_only = load_input_script(std::filesystem::path(DQ8_SOURCE_DIR) / "data" /
+                                                        "smoke" / "dq8-us-boot-to-title.dq8in");
     REQUIRE(settings_only.lines.size() == 3);
     for (std::size_t i = 0; i < 3; ++i) {
         CHECK(settings_only.lines[i].buttons == s.lines[i].buttons);

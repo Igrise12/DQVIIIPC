@@ -12,7 +12,7 @@ dq8in 1
 # The last press opens the memory-card slot window, after --until title has ended the run. Offsets were checked
 # in the M3 bring-up (Docs/milestones/M3-boots.md, "Bring-up log"). Under --movies skip (the default) the flyover
 # is skipped at once, so the press in step 4 opens the menu and the title marker comes at vblank 1080;
-# boot-to-title-settings-only.dq8in is the input for that policy.
+# data/smoke/dq8-us-boot-to-title.dq8in (the setup's smoke input) is the input for that policy.
 
 # The first-run settings screen comes after TITLE is resident and the memory-card check.
 after overlay:TITLE +600 press down 4

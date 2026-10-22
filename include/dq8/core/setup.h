@@ -90,6 +90,9 @@ struct Options {
     std::filesystem::path registry_file;   // empty: registry::default_file()
     std::uint64_t required_free_bytes = 0; // 0: the estimate (2 GiB less what the work directory holds)
     std::chrono::seconds smoke_timeout{900};
+    // The user's consent to download the bundled toolchain (Windows, ADR-0018; the launcher's consent dialog,
+    // `dq8ctl setup --allow-download`). Without it a missing bundle is toolchain-incomplete with its size.
+    bool allow_toolchain_download = false;
 };
 
 struct Result {

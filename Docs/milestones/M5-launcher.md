@@ -336,11 +336,17 @@ calls the same APIs.
   module build uses exactly the detected tools), `DetectOptions::use_environment` (CC/CXX). Minimums: cmake 3.25
   (cmake/module's own `cmake_minimum_required`, not the 3.24 the day-0 comment said), GCC 11, Clang 14 when the
   version is known. The C compiler is reported but not required: cmake/module is `LANGUAGES CXX`.
-- New `include/dq8/core/diagnostics.h` (`report()`, `write_report()`): the report `dq8ctl diagnose` prints and the
-  launcher's Diagnostics page should export.
+- New `include/dq8/core/diagnostics.h` (`report()`, `write_report()`; plain C++ types): the report `dq8ctl
+  diagnose` prints and the launcher's Diagnostics page exports. The header states the rule: paths, hashes,
+  versions, settings and our own logs only; never the contents of a disc file or anything derived from one, no
+  RAM, frames, audio or saves, no tool output.
 - `paths.h`: `find_data_dir()` and `executable_dir_of()`.
-- Shared files touched, as announced to the coordinator: `src/core/CMakeLists.txt` (`setup/diagnostics.cpp`),
-  `src/host/CMakeLists.txt` (`settings_wiring.cpp`, `status_channel.cpp` in `dq8_host`), new `data/smoke/`.
+- Shared files touched, approved by the coordinator (2026-10-22): `src/core/CMakeLists.txt`
+  (`setup/diagnostics.cpp`), `src/host/CMakeLists.txt` (`settings_wiring.cpp`, `status_channel.cpp` in
+  `dq8_host`), new `data/smoke/`, `tests/local/CMakeLists.txt` (the skip run's input path); also approved: the
+  `setup::Options` additions and `Store::load`'s warning-and-default while `set()`/`set_from_text()` throw.
+- `setup::Options::allow_toolchain_download` (session E's request, approved by the coordinator): the user's
+  consent to fetch the bundled toolchain; `dq8ctl setup --allow-download`, the launcher's consent dialog.
 
 **Settings files.** Read as toml11 ordered values and written back from the loaded document: order, comments and
 unknown keys (top-level, inside a category table, inside a profile table) survive a save; known keys are replaced
@@ -385,14 +391,21 @@ else published `data/maps/<profile>/<unit>.toml`; `maps-missing` names the units
   `dq8-game` SHA-1s; register when the entry is identical. Verify, toolchain and maps always run (seconds).
 - Cancel: the flag is polled between stages and passed to the pipeline and the process runner, which stops the
   whole tool tree; the running stage ends with `setup-cancelled` (`process-cancelled` from the pipeline is mapped).
-- The smoke input: a serial-named file is refused outside `data/regions/` (the checker's forbidden-name rule and
-  `.gitignore`'s `SLUS_*`), so `data/smoke/smoke.toml` maps the profile id to `dq8-us-boot-to-title.dq8in` (the
-  presses of `tests/local/input/boot-to-title-settings-only.dq8in`). The run is `--headless --movies skip
-  --input-script ... --until title --vblanks 3000 --json`, 900 s at most, output in `logs/smoke.log`; a profile
-  without an input gets a 600-vblank run that must end without a stop.
-- Session D: when `--maps` is not given, `setup.cpp` hands `data/maps/<profile>/` to `PipelineOptions::maps_dir`
-  and checks for `<unit>.toml` there (`stage_maps`, the one place to change if the published loader wants another
-  field).
+- The smoke input. The coordinator approved `data/smoke/SLUS_21207.dq8in`, but a serial-named file is refused
+  outside `data/regions/` (the checker's forbidden-name rule and `.gitignore`'s `SLUS_*`), so
+  `data/smoke/smoke.toml` maps the profile id to `dq8-us-boot-to-title.dq8in`. That script is the one copy: the
+  settings-only input moved there from `tests/local/input/boot-to-title-settings-only.dq8in`, and
+  `local.boot_to_title_skip` and `test_input_script.cpp` read it from `data/smoke/` (the M3 and M4 bring-up logs
+  keep the old name as it was on their dates). Its header says what it does (dismiss the first-run settings
+  screen, then no press) and where the smoke uses it. The run is `--headless --movies skip --input-script ...
+  --until title --vblanks 3000 --json`, 900 s at most, output in `logs/smoke.log`. A profile without a row runs
+  `--until overlay:<its [title] overlay> --vblanks 3000`, one without a `[title]` table 600 vblanks that must end
+  without a stop.
+- The maps (session D's request through the coordinator). An empty `Options::maps_dir` means the published maps;
+  until D merges the stage looks for `data/maps/<profile>/<unit>.toml` itself and passes that directory as
+  `PipelineOptions::maps_dir`. D replaces both with `recomp::find_maps_dir(executable_dir)` and
+  `PipelineOptions::published_maps_dir` in `stage_maps` and `pipeline_options()` (setup.cpp). Every
+  `maps-missing` message names `--maps`.
 
 **dq8ctl.** `setup`, `settings list|get|set|reset|defaults`, `run`, `diagnose` (`src/cli/README.md`). `run` starts
 `dq8-game --iso --module-dir --config <user file> --window` for the registered build; options after `--` pass
@@ -400,8 +413,22 @@ through (`--headless` replaces `--window`); the game leads its own process group
 which stops the game through the runner. `diagnose` holds no tool output: compiler messages can quote generated
 code, so the setup log's `  | ` lines are left out and the tool logs are listed by name and size only.
 
-**Windows (session E).** `executable_dir_of()` reads `/proc/self/exe` on Linux only (elsewhere `argv0`); E may add
-`GetModuleFileNameW`. `detect()` appends `.exe` to explicit candidate paths; `--status -` uses `_dup`/`_dup2`.
+**Windows (session E's request through the coordinator).** Wired against E's `src/core/toolchain/download.h` as it
+stands in E's worktree, behind `__has_include("toolchain/download.h")` so this branch builds without it (both
+paths were syntax-checked against E's header, not built or run):
+- `detect()` takes the bundle from `installed_toolchain(bundled_root)` (`<bundled_root>/<version>/`), looks
+  there first (`bin/clang++`, `bin/x86_64-w64-mingw32-clang++`), then CC/CXX, then PATH; `Toolchain::bundle_dir`
+  is the bundle when the compiler came from it.
+- On `_WIN32`, a toolchain stage without the bundle calls `download_toolchain()` with the consent, the bundled
+  root, the cmake beside the program (it unpacks with `cmake -E tar`), the cancel flag and a progress callback:
+  `toolchain` progress events with `done`/`total` and the phase (`download`, `verify`, `unpack`) as the message,
+  thinned to whole percents. Without consent the stage ends with `toolchain-incomplete`, naming the archive's
+  size and `--allow-download`. Then it detects again.
+- With the bundle the module build gets `-DCMAKE_TOOLCHAIN_FILE=<cmake/toolchains/llvm-mingw.cmake, found like
+  the other data>`, `-DLLVM_MINGW_ROOT=<bundle>` and `-DCMAKE_MAKE_PROGRAM=<ninja>` instead of
+  `CMAKE_CXX_COMPILER`; a missing toolchain file is `tool-missing` in the toolchain stage.
+- `executable_dir_of()` reads `/proc/self/exe` on Linux only (elsewhere `argv0`); E may add `GetModuleFileNameW`.
+  `detect()` appends `.exe` to explicit candidate paths; `--status -` uses `_dup`/`_dup2`.
 
 **The build manifest (a fix outside A's list, told to the coordinator).** On the disc a no-op re-run still ran the
 smoke test and rewrote the registry: cmake/module relinks every unit on each build, and `build_units` rewrote
