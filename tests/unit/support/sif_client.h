@@ -431,6 +431,10 @@ class SifClient {
         for (const std::size_t off : {0x10u, 0x14u, 0x18u, 0x1Cu}) {
             put(e, off, get(request, off));
         }
+        if (cid == 0x80000009u) {
+            put(e, 0x18,
+                get(request, 0x18) ^ 0x5A5Au); // as the game's EE library: a bind reply keeps a stale id
+        }
         put(e, 0x20, cid);
         put(e, 0x24, server);
         put(e, 0x28, buffer);

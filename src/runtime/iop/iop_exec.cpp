@@ -1039,12 +1039,24 @@ void IopExec::client_call(HleCall& call, std::uint32_t client, std::uint32_t fno
 }
 
 void IopExec::on_rpc_end(std::span<const std::uint8_t> packet) {
+    // Matched by the client structure alone, as the IOP's own library does: the EE's bind reply does not copy
+    // the request's rpc_id (its packet slot keeps whatever it held), so the id cannot tell a stale reply
+    // apart. The command the packet ends must match the request's.
     const std::uint32_t client = sif::load32(packet, sif::rpc_client);
     const auto it = clients_.find(client);
-    if (it == clients_.end() || it->second.rpc_id != sif::load32(packet, sif::rpc_id)) {
+    if (it == clients_.end()) {
         stop(StopReason::guest_error,
              "an RPC end packet for the IOP client structure " + hex32(client) +
                  ", which has no request in flight",
+             0, client);
+    }
+    const std::uint32_t ended = sif::load32(packet, sif::end_cid);
+    const std::uint32_t expected = it->second.bind ? sif::cid_rpc_bind : sif::cid_rpc_call;
+    if (ended != expected) {
+        stop(StopReason::guest_error,
+             "an RPC end packet for the IOP client structure " + hex32(client) + " ends " + hex32(ended) +
+                 " (" + std::string(sif::command_name(ended)) + "), but its request is " + hex32(expected) +
+                 " (" + std::string(sif::command_name(expected)) + ")",
              0, client);
     }
     const IopClientOp op = it->second;
