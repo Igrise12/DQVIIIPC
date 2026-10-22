@@ -76,6 +76,17 @@ std::int64_t int_of(const toml::ordered_value& t, const char* key) {
     return t.contains(key) && t.at(key).is_integer() ? t.at(key).as_integer() : 0;
 }
 
+// True when two build-manifest rows describe the same module from the same inputs (timings aside).
+bool same_build(const toml::ordered_value& a, const toml::ordered_value& b) {
+    for (const char* key : {"module", "module_sha1", "source_sha1", "elf_sha1", "config_sha1", "map_sha1",
+                            "generator", "generated_sha1"}) {
+        if (str_of(a, key).empty() || str_of(a, key) != str_of(b, key)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // The [[units]] rows of an earlier record written for the same source, by unit name.
 std::map<std::string, toml::ordered_value> earlier_rows(const fs::path& file, const std::string& profile,
                                                         const std::string& identity) {
@@ -565,13 +576,19 @@ BuildReport build_units(const PrepareReport& prepared, const GenerateReport& gen
         t["configure_seconds"] = seconds(b.result.configure_time);
         t["build_seconds"] = seconds(b.result.build_time);
         t["built_at"] = utc_timestamp();
-        rows[b.name] = std::move(t);
+        // A module that came out the same from the same inputs keeps its earlier row and the timings of the
+        // build that made it, so a re-run leaves the manifest (and its SHA-1, which the setup's smoke test
+        // and the build registry key on) as it was.
+        if (const auto earlier = rows.find(b.name);
+            b.module_updated || earlier == rows.end() || !same_build(earlier->second, t)) {
+            rows[b.name] = std::move(t);
+        }
         progress(o, b.name,
                  path_utf8(b.module.filename()) + (b.module_updated ? " updated" : " unchanged") +
                      " (build " + std::to_string(b.result.build_time.count() / 1000) + " s)");
         report.units.push_back(std::move(b));
     }
-    platform::write_file_atomic(
+    platform::write_file_if_changed(
         report.manifest, record_text("Game modules built by `dq8ctl recomp build`: input hashes, generator, "
                                      "timings.",
                                      prepared.profile_id, prepared.source_identity, order, rows));

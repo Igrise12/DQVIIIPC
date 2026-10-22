@@ -4,7 +4,9 @@
 
 #include "dq8/core/error.h"
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -14,10 +16,16 @@
 
 // The first-run setup (architecture.md §3): from the user's disc image to an installed, playable build, as
 // one resumable operation with structured progress. It runs the existing stages (intake, recompile, module
-// build) and adds the toolchain check, the published maps, a smoke test and the build registry. The launcher
+// build) and adds the toolchain check, the function maps, a smoke test and the build registry. The launcher
 // calls run() on a worker thread; `dq8ctl setup --events -` prints the same events as JSON lines. Stages are
-// idempotent: a run after a cancel or a failure skips what is already up to date. M5 day 0: declarations and
-// the event format; M5 session A implements run().
+// idempotent: a run after a cancel or a failure skips what is already up to date (verify, toolchain and maps
+// are quick checks that always run).
+//
+// The work directory (default user_data_dir()/build) holds baserom/ (the extracted files), the recompile
+// pipeline's layout (recomp::WorkLayout: units/, generated/, build/, modules/<profile>/, logs/, stamps/) and
+// logs/setup.log, a text log of every run: one line per event (progress thinned to every 5 %), and for an
+// error its full message on following lines that start with "  | " (those may quote tool output, so the
+// diagnostics export leaves them out).
 namespace dq8::core::setup {
 
 enum class Stage {
@@ -31,6 +39,11 @@ enum class Stage {
     smoke,            // dq8-game headless to the title screen
     register_install, // the build registry entry the launcher's Play uses
 };
+
+// Every stage, in the order run() reports them.
+inline constexpr std::array<Stage, 9> stages{Stage::verify, Stage::extract, Stage::toolchain,
+                                             Stage::maps,   Stage::prepare, Stage::generate,
+                                             Stage::build,  Stage::smoke,   Stage::register_install};
 
 enum class State { start, progress, done, skipped, error };
 
@@ -56,8 +69,8 @@ using EventSink = std::function<void(const Event&)>;
 
 struct Options {
     std::filesystem::path iso;
-    std::filesystem::path work_dir;       // default: platform::user_data_dir() / "build"
-    std::filesystem::path maps_dir;       // empty: the published maps (data/maps); else contributor maps
+    std::filesystem::path work_dir; // default: default_work_dir()
+    std::filesystem::path maps_dir; // empty: the published maps (data/maps/<profile>); else contributor maps
     std::filesystem::path regions_dir;    // empty: found next to the program
     std::filesystem::path executable_dir; // where dq8ctl, ps2_recomp and dq8-game are
     unsigned jobs = 0;                    // 0: toolchain::default_jobs()
@@ -65,6 +78,18 @@ struct Options {
     bool smoke_test = true;
     const std::atomic<bool>* cancel = nullptr; // set to stop at the next safe point (setup_cancelled)
     EventSink on_event;
+
+    // Where the setup's programs and data are; each empty one is found from executable_dir: beside it (an
+    // install), else in the source tree above it (a build tree), else on PATH for the programs.
+    std::filesystem::path ps2_recomp;          // the recompiler
+    std::filesystem::path game_executable;     // dq8-game, for the smoke test
+    std::filesystem::path module_template_dir; // cmake/module
+    std::filesystem::path abi_include_dir;     // the directory holding dq8/abi/
+    std::filesystem::path smoke_input;     // the smoke test's input script; empty: data/smoke/smoke.toml's
+    std::filesystem::path toolchain_root;  // toolchain::DetectOptions::bundled_root
+    std::filesystem::path registry_file;   // empty: registry::default_file()
+    std::uint64_t required_free_bytes = 0; // 0: the estimate (2 GiB less what the work directory holds)
+    std::chrono::seconds smoke_timeout{900};
 };
 
 struct Result {
@@ -73,7 +98,12 @@ struct Result {
     std::string message;
     std::string profile_id;
     std::filesystem::path module_dir;
+    std::filesystem::path work_dir;
+    std::filesystem::path log_file; // logs/setup.log in the work directory
 };
+
+// platform::user_data_dir() / "build". Throws Error(io_open) without a home directory.
+std::filesystem::path default_work_dir();
 
 // Never throws for setup failures: they end in a Result with the code and an error Event.
 Result run(const Options& options);

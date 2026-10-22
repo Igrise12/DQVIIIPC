@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+dq8in 1
+# The setup's smoke test for region profile SLUS_21207 (smoke.toml): boot to the title screen with --movies
+# skip. Our own input, authored for DQ8-Native (no game data); the same presses as
+# tests/local/input/boot-to-title-settings-only.dq8in.
+#   1. the memory-card check, which passes without input on an unformatted card;
+#   2. the first-run settings: Down (Wide Screen 16:9), Cross, Cross (sound settings as they are);
+#   3. the publisher logo; the two movies, which --movies skip ends at once;
+#   4. the flyover timeline, which --movies skip moves to its end, so the title fades in at once.
+# dq8-game --until title meets there, within 1,600 vblanks.
+
+after overlay:TITLE +600 press down 4
++30 press cross 4
++30 press cross 4

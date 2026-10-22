@@ -99,12 +99,16 @@ struct Options {
     std::optional<fs::path> dump_dir;         // where `mark NAME` script lines dump the next frame
     std::vector<AtVblank> dump_iop_ram_at;
     std::vector<AtVblank> dump_spu2_at;
-    // M5 (Docs/milestones/M5-launcher.md, "Contracts"): settings (ADR-0006) and the launcher's status
-    // channel. Options whose subsystem has not arrived yet are refused at start-up (run_machine.cpp,
-    // unwired_m5_option).
-    std::optional<fs::path> config;    // a settings file; flags given on the command line win over it
-    std::vector<std::string> sets;     // --set KEY=VALUE, applied after the file
+    // M5 (Docs/milestones/M5-launcher.md, "Settings to dq8-game"): settings (ADR-0006; settings_wiring.h) and
+    // the launcher's status channel (status_channel.h). With --config or --set, every setting whose flag is
+    // not on the command line applies: explicit flags win over --set, which wins over --config.
+    std::optional<fs::path> config;    // a settings file (the user file, with its [profile.<id>] tables)
+    std::vector<std::string> sets;     // --set KEY=VALUE, over the file
     std::optional<std::string> status; // a file, or "-" for stdout: started, first_frame, fps, warning, exit
+    std::vector<std::string> given;    // the options on the command line, by name without "--", in order
+
+    // True when option `name` (without "--") was on the command line.
+    bool was_given(std::string_view name) const noexcept;
 
     bool help = false;
     bool version = false;

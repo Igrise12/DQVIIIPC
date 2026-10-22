@@ -8,8 +8,11 @@
 #include <vector>
 
 // The build registry (architecture.md §3 stage 7): which games are set up and where their modules are, so the
-// launcher can offer Play. One TOML file, installs.toml in platform::user_data_dir(); errors throw
-// Error(registry_parse) or Error(io_*). M5 day 0: declarations; M5 session A implements load and save.
+// launcher can offer Play. One TOML file, installs.toml in platform::user_data_dir(): schema_version, then
+// one
+// [[install]] table per profile with the fields below (profile, iso, module_dir, manifest_sha1, built_at,
+// host_version); keys a later version adds are ignored. Errors throw Error(registry_parse) with
+// "<file>:<line>:" or Error(io_*).
 namespace dq8::core::registry {
 
 struct Install {

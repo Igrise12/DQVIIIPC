@@ -28,6 +28,7 @@ add_library(dq8_core STATIC
     error_text.cpp
     settings/settings.cpp
     setup/setup.cpp
+    setup/diagnostics.cpp
     toolchain/toolchain.cpp
     registry/registry.cpp
 )

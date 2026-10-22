@@ -4,12 +4,15 @@
 
 find_package(Threads REQUIRED)
 
-# Option parsing, set-up, events and the limiter: a library so that the unit tests reach them too.
+# Option parsing, set-up, events, the limiter, settings and the status channel: a library so that the unit
+# tests reach them too.
 add_library(dq8_host STATIC
     options.cpp
     session.cpp
     event_log.cpp
     limiter.cpp
+    settings_wiring.cpp
+    status_channel.cpp
 )
 target_link_libraries(dq8_host PUBLIC dq8::game dq8::runtime dq8::core)
 dq8_set_warnings(dq8_host)

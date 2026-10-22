@@ -1,0 +1,11 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+#
+# The setup's smoke test (dq8/core/setup.h, stage "smoke"): for each region profile, the input script that takes
+# the freshly built game from boot to its title screen, where `dq8-game --until title` ends the run. Our own
+# input (Docs/formats/dq8-input-script.md); a profile without a row gets a plain 600-vblank run instead.
+# Files are named for what they do, not by disc serial (the checker refuses serial-named files outside
+# data/regions).
+
+[profiles]
+SLUS_21207 = "dq8-us-boot-to-title.dq8in"
