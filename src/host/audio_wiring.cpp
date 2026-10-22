@@ -21,6 +21,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -129,9 +130,13 @@ void wire_audio(M4Wiring& w) {
     // Stop the sink (it reads the ring), then flush the taps.
     w.on_stop.push_back([sink, output, report_sink] {
         sink->stop();
-        output->finish();
         if (report_sink) {
             report_sink();
+        }
+        try {
+            output->finish();
+        } catch (const std::runtime_error& e) {
+            throw core::Error(core::ErrorCode::io_write, e.what());
         }
     });
     w.end_fields.push_back([output](rt::MachineEvent& end) { end.add("audio_hash", output->hash_hex()); });
