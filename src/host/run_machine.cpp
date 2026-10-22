@@ -352,7 +352,10 @@ int run_game(const Options& o, const char* argv0) {
         iop_config.reset_image = game::iop_reset_image(*profile);
     }
     // The M4 sessions' additions (m4_wiring.h), before the IOP is built from its configuration.
-    M4Wiring m4{o, profile, pipeline, iop_config, {}, {}, {}, {}, {}};
+    M4Wiring m4{o, profile, pipeline, iop_config, nullptr, {}, {}, {}, {}, {}, {}, {}};
+#ifdef DQ8_HAVE_WINDOW
+    m4.platform = platform.get();
+#endif
     wire_audio(m4);
     wire_movies(m4);
     wire_saves(m4);
@@ -384,6 +387,7 @@ int run_game(const Options& o, const char* argv0) {
     config.stop_at_first_syscall = o.stop_at_first_syscall;
     config.trace_dispatch = o.trace_dispatch;
     config.trace_mask = o.trace;
+    config.vu0_shared = o.vu0_registers == "shared";
     s.memory.set_trap_mmio(o.trap_mmio);
     if (!o.json) {
         s.memory.set_mmio_sink([](const rt::MmioAccess& a) {
@@ -488,6 +492,9 @@ int run_game(const Options& o, const char* argv0) {
             start.add("profile", profile->id);
         }
         start.add("input", std::string(script ? "script" : o.display == Display::window ? "live" : "idle"));
+        for (const auto& add_fields : m4.start_fields) {
+            add_fields(start);
+        }
         log.write(start, 0, 0);
     }
 
@@ -563,6 +570,9 @@ int run_game(const Options& o, const char* argv0) {
             }
             live.publish(0, platform->pad(0));
             live.publish(1, platform->pad(1));
+            for (const auto& frame_hook : m4.on_frame) {
+                frame_hook();
+            }
             gs::FrameImage frame;
             if (pipeline.latest_frame(frame) && frame.field != presented) {
                 platform->present(frame, 4.0 / 3.0);

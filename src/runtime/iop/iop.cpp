@@ -77,6 +77,10 @@ struct Iop::Impl final : public ISifCommandSink, public IVblankListener {
         }
         deps.disc = config.disc;
         deps.input = config.input;
+        deps.cards[0] = config.cards[0];
+        deps.cards[1] = config.cards[1];
+        deps.rtc = config.rtc;
+        deps.pad_feedback = config.pad_feedback;
         deps.load_module = [this](std::string_view path, std::span<const std::uint8_t> args) {
             return load_module(path, args);
         };

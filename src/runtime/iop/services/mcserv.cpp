@@ -247,7 +247,7 @@ class McservServer final : public IopRpcServer {
 
 } // namespace
 
-std::unique_ptr<IopRpcServer> make_mcserv_v1() {
+std::unique_ptr<IopRpcServer> make_mcserv_v1(const IopServiceDeps& /*deps*/) {
     return std::make_unique<McservServer>();
 }
 

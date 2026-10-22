@@ -46,8 +46,10 @@ std::unique_ptr<IopRpcServer> make_iopheap(const IDiscSource* disc);
 std::unique_ptr<IopRpcServer>
 make_loadfile(std::function<std::int32_t(std::string_view path, std::span<const std::uint8_t> args)> load);
 std::vector<std::unique_ptr<IopRpcServer>> make_cdvdfsv(const IDiscSource* disc);
-std::vector<std::unique_ptr<IopRpcServer>> make_padman_v1(IInputSource* input);
-std::unique_ptr<IopRpcServer> make_mcserv_v1();
+// The pad server reads deps.input and reports actuator changes to deps.pad_feedback; the memory-card server
+// serves deps.cards stamped by deps.rtc.
+std::vector<std::unique_ptr<IopRpcServer>> make_padman_v1(const IopServiceDeps& deps);
+std::unique_ptr<IopRpcServer> make_mcserv_v1(const IopServiceDeps& deps);
 std::unique_ptr<IopRpcServer> make_null_server(std::uint32_t sid);
 
 // Helpers shared by the servers.

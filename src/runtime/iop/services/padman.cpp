@@ -246,9 +246,9 @@ class PadmanServer final : public IopRpcServer, public IopVblankClient {
 
 } // namespace
 
-std::vector<std::unique_ptr<IopRpcServer>> make_padman_v1(IInputSource* input) {
+std::vector<std::unique_ptr<IopRpcServer>> make_padman_v1(const IopServiceDeps& deps) {
     auto state = std::make_shared<PadmanState>();
-    state->input = input;
+    state->input = deps.input;
     std::vector<std::unique_ptr<IopRpcServer>> out;
     out.push_back(std::make_unique<PadmanServer>(sid_padman, state, true));
     out.push_back(std::make_unique<PadmanServer>(sid_padman_ext, state, false));

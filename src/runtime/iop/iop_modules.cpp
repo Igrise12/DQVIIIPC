@@ -68,9 +68,9 @@ std::vector<std::unique_ptr<IopRpcServer>> make_iop_service(std::string_view nam
     } else if (name == "cdvdfsv") {
         out = iop_services::make_cdvdfsv(deps.disc);
     } else if (name == "padman.v1") {
-        out = iop_services::make_padman_v1(deps.input);
+        out = iop_services::make_padman_v1(deps);
     } else if (name == "mcserv.v1") {
-        out.push_back(iop_services::make_mcserv_v1());
+        out.push_back(iop_services::make_mcserv_v1(deps));
     } else if (const auto sid = null_server_sid(name)) {
         out.push_back(iop_services::make_null_server(*sid));
     } else {

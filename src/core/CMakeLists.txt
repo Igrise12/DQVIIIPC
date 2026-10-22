@@ -14,6 +14,7 @@ add_library(dq8_core STATIC
     overlay/mwo3.cpp
     overlay/overlay_elf.cpp
     platform/files.cpp
+    platform/paths.cpp
     platform/process.cpp
     platform/system_info.cpp
     recomp/function_map.cpp

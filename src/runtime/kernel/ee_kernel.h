@@ -153,6 +153,9 @@ class EeKernel final : public Scheduler {
         std::uint32_t max_call_depth = 4096;
         std::uint32_t no_progress_fields = 0; // 0: the watchdog is off
         FiberStackSpec stack{};
+        // One VU0 register file for every thread (--vu0-registers shared), as on the console, instead of a
+        // VU0 block per thread context (the default, as PS2Recomp keeps them).
+        bool vu0_shared = false;
     };
 
     EeKernel(MachineServices& machine, EeRuntime& ee, Options options);
@@ -190,6 +193,10 @@ class EeKernel final : public Scheduler {
     // The execution state of the thread or handler that ran last (for the stop report), or null.
     const ExecState* last_exec() const noexcept { return last_exec_; }
     R5900Context& boot_context();
+    // The VU0 registers EE code sees now, which VIF0's MSCAL runs on: the shared file with
+    // Options::vu0_shared, else the running (or interrupted) thread's, else those of the thread that ran
+    // last.
+    R5900Context& vu0_view() noexcept;
 
     // ---- Safe points (on a fiber; off any fiber they do nothing).
     // eeCheckpointDue, a dispatched branch, a run loop: switches when the clock is due or an interrupt can be
@@ -350,6 +357,9 @@ class EeKernel final : public Scheduler {
     std::unique_ptr<Fiber> handler_fiber_;
     ExecState handler_exec_;
     std::unique_ptr<R5900Context> handler_context_;
+    // The VU0 block of the thread that ran last (every switch-out copies it here); with vu0_shared the one
+    // register file every thread and handler works on.
+    std::unique_ptr<R5900Context> vu0_file_;
     bool in_handler_ = false;
     bool handler_busy_ = false; // the handler fiber is suspended in the middle of its work
     std::deque<HandlerCall> handler_queue_;
