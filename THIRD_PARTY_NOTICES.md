@@ -27,6 +27,12 @@ repositories are never fetched.
 | [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) (nested in Granite) | v1.4.358 | `11d6898377797e07dbd543aaaa367e4465074597` | Apache-2.0 or MIT | Vulkan API headers for `dq8-gs-parallel` |
 | [FFmpeg](https://github.com/FFmpeg/FFmpeg) libavcodec and libavutil | n8.1.3 | `1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7` | LGPL-2.1-or-later | `DQ8_FFMPEG=bundled` (`cmake/Ffmpeg.cmake`): a minimal shared build with the `mpeg2video` decoder only, no GPL or non-free parts and no autodetected libraries, installed next to `dq8-movie` in the AppImage (and the Windows zip); its licence text and configure line go to `share/doc/dq8-native/ffmpeg/`. The submodule is `update = none`: only `git submodule update --init --checkout --depth 1 third_party/ffmpeg` fetches it |
 
+## Bundled files (not submodules)
+
+| Component | Version | Source | License | Used for |
+|---|---|---|---|---|
+| Noto Sans Regular (subset; `data/fonts/NotoSans-Regular.ttf.license`) | 2.015 | [notofonts/latin-greek-cyrillic](https://github.com/notofonts/latin-greek-cyrillic) | OFL-1.1 | The dq8-launcher UI font, embedded at build time (`data/fonts/NotoSans-Regular.ttf`) |
+
 ## Adapted into first-party source files (not submodules)
 
 | Component | Version | Commit | License | Used for |

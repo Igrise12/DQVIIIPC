@@ -1,0 +1,8 @@
+SPDX-FileCopyrightText: 2022 The Noto Project Authors (https://github.com/notofonts/latin-greek-cyrillic)
+SPDX-License-Identifier: OFL-1.1
+
+A subset of Noto Sans Regular 2.015 (notofonts/latin-greek-cyrillic; no Reserved Font Name), cut down to the glyphs
+dq8-launcher uses, without hinting, with fontTools 4.67.0:
+  pyftsubset NotoSans-Regular.ttf --no-hinting --name-IDs='*' --name-languages='*' --output-file=NotoSans-Regular.ttf
+    --unicodes="U+0020-007E,U+00A0-017F,U+2000-206F,U+2190-21FF,U+20AC,U+2122,U+2212,U+FFFD"
+sha256 of the subset: a2e7a6a8e18e40224a3f2c20171563049a410f1f19662eceaae8309386038cd5
