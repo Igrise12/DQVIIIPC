@@ -255,7 +255,7 @@ message tests pass under ASan.
 
 | Step | When | Path | Settles |
 |---|---|---|---|
-| B0 | day 0 | M3 acceptance with the new defaults | Same hashes; done 2026-10-21 (title at vblank 1200, `af2abbd8…`, `bb194ddc…`). Since B1's VF0 fix (2026-10-22) the RAM SHA-1 at the title is `a524a87d…`; the GS stream is unchanged |
+| B0 | day 0 | M3 acceptance with the new defaults | Same hashes; done 2026-10-21 (title at vblank 1200, `af2abbd8…`, `bb194ddc…`). Since B1's VF0 fix (2026-10-22) the RAM SHA-1 at the title is `a524a87d…`, and since session D's merge (the card answers GetInfo -2 once, then 0) `ff521066…`; the GS stream is unchanged |
 | B1 | day 0 → | New Game → field (`mark field`), movies skipped, null sound | The field renders (see the bring-up log), BATTLE's first execution, the function-map audit (`ExportFunctionMap.java`, `export_maps.sh`, re-export, re-recompile), new kernel calls; field speed |
 | B2 | day 0 → | menu (Circle) open and close | MENU and the overlay round trip; stale returns |
 | B3 | day 0 → | camp → road (the map: Square; follow the stream) → town → shop purchase | The route; SHOP; the gold word |
