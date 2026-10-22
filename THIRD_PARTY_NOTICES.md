@@ -48,12 +48,12 @@ PS2Recomp's `MPEG.cpp` (GPL-3.0-only, attributed in each file).
 Downloaded by `packaging/linux/build-appimage.sh` at pinned versions with SHA-256 checks; their licence texts are
 installed in the package under `share/doc/dq8-native/licenses/`.
 
-| Component | Version | License | Used for |
+| Component | Release (pinned file, SHA-256) | License | Used for |
 |---|---|---|---|
-| [CMake](https://cmake.org) (`bin/cmake` and its modules) | 4.4.4 | BSD-3-Clause | Configures the game-module build on the user's machine (the AppImage's `usr/bin/cmake`) |
-| [Ninja](https://github.com/ninja-build/ninja) | 1.13.2 | Apache-2.0 | Runs the game-module build (the AppImage's `usr/bin/ninja`) |
-| [AppImage type2-runtime](https://github.com/AppImage/type2-runtime) | 20251108 | MIT; statically links [libfuse](https://github.com/libfuse/libfuse) 3.15.0 (LGPL-2.1), squashfuse 0.5.2 (BSD-2-Clause), zstd (BSD-3-Clause), zlib (Zlib), mimalloc (MIT) and musl (MIT) | The executable head of the AppImage that mounts its contents; built and published by the AppImage project, whose repository at that tag has the sources and build scripts |
-| [appimagetool](https://github.com/AppImage/appimagetool) | 1.9.1 | MIT | Packs the AppImage (build machine only, not shipped) |
+| [CMake](https://cmake.org) (`bin/cmake` and its modules) | v4.4.4 (`cmake-4.4.4-linux-x86_64.tar.gz`, `e5bb807f7728cb60cd8b27ebc97a2edb469b68655f21e844a600c3575b76f5bb`) | BSD-3-Clause (its statically linked libraries' notices are installed with it) | Configures the game-module build on the user's machine (the AppImage's `usr/bin/cmake`); its 13 binary Visual Studio, WinRT and macOS templates are left out |
+| [Ninja](https://github.com/ninja-build/ninja) | v1.13.2 (`ninja-linux.zip`, `5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbead6`) | Apache-2.0 | Runs the game-module build (the AppImage's `usr/bin/ninja`) |
+| [AppImage type2-runtime](https://github.com/AppImage/type2-runtime) | 20251108 (`runtime-x86_64`, `2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d`) | MIT (the release's `LICENSE`); statically links [libfuse](https://github.com/libfuse/libfuse) 3.15.0 (LGPL-2.1), squashfuse 0.5.2 (BSD-2-Clause), zstd (BSD-3-Clause), zlib (Zlib), mimalloc (MIT) and musl (MIT) | The executable head of the AppImage that mounts its contents; built and published by the AppImage project, whose repository at that tag has the sources and build scripts |
+| [appimagetool](https://github.com/AppImage/appimagetool) | 1.9.1 (`appimagetool-x86_64.AppImage`, `ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0`) | MIT | Packs the AppImage (build machine only, not shipped) |
 
 ## Tools used during development, not bundled or redistributed
 
