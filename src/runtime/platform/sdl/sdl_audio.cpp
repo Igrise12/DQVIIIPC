@@ -206,23 +206,28 @@ class Sink final : public SdlAudioSink {
 
     // Reopens the device when its callbacks stopped (or it never opened).
     void monitor() {
-        std::unique_lock lock(mutex_);
-        const std::uint64_t quiet_ns = std::uint64_t{config_.reopen_after_ms} * 1'000'000;
-        while (running_) {
-            wake_.wait_for(lock, std::chrono::milliseconds(50));
-            if (!running_) {
-                break;
-            }
-            const std::uint64_t now = SDL_GetTicksNS();
-            const std::uint64_t last = last_callback_ns_.load(std::memory_order_relaxed);
-            if (now - last >= quiet_ns && now - last_open_ns_ >= quiet_ns) {
-                close_locked();
-                open_locked();
-                if (stream_ != nullptr) {
-                    reopens_.fetch_add(1, std::memory_order_relaxed);
+        {
+            std::unique_lock lock(mutex_);
+            const std::uint64_t quiet_ns = std::uint64_t{config_.reopen_after_ms} * 1'000'000;
+            while (running_) {
+                wake_.wait_for(lock, std::chrono::milliseconds(50));
+                if (!running_) {
+                    break;
+                }
+                const std::uint64_t now = SDL_GetTicksNS();
+                const std::uint64_t last = last_callback_ns_.load(std::memory_order_relaxed);
+                if (now - last >= quiet_ns && now - last_open_ns_ >= quiet_ns) {
+                    close_locked();
+                    open_locked();
+                    if (stream_ != nullptr) {
+                        reopens_.fetch_add(1, std::memory_order_relaxed);
+                    }
                 }
             }
         }
+        // A reopen asks SDL for the device's name, which SDL keeps in thread-local storage; this thread is
+        // not SDL's, so SDL cannot free it at exit.
+        SDL_CleanupTLS();
     }
 
     SdlAudioConfig config_;
