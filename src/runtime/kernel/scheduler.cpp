@@ -88,7 +88,8 @@ std::string_view to_string(WaitKind kind) noexcept {
 }
 
 EeKernel::EeKernel(MachineServices& machine, EeRuntime& ee, Options options)
-    : machine_(machine), ee_(ee), options_(options), handler_context_(std::make_unique<R5900Context>()) {
+    : machine_(machine), ee_(ee), options_(options), handler_context_(std::make_unique<R5900Context>()),
+      vu0_file_(std::make_unique<R5900Context>()) {
     handler_exec_.id = handler_fiber_id;
     handler_exec_.ctx = handler_context_.get();
 }
@@ -153,6 +154,7 @@ void EeKernel::reset(std::uint32_t entry) {
     in_handler_ = false;
     handler_busy_ = false;
     *handler_context_ = R5900Context();
+    *vu0_file_ = R5900Context();
     handler_exec_ = ExecState{};
     handler_exec_.id = handler_fiber_id;
     handler_exec_.ctx = handler_context_.get();
@@ -272,8 +274,12 @@ void EeKernel::run_thread(GuestThread& t) {
     ee_.set_exec(&t.exec);
     machine_.clock().set_deadline(next_deadline());
     switch_reason_ = SwitchReason::none;
+    if (options_.vu0_shared) {
+        copy_vu0_block(*vu0_file_, *t.context); // one register file: the thread finds it as it was left
+    }
     t.fiber->resume();
     ee_.set_exec(nullptr);
+    copy_vu0_block(*t.context, *vu0_file_); // before an exit can erase the thread
     const SwitchReason reason = switch_reason_;
     switch_reason_ = SwitchReason::none;
     switch (reason) {
@@ -411,6 +417,13 @@ void EeKernel::record_stop(StopInfo info) {
     stop_ = std::move(info);
 }
 
+R5900Context& EeKernel::vu0_view() noexcept {
+    if (!options_.vu0_shared && current_ != nullptr) {
+        return *current_->context;
+    }
+    return *vu0_file_;
+}
+
 // ---- Interrupt handlers on the handler fiber.
 
 void EeKernel::run_handler_fiber() {
@@ -448,6 +461,9 @@ void EeKernel::handler_loop() {
             verify_kernel_ram("before an interrupt handler");
             R5900Context& c = *handler_context_;
             c = R5900Context();
+            // The handler starts with the VU0 registers of the thread it interrupted (a copy: with
+            // per-thread registers what it changes is dropped; with one shared file it is kept below).
+            copy_vu0_block(vu0_view(), c);
             c.cop0_status |= status_exl; // exception level: handlers never nest
             c.pc = call->handler;
             set_gpr_lo(c, 4, call->args[0]);
@@ -460,6 +476,9 @@ void EeKernel::handler_loop() {
             handler_exec_.unwinding = false;
             handler_exec_.depth = 0;
             ee_.call_guest(handler_exec_, c);
+            if (options_.vu0_shared) {
+                copy_vu0_block(c, *vu0_file_); // the next thread to run takes it from there
+            }
             verify_kernel_ram("after an interrupt handler");
         }
         switch_out(SwitchReason::handler_done);

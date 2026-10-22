@@ -4,6 +4,7 @@
 target_sources(dq8_unit_tests PRIVATE
     test_memcard.cpp
     test_pad_feedback.cpp
+    test_vu0_registers.cpp
 )
 # dq8-game's card options on the synthetic machine program (the inputs come from the host.machine_inputs
 # fixture of CMakeLists.txt).

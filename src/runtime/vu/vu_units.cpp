@@ -4,6 +4,8 @@
 
 #include "runtime/dma/gif.h"
 #include "runtime/ee/guest_stop.h"
+#include "runtime/kernel/ee_kernel.h"
+#include "runtime/kernel/scheduler.h"
 #include "runtime/vu/vu0_bridge.h"
 
 #include <algorithm>
@@ -32,6 +34,7 @@ void VuUnits::Host::reserved_instruction(bool upper, std::uint32_t pc, std::uint
 
 void VuUnits::attach(MachineServices& machine) {
     machine_ = &machine;
+    kernel_ = dynamic_cast<EeKernel*>(machine.scheduler());
     machine.mmio().map(base, size, *this);
     machine.set_vu0(this);
 }
@@ -44,6 +47,8 @@ void VuUnits::reset() {
         ++u.host.generation;
         u.stats = {};
     }
+    vu0_user_ = 0;
+    vu0_reported_.clear();
 }
 
 VuUnits::Target VuUnits::locate(std::uint32_t offset) noexcept {
@@ -85,14 +90,44 @@ void VuUnits::write_micro(unsigned unit, std::uint32_t byte_offset, std::span<co
 }
 
 void VuUnits::start(unsigned unit, std::uint32_t start_pc, std::uint32_t top, std::uint32_t itop) {
+    if (unit == 0 && kernel_ != nullptr) {
+        run_vu0_view(true, start_pc, top, itop);
+        return;
+    }
     run(unit, true, start_pc, top, itop);
 }
 
 void VuUnits::resume(unsigned unit, std::uint32_t top, std::uint32_t itop) {
+    if (unit == 0 && kernel_ != nullptr) {
+        run_vu0_view(false, 0, top, itop);
+        return;
+    }
     run(unit, false, 0, top, itop);
 }
 
+void VuUnits::run_vu0_view(bool fresh, std::uint32_t start_pc, std::uint32_t top, std::uint32_t itop) {
+    R5900Context& view = kernel_->vu0_view();
+    VuState& state = units_[0].interp.state();
+    load_vu0_state(view, state);
+    // MSCNT continues where the last program ended, which the view keeps as TPC.
+    run(0, true, fresh ? start_pc : (view.vu0_tpc & 0xFF8u), top, itop);
+    store_vu0_state(state, view);
+}
+
+void VuUnits::note_vu0_user() {
+    Scheduler* scheduler = machine_ != nullptr ? machine_->scheduler() : nullptr;
+    if (scheduler == nullptr) {
+        return;
+    }
+    const std::int64_t who = scheduler->in_handler() ? -1 : scheduler->current_thread_id();
+    if (vu0_user_ != 0 && who != vu0_user_ && vu0_reported_.insert({vu0_user_, who}).second) {
+        machine_->emit(MachineEvent{"vu0_cross_thread", {}}.add("thread", who).add("previous", vu0_user_));
+    }
+    vu0_user_ = who;
+}
+
 std::uint64_t VuUnits::run_from_ee(R5900Context& ctx, std::uint32_t start) {
+    note_vu0_user();
     VuState& state = units_[0].interp.state();
     load_vu0_state(ctx, state);
     const std::uint64_t before = state.cycles;
