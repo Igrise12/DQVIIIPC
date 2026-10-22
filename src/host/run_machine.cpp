@@ -235,12 +235,6 @@ struct Outcome {
 // M4 options whose subsystem has not arrived on this build yet (Docs/milestones/M4-playable.md): the session
 // that brings each one removes its line. Refused at start-up rather than silently ignored.
 std::optional<std::string> unwired_m4_option(const Options& o) {
-    if (o.movies == "play" || o.movies == "nodecode") {
-        return "--movies " + o.movies + " arrives with the movie HLE (M4 session C)";
-    }
-    if (o.movie_decoder) {
-        return std::string("--movie-decoder arrives with the movie HLE (M4 session C)");
-    }
     if (o.audio == "sdl" && o.display == Display::headless) {
         return std::string("--audio sdl arrives with the audio output (M4 session B)");
     }
@@ -288,9 +282,9 @@ int run_game(const Options& o, const char* argv0) {
             throw UsageError(std::string("--input-script: ") + e.what());
         }
     }
-    // --movies auto plays when the movie HLE and its decoder are available (M4 session C); until then it
-    // skips.
-    const auto movie_policy = game::parse_movie_policy(o.movies == "auto" ? std::string("skip") : o.movies);
+    // --movies play and nodecode run the sceMpeg HLE (movie_wiring.cpp), auto too when dq8-movie loads, else
+    // it skips.
+    const auto movie_policy = game::resolve_movie_policy(o.movies, o.movie_decoder);
     EventLog log(o.events, o.trace_events);
 
     // Disc.
