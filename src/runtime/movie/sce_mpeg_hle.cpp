@@ -102,6 +102,7 @@ void SceMpegHle::fail(const OverrideCall& call, std::string message) {
         throw GuestStop(std::move(info));
     }
     machine_->stop(std::move(info));
+    std::abort(); // stop() never returns; GCC cannot see that through the virtual call
 }
 
 SceMpegHle::Session& SceMpegHle::session(const OverrideCall& call, std::uint32_t mp, std::string_view what) {
