@@ -287,6 +287,33 @@ TEST_CASE("iop hw: SSBUS registers are stores the guest reads back", "[iop][hw]"
     CHECK(h.log(b, log) == std::vector<std::uint32_t>{0x200B31E1u, 0x000012EFu});
 }
 
+TEST_CASE("iop hw: the HLE page reads as trap words and a linked stub jumps into it", "[iop][hw]") {
+    IrxBuilder b("HWTEST");
+    const Label log = b.zeros(32);
+    b.imports("thbase", {20});
+    const Label start = b.here();
+    b.enter(32);
+    b.emit(m::lui(m::t0, 0x0FF0));
+    b.emit(m::lw(m::t1, 8, m::t0));
+    b.emit(m::lw(m::t2, 12, m::t0));
+    b.emit(m::nop());
+    b.append(log, m::t1);
+    b.append(log, m::t2);
+    b.load(m::t1, b.stub("thbase", 20)); // the linked stub: j into the HLE page
+    b.append(log, m::t1);
+    b.li(m::v0, 0);
+    b.leave(32);
+    b.entry(start);
+    HwRig h(b);
+    h.load();
+    const auto v = h.log(b, log);
+    REQUIRE(v.size() == 3);
+    CHECK(v[0] == (rt::iop_hle_trap_opcode | 1u));
+    CHECK(v[1] == 0);
+    CHECK((v[2] >> 26) == 2); // j
+    CHECK(((v[2] & 0x03FFFFFFu) << 2) >= (rt::iop_map::hle_page & 0x0FFFFFFFu));
+}
+
 TEST_CASE("iop hw: the spin detector moves the IOP to the next event", "[iop][hw]") {
     IrxBuilder b("HWTEST");
     const Label stamp = b.zeros(8);

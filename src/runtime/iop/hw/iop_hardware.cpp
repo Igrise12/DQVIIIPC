@@ -164,6 +164,15 @@ bool IopHardware::read(std::uint32_t physical, std::uint32_t width, std::uint32_
         owner_.hw_poll(pc, physical, value);
         return true;
     }
+    if (physical >= iop_map::hle_page && physical - iop_map::hle_page < hle_slots_ * iop_map::hle_slot_size) {
+        // The HLE page reads as its trap words (a slot's second word is 0); only a fetch traps.
+        const std::uint32_t offset = (physical & ~3u) - iop_map::hle_page;
+        const std::uint32_t word = offset % iop_map::hle_slot_size == 0
+                                       ? iop_hle_trap_opcode | (offset / iop_map::hle_slot_size)
+                                       : 0;
+        value = extract(word, physical, width);
+        return true;
+    }
     const auto word = register_read(physical & ~3u, pc);
     if (!word) {
         return false;

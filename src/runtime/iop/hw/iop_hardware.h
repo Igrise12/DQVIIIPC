@@ -41,7 +41,8 @@ inline constexpr std::uint32_t dicr2 = 0x1F801574u;
 inline constexpr std::uint32_t dmacen = 0x1F801578u;
 inline constexpr std::uint32_t dmacinten = 0x1F80157Cu;
 // The HLE page: in the first 256 MiB (so a `j` from module code reaches it) and above every RAM mirror. Slot
-// n is the 8 bytes at hle_page + 8n; an instruction fetch there is a trap.
+// n is the 8 bytes at hle_page + 8n: the trap word iop_hle_trap_opcode | n and a zero word, as loads read
+// them; an instruction fetch at a slot is the trap.
 inline constexpr std::uint32_t hle_page = 0x0FF00000u;
 inline constexpr std::uint32_t hle_page_size = 0x00010000u;
 inline constexpr std::uint32_t hle_slot_size = 8;

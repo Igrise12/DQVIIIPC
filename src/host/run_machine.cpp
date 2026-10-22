@@ -250,9 +250,6 @@ std::optional<std::string> unwired_m4_option(const Options& o) {
     if (!o.dump_spu2_at.empty()) {
         return std::string("--dump-spu2-at arrives with the SPU2 (M4 session B)");
     }
-    if (!o.dump_iop_ram_at.empty()) {
-        return std::string("--dump-iop-ram-at arrives with the interpreted IOP (M4 session A)");
-    }
     if (o.save_dir || o.memory_card != "unformatted" || o.memory_card2 != "none" || o.rtc) {
         return std::string("--save-dir, --memory-card, --memory-card2 and --rtc arrive with the memory card "
                            "(M4 session D)");
@@ -518,6 +515,21 @@ int run_game(const Options& o, const char* argv0) {
                         if (d.vblank == vblank) {
                             write_ram(s.memory, d.path);
                             log.write(rt::MachineEvent{"ram_dump", {}}.add("sha1", ram_sha1(s.memory)),
+                                      vblank, r.cycles);
+                        }
+                    }
+                    for (const AtVblank& d : o.dump_iop_ram_at) {
+                        if (d.vblank == vblank) {
+                            const std::span<const std::uint8_t> iop_ram = iop.ram();
+                            std::ofstream out(d.path, std::ios::binary | std::ios::trunc);
+                            out.write(reinterpret_cast<const char*>(iop_ram.data()),
+                                      static_cast<std::streamsize>(iop_ram.size()));
+                            if (!out) {
+                                throw core::Error(core::ErrorCode::io_write,
+                                                  "cannot write the IOP RAM dump " + d.path.string());
+                            }
+                            log.write(rt::MachineEvent{"iop_ram_dump", {}}.add(
+                                          "sha1", core::to_hex(core::Sha1::of(iop_ram))),
                                       vblank, r.cycles);
                         }
                     }
