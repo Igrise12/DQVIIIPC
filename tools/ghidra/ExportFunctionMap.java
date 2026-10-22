@@ -4,7 +4,8 @@
 // Headless postScript: export the function map of one code unit for ps2_recomp.
 //
 //   -postScript ExportFunctionMap.java <out.csv> <out.jump_tables.toml> <out.stats.toml> <unit_start> <unit_end>
-//               [entry_tables=START:END[,START:END...]] [pointer_gaps=1] [entries=ADDR[,ADDR...]]
+//               [entry_tables=START:END[,START:END...]] [pointer_gaps=1] [outside_pointers=1]
+//               [entries=ADDR[,ADDR...]]
 //
 // entries: function entries known from outside this program, such as the main-program targets of the overlays'
 // direct jal/j instructions (export_maps.sh scans the overlay files for them): Ghidra's main project never sees
@@ -24,6 +25,18 @@
 // existing function and every word of the body is an instruction. Pointers into existing bodies are never used,
 // so no function is split, and targets in gaps larger than MAX_CODE_GAP between auto-analysed functions are data
 // areas and never used either (floats and tables decode as instructions too).
+//
+// outside_pointers=1 (overlay units): every aligned data word of the program outside the unit that points into
+// the unit is a candidate entry too: the main program keeps callback tables of window addresses, and an
+// overlay's code reached only through them was left undisassembled (M4 bring-up B2: 150 of MENU's functions,
+// the first at 0x00468B60). Such a word may belong to another overlay sharing the window, so a target is used
+// only when no function covers it and its first word allocates a stack frame (addiu sp, sp, -N); it is then
+// disassembled and kept under the same rules as pointer_gaps (cleanBody), whatever the size of its gap.
+//
+// Before any option, calls that return are made to: a function Ghidra marked as not returning whose body holds a
+// jr $ra returns, so its flag is cleared and the code after each of its call sites in the unit is disassembled and
+// joins the caller's body (M4 bring-up B2: the overlay projects held such flags for main's 0x002D23C0 and others,
+// leaving the code after 101 calls in MENU undisassembled; the first miss was the return address 0x00468AA0).
 //
 // The unit is the half-open address range [unit_start, unit_end): the main program's file image, or
 // one overlay's 64-byte header plus text plus data at the window base. Three files are written:
@@ -76,17 +89,20 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 import ghidra.app.cmd.disassemble.DisassembleCommand;
+import ghidra.app.cmd.function.CreateFunctionCmd;
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
 import ghidra.program.model.address.AddressRange;
 import ghidra.program.model.address.AddressSet;
 import ghidra.program.model.address.AddressSetView;
+import ghidra.program.model.listing.FlowOverride;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionIterator;
 import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Listing;
 import ghidra.program.model.mem.Memory;
 import ghidra.program.model.mem.MemoryAccessException;
+import ghidra.program.model.mem.MemoryBlock;
 import ghidra.program.model.symbol.RefType;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
@@ -186,6 +202,7 @@ public class ExportFunctionMap extends GhidraScript {
     private final Map<String, Long> counts = new LinkedHashMap<>();
     private final TreeSet<Long> tableEntryFunctions = new TreeSet<>();
     private final TreeSet<Long> pointerGapFunctions = new TreeSet<>();
+    private final TreeSet<Long> outsidePointerFunctions = new TreeSet<>();
     private final TreeSet<Long> delaySlotEntries = new TreeSet<>();
     private final TreeSet<Long> listedEntryFunctions = new TreeSet<>();
     private final TreeSet<Long> insideEntries = new TreeSet<>();
@@ -199,7 +216,7 @@ public class ExportFunctionMap extends GhidraScript {
         if (args.length < 5) {
             throw new IllegalArgumentException("usage: ExportFunctionMap.java <out.csv> <out.jump_tables.toml> " +
                     "<out.stats.toml> <unit_start> <unit_end> [entry_tables=START:END[,START:END...]] " +
-                    "[pointer_gaps=1]");
+                    "[pointer_gaps=1] [outside_pointers=1] [entries=ADDR[,ADDR...]]");
         }
         File csvFile = new File(args[0]);
         File tablesFile = new File(args[1]);
@@ -211,12 +228,16 @@ public class ExportFunctionMap extends GhidraScript {
         }
         memory = currentProgram.getMemory();
         listing = currentProgram.getListing();
+        disassembleAfterReturningCalls(unitStart, unitEnd);
         for (int i = 5; i < args.length; i++) {
             if (args[i].startsWith("entry_tables=")) {
                 createTableEntryFunctions(args[i], unitStart, unitEnd);
             }
             else if (args[i].equals("pointer_gaps=1")) {
                 createPointerGapFunctions(unitStart, unitEnd);
+            }
+            else if (args[i].equals("outside_pointers=1")) {
+                createOutsidePointerFunctions(unitStart, unitEnd);
             }
             else if (args[i].startsWith("entries=")) {
                 createListedEntries(args[i].substring("entries=".length()), unitStart, unitEnd);
@@ -1141,6 +1162,132 @@ public class ExportFunctionMap extends GhidraScript {
         put("pointer_gap_rejected", rejected);
     }
 
+    // Clears the no-return flag of functions that return and disassembles after their calls (see the header).
+    private void disassembleAfterReturningCalls(long unitStart, long unitEnd) throws Exception {
+        List<Function> flagged = new ArrayList<>();
+        for (FunctionIterator it = currentProgram.getFunctionManager().getFunctions(true); it.hasNext();) {
+            Function f = it.next();
+            if (f.hasNoReturn() && bodyReturns(f)) {
+                flagged.add(f);
+            }
+        }
+        long sites = 0;
+        long disassembled = 0;
+        for (Function f : flagged) {
+            f.setNoReturn(false);
+            for (Reference r : getReferencesTo(f.getEntryPoint())) {
+                if (!r.getReferenceType().isCall()) {
+                    continue;
+                }
+                Address from = r.getFromAddress();
+                long ret = from.getOffset() + 8;
+                if (ret < unitStart || ret + 4 > unitEnd) {
+                    continue;
+                }
+                sites++;
+                Instruction call = listing.getInstructionAt(from);
+                if (call != null && call.getFlowOverride() != FlowOverride.NONE) {
+                    call.setFlowOverride(FlowOverride.NONE);
+                }
+                if (call != null && call.isFallThroughOverridden()) {
+                    call.clearFallThroughOverride();
+                }
+                Address at = toAddr(ret);
+                if (listing.getInstructionAt(at) == null && listing.isUndefined(at, at.add(3))) {
+                    new DisassembleCommand(at, null, true).applyTo(currentProgram, monitor);
+                    disassembled++;
+                }
+                Function owner = getFunctionContaining(from);
+                if (owner != null) {
+                    CreateFunctionCmd.fixupFunctionBody(currentProgram, owner, monitor);
+                }
+            }
+        }
+        put("returning_calls_functions_cleared", flagged.size());
+        put("returning_calls_sites", sites);
+        put("returning_calls_disassembled", disassembled);
+    }
+
+    // True when the function's body holds a jr $ra.
+    private boolean bodyReturns(Function f) {
+        for (AddressRange r : f.getBody()) {
+            for (long a = r.getMinAddress().getOffset() & ~3L; a <= r.getMaxAddress().getOffset(); a += 4) {
+                long w = readWordOrNull(a);
+                if (w != NO_VALUE && op((int) w) == 0 && fn((int) w) == 0x08 && rs((int) w) == 31) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Makes functions at targets of data words outside the unit (see outside_pointers).
+    private void createOutsidePointerFunctions(long unitStart, long unitEnd) throws Exception {
+        TreeSet<Long> targets = new TreeSet<>();
+        long words = 0;
+        for (MemoryBlock block : memory.getBlocks()) {
+            if (!block.isInitialized()) {
+                continue;
+            }
+            long start = (block.getStart().getOffset() + 3) & ~3L;
+            long end = block.getEnd().getOffset() + 1;
+            for (long a = start; a + 4 <= end; a += 4) {
+                if (a + 4 > unitStart && a < unitEnd) {
+                    continue; // the unit's own words are pointer_gaps'
+                }
+                if (listing.getInstructionContaining(toAddr(a)) != null) {
+                    continue; // code, not a data word
+                }
+                long target = readWordOrNull(a);
+                if (target == NO_VALUE || target < unitStart || target >= unitEnd || (target & 3) != 0) {
+                    continue;
+                }
+                words++;
+                if (getFunctionContaining(toAddr(target)) != null || !allocatesFrame(readWordOrNull(target))) {
+                    continue;
+                }
+                targets.add(target);
+            }
+        }
+        long rejected = 0;
+        for (long target : targets) {
+            Address at = toAddr(target);
+            if (getFunctionContaining(at) != null) {
+                continue; // a function made for an earlier target covers it now
+            }
+            Instruction ins = listing.getInstructionContaining(at);
+            if (ins != null && !ins.getAddress().equals(at)) {
+                rejected++;
+                continue;
+            }
+            if (ins == null) {
+                if (!listing.isUndefined(at, at.add(3))) {
+                    rejected++;
+                    continue; // defined data, not code
+                }
+                new DisassembleCommand(at, null, true).applyTo(currentProgram, monitor);
+            }
+            Function f = listing.getInstructionAt(at) != null ? createFunction(at, null) : null;
+            if (f == null || !cleanBody(f, unitStart, unitEnd)) {
+                if (f != null) {
+                    removeFunction(f);
+                }
+                rejected++;
+                continue;
+            }
+            outsidePointerFunctions.add(target);
+        }
+        put("outside_pointer_words", words);
+        put("outside_pointer_targets", targets.size());
+        put("outside_pointer_functions_created", outsidePointerFunctions.size());
+        put("outside_pointer_rejected", rejected);
+    }
+
+    // addiu sp, sp, -N: the first word of a function that allocates a stack frame.
+    private static boolean allocatesFrame(long w) {
+        return w != NO_VALUE && op((int) w) == 0x09 && rs((int) w) == 29 && rt((int) w) == 29 && (w & 0x8000) != 0;
+    }
+
     // A made function is kept only when its body lies in the unit, every word of it is an instruction, and no
     // word is an encoding that only data produces: COP0 formats user code never uses (floats from 2.0 to about
     // 500.0 decode as those) and SPECIAL functions the R5900 lacks (MOVCI, DMULT, DDIV, ...). ps2_recomp reports
@@ -1329,6 +1476,8 @@ public class ExportFunctionMap extends GhidraScript {
             writeList(w, "listed_entries_inside_functions", insideEntries);
             w.println("# Functions made at data-pointer targets in undisassembled gaps (pointer_gaps=1).");
             writeList(w, "pointer_gap_functions", pointerGapFunctions);
+            w.println("# Functions made at targets of data words outside the unit (outside_pointers=1).");
+            writeList(w, "outside_pointer_functions", outsidePointerFunctions);
             w.println("# The same for link branches whose target is inside their own function (not entries).");
             writeList(w, "link_branch_internal", linkInternal);
             w.println("# Computed jr sites with an emitted table (bound: slti/sltiu case count, or scan).");

@@ -143,6 +143,8 @@ PY
     else
         project=$projects/s3-$unit
         read -r start end < <(unit_range "$bin_dir/${unit^^}.BIN")
+        # Overlay code reached only through the main program's callback tables (M4 bring-up B2).
+        extra+=(outside_pointers=1)
     fi
     if [ ! -f "$project/DQ8.gpr" ]; then
         echo "error: Ghidra project $project/DQ8.gpr not found" >&2
