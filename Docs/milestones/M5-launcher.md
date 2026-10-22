@@ -542,7 +542,7 @@ on a floating window manager, and vsync on the monitor.
 | Date | Step | Result |
 |---|---|---|
 | 2026-10-22 | Day 0 | Contracts, stubs and the placeholder launcher on `main`; dev-clang and asan unit tests pass (596); the launcher runs three frames on SDL's dummy driver |
-| 2026-10-22 | Session C | Window modes and Alt+Enter, aspect auto through the `[display]` watcher (16:9 frames and the `_W` movies at 16:9, 4:3 with Normal 4:3), integer scaling and filter, `--internal-resolution` (a real 2x picture in 3D scenes), pipeline cache, input profiles with dead zones, stable ports and rumble strength, audio device and volume; event streams byte-identical to `main` (see "Protocol notes"); 614 unit tests on dev-clang |
+| 2026-10-22 | Session C | Window modes and Alt+Enter, aspect auto through the `[display]` watcher (16:9 frames and the `_W` movies at 16:9, 4:3 with Normal 4:3), integer scaling and filter, `--internal-resolution` (a real 2x picture in 3D scenes), pipeline cache, input profiles with dead zones, stable ports and rumble strength, audio device and volume; event streams byte-identical to `main` (see "Protocol notes"); unit tests pass on dev-clang and asan (614) and on GCC with `-Werror` (613); checker `--tree --deep`, pre-commit and `reuse lint` clean |
 
 ## Results
 
