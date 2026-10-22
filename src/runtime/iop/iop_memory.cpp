@@ -4,6 +4,7 @@
 
 #include "runtime/ee/guest_stop.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <map>
@@ -78,8 +79,82 @@ std::optional<std::uint32_t> IopMemory::allocate(std::uint32_t bytes) {
     return cursor;
 }
 
-void IopMemory::free(std::uint32_t addr) {
-    heap_->blocks.erase(addr);
+std::optional<std::uint32_t> IopMemory::allocate(std::uint32_t bytes, std::uint32_t align, bool high) {
+    if (bytes == 0 || align == 0 || (align & (align - 1)) != 0 || bytes > heap_end - heap_base) {
+        return std::nullopt;
+    }
+    const std::uint32_t rounded = (bytes + align - 1) & ~(align - 1);
+    if (!high) {
+        std::uint32_t cursor = heap_base;
+        for (const auto& [addr, block_size] : heap_->blocks) {
+            const std::uint32_t start = (cursor + align - 1) & ~(align - 1);
+            if (start <= addr && addr - start >= rounded) {
+                heap_->blocks.emplace(start, rounded);
+                return start;
+            }
+            cursor = std::max(cursor, addr + block_size);
+        }
+        const std::uint32_t start = (cursor + align - 1) & ~(align - 1);
+        if (start > heap_end || heap_end - start < rounded) {
+            return std::nullopt;
+        }
+        heap_->blocks.emplace(start, rounded);
+        return start;
+    }
+    std::uint32_t end = heap_end;
+    for (auto it = heap_->blocks.rbegin(); it != heap_->blocks.rend(); ++it) {
+        const std::uint32_t block_end = it->first + it->second;
+        if (end >= rounded) {
+            const std::uint32_t start = (end - rounded) & ~(align - 1);
+            if (start >= block_end) {
+                heap_->blocks.emplace(start, rounded);
+                return start;
+            }
+        }
+        end = std::min(end, it->first);
+    }
+    if (end < rounded) {
+        return std::nullopt;
+    }
+    const std::uint32_t start = (end - rounded) & ~(align - 1);
+    if (start < heap_base) {
+        return std::nullopt;
+    }
+    heap_->blocks.emplace(start, rounded);
+    return start;
+}
+
+std::optional<std::uint32_t> IopMemory::allocate_at(std::uint32_t addr, std::uint32_t bytes,
+                                                    std::uint32_t align) {
+    if (bytes == 0 || align == 0 || (align & (align - 1)) != 0) {
+        return std::nullopt;
+    }
+    const std::uint32_t start = addr & ~(align - 1);
+    const std::uint64_t end = std::uint64_t{addr} + bytes;
+    const std::uint32_t rounded =
+        static_cast<std::uint32_t>(((end - start) + align - 1) & ~std::uint64_t{align - 1});
+    if (start < heap_base || start > heap_end || heap_end - start < rounded) {
+        return std::nullopt;
+    }
+    for (const auto& [a, block_size] : heap_->blocks) {
+        if (a < start + rounded && start < a + block_size) {
+            return std::nullopt;
+        }
+    }
+    heap_->blocks.emplace(start, rounded);
+    return start;
+}
+
+bool IopMemory::free(std::uint32_t addr) {
+    return heap_->blocks.erase(addr) != 0;
+}
+
+std::optional<std::uint32_t> IopMemory::block_size(std::uint32_t addr) const {
+    const auto it = heap_->blocks.find(addr);
+    if (it == heap_->blocks.end()) {
+        return std::nullopt;
+    }
+    return it->second;
 }
 
 void IopMemory::reset() {

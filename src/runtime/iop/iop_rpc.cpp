@@ -57,6 +57,36 @@ IopRpcLayer::Server& IopRpcLayer::add(std::unique_ptr<IopRpcServer> server, std:
     return by_sid_.emplace(sid, std::move(entry)).first->second;
 }
 
+IopRpcLayer::Server& IopRpcLayer::add_guest(std::unique_ptr<IopRpcServer> server, std::string module,
+                                            std::uint32_t handle, std::uint32_t buffer,
+                                            std::uint32_t cbuffer) {
+    const std::uint32_t sid = server->sid();
+    if (by_sid_.count(sid) != 0) {
+        throw std::invalid_argument("IOP RPC server " + hex32(sid) + " (" + std::string(server->name()) +
+                                    ") is registered twice");
+    }
+    Server entry;
+    entry.impl = std::move(server);
+    entry.module = std::move(module);
+    entry.handle = handle;
+    entry.buffer = buffer;
+    entry.buffer_size = IopMemory::size - (buffer & (IopMemory::size - 1));
+    entry.cbuffer = cbuffer;
+    entry.guest = true;
+    by_handle_[handle] = sid;
+    return by_sid_.emplace(sid, std::move(entry)).first->second;
+}
+
+bool IopRpcLayer::remove(std::uint32_t sid) {
+    const auto it = by_sid_.find(sid);
+    if (it == by_sid_.end()) {
+        return false;
+    }
+    by_handle_.erase(it->second.handle);
+    by_sid_.erase(it);
+    return true;
+}
+
 const IopRpcLayer::Server* IopRpcLayer::find(std::uint32_t sid) const {
     const auto it = by_sid_.find(sid);
     return it == by_sid_.end() ? nullptr : &it->second;
@@ -74,6 +104,7 @@ std::vector<const IopRpcLayer::Server*> IopRpcLayer::servers() const {
 void IopRpcLayer::clear() {
     by_sid_.clear();
     by_handle_.clear();
+    pending_.clear();
 }
 
 void IopRpcLayer::bind(std::span<const std::uint8_t> packet) {
@@ -81,16 +112,18 @@ void IopRpcLayer::bind(std::span<const std::uint8_t> packet) {
     const std::uint32_t sid = sif::load32(packet, sif::bind_sid);
     std::uint32_t handle = 0;
     std::uint32_t buffer = 0;
+    std::uint32_t cbuffer = 0;
     if (const auto it = by_sid_.find(sid); it != by_sid_.end()) {
         handle = it->second.handle;
         buffer = it->second.buffer;
+        cbuffer = it->second.cbuffer;
         machine_.emit(
             MachineEvent{"rpc_bind", {}}.add("sid", std::uint64_t{sid}).add("server", std::uint64_t{handle}));
     }
     machine_.trace(TraceCategory::rpc,
                    "bind " + hex32(sid) + (handle != 0 ? " -> " + hex32(handle) : " -> no server"));
     const Cycles ready = machine_.clock().now() + machine_.cost().rpc_reply(sif::end_size);
-    link_.send_to_ee(end_packet(packet, sif::cid_rpc_bind, handle, buffer, 0, 0), {}, ready);
+    link_.send_to_ee(end_packet(packet, sif::cid_rpc_bind, handle, buffer, 0, 0, cbuffer), {}, ready);
 }
 
 void IopRpcLayer::call(std::span<const std::uint8_t> packet) {
@@ -105,20 +138,20 @@ void IopRpcLayer::call(std::span<const std::uint8_t> packet) {
     const std::uint32_t send_size = sif::load32(packet, sif::call_send_size);
     const std::uint32_t recv_addr = sif::load32(packet, sif::call_recv_addr);
     const std::uint32_t recv_size = sif::load32(packet, sif::call_recv_size);
-    const std::uint32_t rmode = sif::load32(packet, sif::call_rmode);
     if (send_size > s.buffer_size) {
         fail("an RPC call to " + std::string(s.impl->name()) + " sends " + std::to_string(send_size) +
              " bytes; its receive buffer holds " + std::to_string(s.buffer_size));
     }
     std::vector<std::uint8_t> args(send_size);
-    iop_.read(s.buffer, args);
+    iop_.read(s.buffer & (IopMemory::size - 1), args);
 
     if (machine_.tracing(TraceCategory::rpc)) {
         machine_.emit(MachineEvent{"rpc_call", {}}
                           .add("sid", std::uint64_t{hit->second})
                           .add("fno", std::uint64_t{fno}));
     }
-    IopCallContext ctx{machine_, iop_, disc_, hit->second, fno, recv_addr, recv_size};
+    const std::uint64_t request = next_request_++;
+    IopCallContext ctx{machine_, iop_, disc_, hit->second, fno, recv_addr, recv_size, request, false};
     RpcReply reply;
     try {
         reply = s.impl->call(ctx, args);
@@ -128,7 +161,34 @@ void IopRpcLayer::call(std::span<const std::uint8_t> packet) {
         fail(std::string(s.impl->name()) + " function " + std::to_string(fno) + " failed: " + e.what());
     }
     ++s.calls;
+    Pending p;
+    p.sid = hit->second;
+    p.packet.assign(packet.begin(), packet.end());
+    p.handle = s.handle;
+    p.buffer = s.buffer;
+    p.cbuffer = s.cbuffer;
+    if (ctx.deferred) {
+        pending_.emplace(request, std::move(p));
+        return;
+    }
+    finish(p, std::move(reply));
+}
 
+void IopRpcLayer::complete(std::uint64_t request, RpcReply reply) {
+    const auto it = pending_.find(request);
+    if (it == pending_.end()) {
+        return;
+    }
+    const Pending p = std::move(it->second);
+    pending_.erase(it);
+    finish(p, std::move(reply));
+}
+
+void IopRpcLayer::finish(const Pending& call, RpcReply reply) {
+    const std::span<const std::uint8_t> packet(call.packet);
+    const std::uint32_t recv_addr = sif::load32(packet, sif::call_recv_addr);
+    const std::uint32_t recv_size = sif::load32(packet, sif::call_recv_size);
+    const std::uint32_t rmode = sif::load32(packet, sif::call_rmode);
     std::vector<EeWrite> writes = std::move(reply.extra);
     std::uint32_t data_bytes = 0;
     if (recv_addr != 0 && recv_size != 0 && !reply.data.empty()) {
@@ -140,17 +200,23 @@ void IopRpcLayer::call(std::span<const std::uint8_t> packet) {
     for (const EeWrite& w : writes) {
         bytes += w.bytes.size();
     }
-    const Cycles start = std::max(machine_.clock().now(), s.busy_until);
+    const auto server = by_sid_.find(call.sid);
+    const Cycles busy = server != by_sid_.end() ? server->second.busy_until : 0;
+    const Cycles start = std::max(machine_.clock().now(), busy);
     const Cycles ready = std::max(start + machine_.cost().rpc_reply(bytes), reply.ready_at);
-    s.busy_until = ready;
+    if (server != by_sid_.end()) {
+        server->second.busy_until = ready;
+    }
     if (rmode != 0) {
-        link_.send_to_ee(end_packet(packet, sif::cid_rpc_call, s.handle, s.buffer, data_bytes, recv_addr),
+        link_.send_to_ee(end_packet(packet, sif::cid_rpc_call, call.handle, call.buffer, data_bytes,
+                                    recv_addr, call.cbuffer),
                          std::move(writes), ready);
     } else {
         // No end packet was asked for: the data travels without an interrupt, followed by an end-format
         // packet written over the request itself with its slot flags and request number cleared, which frees
         // the EE's packet slot and ends sceSifCheckStatRpc's busy state.
-        std::vector<std::uint8_t> release = end_packet(packet, sif::cid_rpc_call, s.handle, s.buffer, 0, 0);
+        std::vector<std::uint8_t> release =
+            end_packet(packet, sif::cid_rpc_call, call.handle, call.buffer, 0, 0, call.cbuffer);
         sif::store32(release, sif::rpc_rec_id, 0);
         sif::store32(release, sif::rpc_id, 0);
         writes.push_back(EeWrite{sif::load32(packet, sif::rpc_pkt_addr), std::move(release)});
@@ -179,7 +245,7 @@ void IopRpcLayer::rdata(std::span<const std::uint8_t> packet) {
 std::vector<std::uint8_t> IopRpcLayer::end_packet(std::span<const std::uint8_t> request,
                                                   std::uint32_t ended_cid, std::uint32_t server,
                                                   std::uint32_t buffer, std::uint32_t extra_size,
-                                                  std::uint32_t extra_dest) const {
+                                                  std::uint32_t extra_dest, std::uint32_t cbuffer) const {
     std::vector<std::uint8_t> p(sif::end_size, 0);
     sif::store32(p, sif::hdr_sizes, sif::end_size | (extra_size << 8));
     sif::store32(p, sif::hdr_extra_dest, extra_dest);
@@ -190,6 +256,7 @@ std::vector<std::uint8_t> IopRpcLayer::end_packet(std::span<const std::uint8_t> 
     sif::store32(p, sif::end_cid, ended_cid);
     sif::store32(p, sif::end_server, server);
     sif::store32(p, sif::end_buffer, buffer);
+    sif::store32(p, sif::end_cbuffer, cbuffer);
     return p;
 }
 

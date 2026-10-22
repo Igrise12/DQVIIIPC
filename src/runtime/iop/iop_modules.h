@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -19,6 +20,8 @@
 //   padman.v1                            the pad server of the old pad library (two server ids)
 //   mcserv.v1                            the memory-card server over IopConfig::cards (M4)
 //   null:<sid>                           acknowledges every call with zeros (sound servers until M4)
+//   interpret                            M4 (ADR-0014): the module itself runs on the interpreted IOP; alone
+//                                        in its row
 namespace dq8::rt {
 
 class IDiscSource;
@@ -40,8 +43,12 @@ struct IopServiceDeps {
     IMemoryCardStore* cards[2] = {nullptr, nullptr};
     const VirtualRtc* rtc = nullptr;
     IPadFeedbackSink* pad_feedback = nullptr;
-    // loadfile: load a module by path with its argument block; returns the module id or a negative IOP error.
-    std::function<std::int32_t(std::string_view path, std::span<const std::uint8_t> args)> load_module;
+    // loadfile: load a module by path with its argument block; returns the module id or a negative IOP error,
+    // or nullopt when the module runs interpreted and its start has not returned yet: the Iop then answers
+    // RPC request `request` itself (IopRpcLayer::complete) once it has.
+    std::function<std::optional<std::int32_t>(std::string_view path, std::span<const std::uint8_t> args,
+                                              std::uint64_t request)>
+        load_module;
     // Sends a command packet of the given id and option word to the EE (the header is filled in; `body`
     // follows it), after `writes` land, no earlier than `ready_at`: what a server's own IOP thread sends
     // outside the RPC reply (fileio's completion records).
@@ -50,10 +57,11 @@ struct IopServiceDeps {
         send_command;
 };
 
-// True for a catalogue name (including any well-formed "null:<sid>").
+// True for a catalogue name (including any well-formed "null:<sid>" and "interpret").
 bool is_iop_service(std::string_view name);
-// The servers a catalogue name stands for; `deps` must outlive them. std::invalid_argument for an unknown
-// name.
+inline constexpr std::string_view interpret_service = "interpret";
+// The servers a catalogue name stands for ("interpret" stands for none: the module registers its own);
+// `deps` must outlive them. std::invalid_argument for an unknown name.
 std::vector<std::unique_ptr<IopRpcServer>> make_iop_service(std::string_view name,
                                                             const IopServiceDeps& deps);
 // The services an IOP boot (and every reboot) provides before any module is loaded.

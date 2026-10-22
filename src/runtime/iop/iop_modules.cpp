@@ -53,7 +53,8 @@ std::string upper(std::string_view s) {
 
 bool is_iop_service(std::string_view name) {
     return std::find(standard_services.begin(), standard_services.end(), name) != standard_services.end() ||
-           name == "padman.v1" || name == "mcserv.v1" || null_server_sid(name).has_value();
+           name == "padman.v1" || name == "mcserv.v1" || name == interpret_service ||
+           null_server_sid(name).has_value();
 }
 
 std::vector<std::unique_ptr<IopRpcServer>> make_iop_service(std::string_view name,
@@ -71,6 +72,8 @@ std::vector<std::unique_ptr<IopRpcServer>> make_iop_service(std::string_view nam
         out = iop_services::make_padman_v1(deps);
     } else if (name == "mcserv.v1") {
         out.push_back(iop_services::make_mcserv_v1(deps));
+    } else if (name == interpret_service) {
+        // The interpreted module registers its servers itself.
     } else if (const auto sid = null_server_sid(name)) {
         out.push_back(iop_services::make_null_server(*sid));
     } else {
@@ -97,6 +100,10 @@ IopModuleRegistry::IopModuleRegistry(std::vector<IopModuleSpec> specs) : specs_(
             if (!is_iop_service(service)) {
                 throw std::invalid_argument("IOP module " + spec.name + " names unknown service '" + service +
                                             "'");
+            }
+            if (service == interpret_service && spec.services.size() != 1) {
+                throw std::invalid_argument("IOP module " + spec.name +
+                                            " names 'interpret' with other services; it must stand alone");
             }
         }
     }

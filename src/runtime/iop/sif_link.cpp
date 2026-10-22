@@ -404,9 +404,10 @@ void SifLink::land(Landing& landing) {
     }
 }
 
-void SifLink::send_to_ee(std::vector<std::uint8_t> packet, std::vector<EeWrite> writes, Cycles ready_at) {
+void SifLink::send_to_ee(std::vector<std::uint8_t> packet, std::vector<EeWrite> writes, Cycles ready_at,
+                         std::function<void(Cycles)> delivered) {
     sif0_queue_.emplace(std::pair{ready_at, sif0_sequence_++},
-                        Sif0Delivery{std::move(packet), std::move(writes)});
+                        Sif0Delivery{std::move(packet), std::move(writes), std::move(delivered)});
     schedule_sif0();
 }
 
@@ -436,7 +437,7 @@ void SifLink::schedule_sif0() {
     sif0_event_ = machine_->events().schedule(when, "sif0_deliver", [this](Cycles at) { deliver_sif0(at); });
 }
 
-void SifLink::deliver_sif0(Cycles) {
+void SifLink::deliver_sif0(Cycles at) {
     sif0_event_ = 0;
     if (!sif0_armed_ || sif0_queue_.empty()) {
         return;
@@ -474,6 +475,9 @@ void SifLink::deliver_sif0(Cycles) {
     }
     ++delivered_;
     machine_->note_activity();
+    if (d.delivered) {
+        d.delivered(at);
+    }
     schedule_sif0();
 }
 

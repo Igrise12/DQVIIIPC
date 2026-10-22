@@ -488,6 +488,111 @@ calls Reset itself, so the Reset hook also runs once inside Create.
   entered by a tail jump from the player entry `0x001A2450`, which the dispatcher cannot intercept (a hook there ran 0
   times), so the key names the open's first call, `0x0019E430` (its only caller is the open), whose `$a0` is the name.
 
+### The interpreted IOP (session A, 2026-10-22)
+
+Re-derived from the formats and the IOP kernel's observable behaviour; items marked *inferred* are choices to
+confirm in bring-up B8. Code: `src/runtime/iop/{cpu,hw,loader,kernel}/`, `iop_exec.*`.
+
+**IRX image.** ELF type 0xFF80; the program header of type 0x70000080 points at the .iopmod record: +0x00 module
+info pointer, +0x04 entry, +0x08 gp, +0x0C text size, +0x10 data size, +0x14 bss size, +0x18 version (16 bits),
++0x1A name (NUL-terminated). One PT_LOAD at address 0. REL types 2 (32), 4 (26), 5/6 (HI16/LO16, every HI16 paired
+with the next LO16) against the image base, symbol index 0; any other type, a RELA section or a symbol stops the
+load. Images go to sysmem's lowest free block (256-byte units).
+
+**Import and export tables.** Import (in the text, found by scanning it): +0x00 0x41E00000, +0x04 link (0 in the
+file), +0x08 version (16 bits; the high byte is the major), +0x0A flags, +0x0C name (8 bytes), +0x14 stubs of two
+words (`jr $ra`, `addiu $zero, $zero, ordinal`) ended by two zero words; a word equal to the magic without a
+printable name and a well-formed first stub is not a table. Linking writes `j target` over a stub's first word.
+Export (registered at start): +0x00 0x41C00000, the same header, function addresses from +0x14 (ordinal n at
++0x14 + 4n) ended by 0. HLE libraries win over guest ones; a guest library may not take an HLE name (-212).
+
+**HLE page.** Physical 0x0FF00000 (above the RAM mirrors, in reach of `j`), 64 KiB of 8-byte slots: the trap
+word 0x6C000000 | slot (primary opcode 0x1B) and a zero word, as loads read them; fetching a slot is the trap.
+Slot 0 thread exit, 1 module start return, 2 RPC function return, 3 interrupt return, then the 66 HLE functions in
+library and ordinal order, then one stop trap per unimplemented (library, ordinal) imported.
+
+**Module start.** A thread at priority 8 (*inferred*: start returns before the threads it starts unless they
+block it) with a 16 KiB stack runs start(argc, argv): argv[0] is the load path, the NUL-separated loadfile
+arguments follow; strings and vector sit at the top of that stack. Result 0 resident, 1 not resident (the image is
+freed), 2 removable. The loadfile reply (id, start result) leaves once start returns.
+
+**Threads.** CreateThread parameter: +0x00 attr, +0x04 option, +0x08 entry, +0x0C stack size, +0x10 priority
+(1-126; lower runs first; no time slicing). Stacks come from the top of the heap (sysmem mode 1) and are filled with
+0xFF unless attr has 0x00100000. A started thread has $sp = stack top - 16, $gp = its creator's, $a0 = StartThread's
+argument; returning from its entry makes it dormant. ReferThreadStatus writes 13 words: attr, option, status (1 run,
+2 ready, 4 wait, 0x10 dormant), entry, stack, stack size, gp, initial priority, current priority, wait type (1
+sleep, 2 delay, 3 semaphore, 4 event flag; RPC waits report 1), wait id, wakeup count, 0. Thread 0 in a call means
+the caller.
+
+**Semaphores and event flags.** CreateSema parameter: +0x00 attr (bit 0: waiters by priority, else FIFO), +0x04
+option, +0x08 initial, +0x0C max. CreateEventFlag: +0x00 attr (bit 1: several waiters allowed), +0x04 option, +0x08
+initial bits. WaitEventFlag mode: bit 0 OR (else AND), 0x10 clear the bits waited for, 0x20 clear all; the result
+word gets the bits before the clear. ClearEventFlag ANDs. Deleting either wakes its waiters with -425.
+
+**Time.** The system clock counts IOP cycles (36.864 MHz) since the IOP's last boot; GetSystemTime and
+USec2SysClock write (low, high) words; USec2SysClock = µs × 36,864 / 1,000; SysClock2USec splits into seconds and
+microseconds. DelayThread(µs) is an "iop_delay" event; iSetAlarm(clock, handler, common) an "iop_alarm" event whose
+handler returns the next interval in ticks (0 ends it); CancelAlarm/iCancelAlarm take (handler, common) and return
+-105 when none matches (*inferred*).
+
+**Interrupts.** Numbers 0-31 are INTC lines; 0x20 + n is DMA channel n (0-6) and 0x28 + (n - 7) channels 7-12,
+demultiplexed from line 3 by DICR (channel enables in bits 16+, flags in bits 24+, master enable bit 23) and DICR2
+(channels 7-12, same bit layout). EnableIntr on a DMA number sets the channel's enable, the master enable and I_MASK
+bit 3. Handlers run one at a time on an 8 KiB interrupt stack as handler(arg) with the registering code's $gp, when
+the running thread has interrupts enabled (CpuSuspendIntr writes 1 or 0 to its state word and returns -102 when
+already suspended); one that returns 0 has its interrupt disabled (*inferred*). QueryIntrContext is 1 in a handler.
+Blocking calls return -100 there and -417 with interrupts suspended.
+
+**Hardware.** I_STAT 0x1F801070 (a write ANDs), I_MASK 0x1F801074, I_CTRL 0x1F801078 (a read returns and clears
+it); DMA channel n at 0x1F801080 + 0x10n (0-6) or 0x1F801500 + 0x10(n - 7): MADR, BCR, CHCR (bit 24 busy), TADR;
+DPCR 0x1F8010F0 and DPCR2 0x1F801570 (enable = bit 4k + 3), DICR 0x1F8010F4, DICR2 0x1F801574 (flags write-1-to-clear),
+DMACEN 0x1F801578, DMACINTEN 0x1F80157C; SSBUS stores at 0x1F801000-0x1F801020 and 0x1F801400-0x1F801420; the
+scratchpad at 0x1F800000 (1 KiB). Only whole-word stores reach I_STAT, I_CTRL, DICR, DICR2 and CHCR. 32-bit
+accesses to a mapped device arrive as two 16-bit accesses, low half first. Starting a channel no device maps, or
+one DPCR/DPCR2 leaves disabled, stops; so does any other device-space address.
+
+**timrman.** Timer ids are (index + 1) << 28 | (register address >> 4); allocation order 2, 5, 4, 3, 0, 1; source
+masks 0x0B, 0x0D, 0x01, 0x05, 0x01, 0x01; widths 16, 16, 16, 32, 32, 32 bits; maximum prescale 1, 1, 8, 1, 256, 256
+(table adapted from PS2Recomp). Sources: 1 system clock, 2 pixel clock (13.5 MHz), 4 horizontal blank. A started
+timer with a handler raises "iop_timer" after `compare` counts; the handler(common) returns the next compare (0
+stops the timer); the counter restarts at each compare. SetupHardTimer modes 0, 1, 3, 5, 7.
+
+**sysmem.** AllocSysMemory(mode, size, address): 0 lowest fit, 1 highest fit, 2 the block holding `address`, in
+256-byte units, 0 when it does not fit; other modes stop. FreeSysMemory returns -1 for an address that starts no
+block (*inferred*). Kprintf and printf use our formatter and go to the `iop` trace category line by line.
+
+**IOP RPC structures.** Server structure (0x44 bytes, the handle the EE binds to): +0x00 sid, +0x04 function,
++0x08 buffer, +0x0C argument size, +0x10 cfunction, +0x14 cbuffer, +0x24 function number, +0x2C reply size, +0x40
+queue. Queue (0x18 bytes): +0x00 the serving thread. The function runs as function(fno, buffer, size) on the
+sceSifRpcLoop thread and returns the reply's address; reply size bytes are copied from it. Client structure (0x28
+bytes): +0x00 packet address (the structure itself), +0x04 request number, +0x08 thread, +0x0C mode (bit 0 no
+wait), +0x10 command, +0x14 server buffer, +0x18 cbuffer, +0x1C end function, +0x20 end parameter, +0x24 server
+(0 until a bind ends with one).
+
+**IOP-to-EE RPC packets.** Bind (0x24 bytes): header size 0x24, cid 0x80000009; +0x10 0, +0x14 client, +0x18 request
+number, +0x1C client, +0x20 sid. Call (0x38 bytes): header word 0 = 0x38 | send size << 8, word 1 = the server's EE
+buffer, cid 0x8000000A; +0x10 0, +0x14 client, +0x18 request number, +0x1C client, +0x20 fno, +0x24 send size, +0x28
+the IOP receive address, +0x2C receive size, +0x30 1 (an end packet is always asked for), +0x34 server; the send
+data is written to the EE buffer ahead of the packet. The EE's end packet (cid 0x80000008) echoes +0x10..+0x1C and
+gives +0x20 the ended command, +0x24 server, +0x28 buffer, +0x2C cbuffer; a call's reply data reaches the receive
+address before it. The end function runs as end(param) in the interrupt context; a waiting caller wakes with 0.
+`Iop::on_command` routes every cid 0x80000008 to the interpreted IOP (the native services never make requests).
+
+**sifman.** sceSifSetDma(descriptors, count): 16-byte descriptors (IOP source, EE destination, size, attribute);
+attribute 0 or 0x40 only (interrupt bits stop); sizes round up to words; a data-only SIF0 delivery. sceSifDmaStat:
+1 while queued, -1 once delivered (the last 256 ids are remembered).
+
+**Error codes returned.** -100 illegal context, -101 illegal interrupt number, -102 interrupts already suspended,
+-103 interrupt already disabled, -104/-105 handler found/not found, -150 to -156 timers (no timer, bad id, source,
+prescale, busy, not set up, not in use), -212/-213/-214 library found/not found/illegal, -400 no memory, -402
+entry, -403 priority, -404 stack size, -405 mode, -406 thread id, -407 unknown thread, -408 unknown semaphore, -409
+unknown event flag, -413 dormant, -414 not dormant, -417 cannot wait, -420 semaphore overflow, -422 event flag
+multiple waiters, -423 empty pattern, -425 deleted while waiting.
+
+**Events.** `iop_module` (native rows: mode "native", base, size and start 0), `iop_link`, `iop_import_unimplemented`,
+`iop_rpc_register`; with `--dump-iop-ram-at`, `iop_ram_dump {sha1}`. Event tags: "iop_slice", "iop_delay",
+"iop_alarm", "iop_timer", "iop_dma".
+
 ## Bring-up log
 
 | Unknown | Local evidence | Resolution (addresses, ids, offsets, chosen values) | Change |
