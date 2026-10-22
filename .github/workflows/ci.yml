@@ -15,6 +15,9 @@ env:
     libgles2-mesa-dev libdrm-dev libgbm-dev libasound2-dev libpulse-dev libdbus-1-dev libudev-dev
   SDL_VIDEO_DRIVER: dummy
   SDL_AUDIO_DRIVER: dummy
+  # The movie decoder library dq8-movie links the system's libavcodec and libavutil (ADR-0015, cmake/Movie.cmake);
+  # the Linux jobs build and test it (DQ8_FFMPEG=system fails the configuration if they are missing).
+  FFMPEG_LINUX_DEPS: libavcodec-dev libavutil-dev
 
 jobs:
   build-test:
@@ -34,7 +37,7 @@ jobs:
         run: bash scripts/init_submodules.sh
       - name: Install Linux tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y ninja-build ${{ matrix.cc }} ${{ env.SDL3_LINUX_DEPS }}
+        run: sudo apt-get update && sudo apt-get install -y ninja-build ${{ matrix.cc }} ${{ env.SDL3_LINUX_DEPS }} ${{ env.FFMPEG_LINUX_DEPS }}
       - name: Register compiler problem matchers (errors become annotations readable without the logs)
         shell: bash
         run: |
@@ -42,7 +45,7 @@ jobs:
           echo "::add-matcher::.github/problem-matchers/msvc.json"
       # The paraLLEl-GS backend stays OFF on MSVC (its MSVC build is unverified in M3, Docs/milestones/M3-boots.md).
       - name: Configure
-        run: cmake --preset ${{ matrix.preset }} ${{ runner.os == 'Linux' && format('-DCMAKE_C_COMPILER={0} -DCMAKE_CXX_COMPILER={1}', matrix.cc, matrix.cxx) || '-DDQ8_BUILD_GS_PARALLEL=OFF' }}
+        run: cmake --preset ${{ matrix.preset }} ${{ runner.os == 'Linux' && format('-DCMAKE_C_COMPILER={0} -DCMAKE_CXX_COMPILER={1} -DDQ8_FFMPEG=system', matrix.cc, matrix.cxx) || '-DDQ8_BUILD_GS_PARALLEL=OFF' }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }} --parallel
       - name: Unit tests
@@ -63,9 +66,9 @@ jobs:
       - name: Submodules (pinned subset, scripts/init_submodules.sh)
         shell: bash
         run: bash scripts/init_submodules.sh
-      - run: sudo apt-get update && sudo apt-get install -y ninja-build clang-18 ${{ env.SDL3_LINUX_DEPS }}
+      - run: sudo apt-get update && sudo apt-get install -y ninja-build clang-18 ${{ env.SDL3_LINUX_DEPS }} ${{ env.FFMPEG_LINUX_DEPS }}
       - run: echo "::add-matcher::.github/problem-matchers/gcc.json"
-      - run: cmake --preset asan -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18
+      - run: cmake --preset asan -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DDQ8_FFMPEG=system
       - run: cmake --build --preset asan --parallel
       - run: ctest --preset unit-asan
 

@@ -47,6 +47,12 @@ void IpuRegisters::attach(MachineServices& machine) {
 void IpuRegisters::reset() {
     commands_ = 0;
     fifo_writes_ = 0;
+    thresholds_ = IpuThresholds{};
+}
+
+IpuRegisters* IpuRegisters::find(MachineServices& machine) noexcept {
+    const auto hit = machine.mmio().find(regs_base);
+    return hit ? dynamic_cast<IpuRegisters*>(hit->device) : nullptr;
 }
 
 bool IpuRegisters::read(std::uint32_t /*offset*/, std::uint32_t width, std::uint8_t* out,
@@ -62,6 +68,10 @@ bool IpuRegisters::write(std::uint32_t offset, std::uint32_t width, const std::u
         const std::uint32_t code = value >> 28;
         if (code != cmd_bclr && code != cmd_setiq && code != cmd_setvq && code != cmd_setth) {
             decode_path(std::string("IPU command ") + command_name(code), value, at);
+        }
+        if (code == cmd_setth) {
+            thresholds_.th0 = static_cast<std::uint16_t>(value & 0x1FFu);
+            thresholds_.th1 = static_cast<std::uint16_t>((value >> 16) & 0x1FFu);
         }
         ++commands_;
         return true;

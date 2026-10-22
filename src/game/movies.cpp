@@ -6,6 +6,8 @@
 #include "runtime/ee/context.h"
 #include "runtime/ee/guest_stop.h"
 #include "runtime/machine/machine_services.h"
+#include "runtime/movie/movie_decoder.h"
+#include "runtime/movie/sce_mpeg_hle.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -47,14 +49,31 @@ std::string_view to_string(MoviePolicy policy) noexcept {
         return "skip";
     case MoviePolicy::blank:
         return "blank";
+    case MoviePolicy::hle:
+        return "hle";
     case MoviePolicy::stop:
         break;
     }
     return "stop";
 }
 
+std::optional<MoviePolicy> resolve_movie_policy(std::string_view option,
+                                                const std::optional<std::filesystem::path>& library) {
+    if (option == "play" || option == "nodecode") {
+        return MoviePolicy::hle;
+    }
+    if (option == "auto") {
+        const rt::MovieLibraryConfig config{library ? library->string() : std::string()};
+        return rt::movie_library_problem(config) ? MoviePolicy::skip : MoviePolicy::hle;
+    }
+    return parse_movie_policy(option);
+}
+
 std::vector<rt::OverrideSpec> movie_overrides(const core::RegionProfile& profile, MoviePolicy policy) {
     std::vector<rt::OverrideSpec> out;
+    if (policy == MoviePolicy::hle) {
+        return out;
+    }
     for (std::size_t i = 0; i < profile.movie.player_entries.size(); ++i) {
         const std::uint32_t entry = profile.movie.player_entries[i];
         rt::OverrideSpec spec;
@@ -96,6 +115,46 @@ std::vector<rt::OverrideSpec> movie_overrides(const core::RegionProfile& profile
             call.return_to_caller();
         };
         out.push_back(std::move(spec));
+    }
+    return out;
+}
+
+std::vector<rt::OverrideSpec> movie_hle_overrides(const core::RegionProfile& profile, rt::SceMpegHle& hle) {
+    std::vector<rt::OverrideSpec> out;
+    const core::RegionProfile::Movie::SceMpeg& m = profile.movie.sce_mpeg;
+    if (!m.present()) {
+        return out;
+    }
+    rt::SceMpegHle* h = &hle;
+    const auto add = [&out](std::uint32_t address, rt::OverrideKind kind, const char* name,
+                            rt::OverrideFn fn) {
+        rt::OverrideSpec spec;
+        spec.unit = std::string(main_unit_name);
+        spec.address = address;
+        spec.kind = kind;
+        spec.name = std::string("sce-mpeg-") + name;
+        spec.fn = std::move(fn);
+        out.push_back(std::move(spec));
+    };
+    using K = rt::OverrideKind;
+    add(m.create, K::hook_before, "create", [h](rt::OverrideCall& c) { h->hook_create(c); });
+    add(m.delete_, K::hook_before, "delete", [h](rt::OverrideCall& c) { h->hook_delete(c); });
+    add(m.add_callback, K::hook_before, "add-callback",
+        [h](rt::OverrideCall& c) { h->hook_add_callback(c); });
+    add(m.add_str_callback, K::hook_before, "add-str-callback",
+        [h](rt::OverrideCall& c) { h->hook_add_str_callback(c); });
+    add(m.demux_pss_ring, K::hook_before, "demux-pss-ring",
+        [h](rt::OverrideCall& c) { h->hook_demux_pss_ring(c); });
+    add(m.reset, K::hook_before, "reset", [h](rt::OverrideCall& c) { h->hook_reset(c); });
+    add(m.get_picture, K::replace, "get-picture", [h](rt::OverrideCall& c) { h->get_picture(c); });
+    add(m.get_picture_inner, K::replace, "ipu-decode", [h](rt::OverrideCall& c) { h->decode_reached(c); });
+    add(m.is_end, K::replace, "is-end", [h](rt::OverrideCall& c) { h->is_end(c); });
+    add(m.video_stream_callback, K::replace, "video-stream",
+        [h](rt::OverrideCall& c) { h->video_stream(c); });
+    if (m.player_open != 0) {
+        const unsigned name_arg = m.player_open_name_arg;
+        add(m.player_open, K::hook_before, "player-open",
+            [h, name_arg](rt::OverrideCall& c) { h->hook_player_open(c, name_arg); });
     }
     return out;
 }

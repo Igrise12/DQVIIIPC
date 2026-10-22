@@ -4,6 +4,7 @@
 
 #include "runtime/machine/machine_services.h"
 #include "runtime/machine/mmio.h"
+#include "runtime/movie/ipu_csc.h"
 
 #include <cstdint>
 #include <string_view>
@@ -13,8 +14,8 @@
 // Registers at 0x10002000 (CMD, CTRL, BP, TOP) and the FIFOs at 0x10007000 (OUT, IN). Reads show an idle IPU;
 // CTRL writes (reset) and the set-up commands BCLR, SETIQ, SETVQ and SETTH are accepted; IN FIFO writes are
 // discarded and counted; a decode command (IDEC, BDEC, VDEC, FDEC, CSC, PACK) or an OUT FIFO read stops the
-// machine, since the HLE should have covered that path. Day-0 stub; M4 session C extends it (SETTH capture
-// for the CSC alpha).
+// machine, since the HLE should have covered that path. SETTH's two thresholds are kept: the HLE's colour
+// conversion uses them for the alpha of dark pixels, as the IPU's CSC does.
 namespace dq8::rt {
 
 class IpuRegisters final : public IDevice, public IMmioDevice {
@@ -31,6 +32,11 @@ class IpuRegisters final : public IDevice, public IMmioDevice {
 
     std::uint64_t commands() const noexcept { return commands_; }
     std::uint64_t fifo_writes() const noexcept { return fifo_writes_; }
+    // The thresholds of the last SETTH (both 0 after reset).
+    const IpuThresholds& thresholds() const noexcept { return thresholds_; }
+
+    // The stub mapped on `machine`'s bus, or null.
+    static IpuRegisters* find(MachineServices& machine) noexcept;
 
   private:
     // The FIFO page, mapped separately (its offsets overlap the register page's).
@@ -53,6 +59,7 @@ class IpuRegisters final : public IDevice, public IMmioDevice {
     MachineServices* machine_ = nullptr;
     std::uint64_t commands_ = 0;
     std::uint64_t fifo_writes_ = 0;
+    IpuThresholds thresholds_;
 };
 
 } // namespace dq8::rt

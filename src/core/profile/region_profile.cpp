@@ -634,6 +634,19 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
             m.reset = entry("reset");
             m.ipu_init = entry("ipu_init");
             m.video_stream_callback = entry("video_stream_callback");
+            // Optional: the player's open routine and the argument holding the movie's name (0 or absent:
+            // none).
+            if (r.optional(*mpeg, "player_open") != nullptr &&
+                r.u32(*mpeg, "player_open", "movie.sce_mpeg") != 0) {
+                m.player_open = entry("player_open");
+            }
+            if (const toml::value* arg = r.optional(*mpeg, "player_open_name_arg")) {
+                m.player_open_name_arg = r.u32(*mpeg, "player_open_name_arg", "movie.sce_mpeg");
+                if (m.player_open_name_arg > 3) {
+                    r.fail(*arg,
+                           "[movie.sce_mpeg].player_open_name_arg must be 0 to 3 (an argument in $a0..$a3)");
+                }
+            }
         }
 
         if (const toml::value* timelines = r.optional(*movie, "timelines")) {

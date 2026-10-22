@@ -281,6 +281,8 @@ TEST_CASE("the shipped region profiles are valid", "[core][profile]") {
             CHECK(p.movie.sce_mpeg.create == 0x00110728);
             CHECK(p.movie.sce_mpeg.get_picture == 0x001113C8);
             CHECK(p.movie.sce_mpeg.video_stream_callback == 0x001A06C0);
+            CHECK(p.movie.sce_mpeg.player_open == 0x0019E430);
+            CHECK(p.movie.sce_mpeg.player_open_name_arg == 0);
             CHECK(p.boot.ctor_table_start == 0x003CF910);
             CHECK(p.boot.ctor_table_end == 0x003CFB80);
             CHECK(p.iop.reset_image == "MODULES/IOPRP300.IMG");
@@ -379,6 +381,20 @@ TEST_CASE("the optional [iop] and [movie] tables are validated", "[core][profile
     CHECK_FALSE(plain.movie.sce_mpeg.present());
     fails(base + iop + movie + replace_line(mpeg, "is_end = 0x00100020", "is_end = 0x00300000"), "is_end");
     fails(base + iop + movie + replace_line(mpeg, "reset = 0x00100020", ""), "reset");
+
+    // The optional player open: absent or 0 means no hook; its name argument is $a0..$a3.
+    CHECK(with_mpeg.movie.sce_mpeg.player_open == 0);
+    CHECK(with_mpeg.movie.sce_mpeg.player_open_name_arg == 0);
+    const auto opened = dq8::core::load_region_profile(
+        write(tmp.path(), "open.toml",
+              base + iop + movie + mpeg + "player_open = 0x00100040\nplayer_open_name_arg = 3\n"));
+    CHECK(opened.movie.sce_mpeg.player_open == 0x00100040);
+    CHECK(opened.movie.sce_mpeg.player_open_name_arg == 3);
+    const auto zero = dq8::core::load_region_profile(
+        write(tmp.path(), "zero.toml", base + iop + movie + mpeg + "player_open = 0\n"));
+    CHECK(zero.movie.sce_mpeg.player_open == 0);
+    fails(base + iop + movie + mpeg + "player_open = 0x00300000\n", "player_open");
+    fails(base + iop + movie + mpeg + "player_open = 0x00100040\nplayer_open_name_arg = 4\n", "0 to 3");
 }
 
 TEST_CASE("[[movie.timelines]] rows are validated", "[core][profile]") {
