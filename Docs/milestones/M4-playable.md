@@ -367,6 +367,28 @@ bumps the ring's byte counters (harmless under the HLE: no DMA), sets the reader
 to return, then terminates and deletes the three threads. The decoder thread may be inside GetPicture, and so inside
 the nodata callback: the HLE keeps no host state across that call.
 
+**The end of a movie.** The manager loop ends when the reader's remaining-bytes word drops below 5 or the word at
+mp + 0xA8 (`0x00410B08`) reads 3, which the decoder thread writes after its loop (IsEnd true, then Reset). sceMpegCreate
+calls Reset itself, so the Reset hook also runs once inside Create.
+
+**What the HLE does (session C, `runtime/movie/sce_mpeg_hle.*`).**
+- Sessions are keyed by `mp`, created by the Create hook (which takes the name the player-open hook recorded) and
+  dropped by the Delete hook. The AddCallback hook keeps type 1 (nodata); the AddStrCallback hook stops the machine
+  if stream type 0 is registered to anything but the profile's `video_stream_callback`; the DemuxPssRing hook
+  records the ring's base and size ($a3, $t0) so the video callback can follow a payload across the ring's end.
+- The video callback replacement copies the payload into `MpegEsModel` and returns 1, or returns 0 without reading
+  while four complete pictures are not yet delivered. GetPicture delivers the next picture in display order: the
+  decoder is fed coded pictures tagged with their decode-order index until it returns that tag (black, and counted,
+  if it cannot); the IPU CSC with SETTH's thresholds turns it into RGB32 macroblocks (column-major, 1 KiB each, as many
+  as $a2 asks); mp + 0/4/8 and the PTS and DTS at + 0x10 and + 0x18 are written; `movie_picture` cycles are charged.
+  With no picture ready it calls the nodata callback with a data block whose type word is 1, as often as needed; a
+  callback result of 0 makes GetPicture return -1. IsEnd is 1 once the stream's sequence end code has been seen and
+  every picture delivered.
+- Events: `movie {phase, name, pictures, slot_a, slot_b}` with phase `open` (the player-open hook), `end` (IsEnd first
+  1) and `delete`; `slot_a` and `slot_b` are the physical addresses of the first two GetPicture destinations (each
+  holds macroblocks × 1 KiB), the RAM a play-against-nodecode comparison masks. `movie_decoder {available: false,
+  reason}` once at start-up when `--movies auto` falls back to skip.
+
 ## Bring-up log
 
 | Unknown | Local evidence | Resolution (addresses, ids, offsets, chosen values) | Change |
@@ -380,6 +402,7 @@ the nodata callback: the HLE keeps no host state across that call.
 | DemuxPssRing with a refusing callback (session C) | Ghidra: `0x001155C0`, the reader `0x001A0B40` | Stops at the refused packet and returns the bytes up to the last accepted one; the reader keeps the rest in its ring, so the packet is offered again | The video callback replacement refuses at four pending pictures |
 | The open's name argument (session C) | Ghidra: `0x001A2450`, `0x001A1C60`, `0x0019F2F0` | $a2 of the open, a C string (the name before the path and extension rewrite); $t0/$t1 width and height | The `movie` events carry it |
 | How `.MVI` data arrives (session C) | Ghidra: `0x0019F130` → the file layer `0x0024E990` → `0x00162980`, `0x00161ED0`, `0x00161880` | The `cdrom0:` device: sceCdSearchFile, then sceCdRead by LSN through libcdvd's N-commands; not fileio, not CD streaming | None: M3's cdvdfsv already serves both |
+| The flyover under the HLE (session C, 2026-10-22, real disc, Clang Debug, `boot-to-title-settings-only.dq8in`, `--gs trace`) | `--movies nodecode` and `play`; override call counts in `--json`; a temporary stderr log of the HLE (not committed) | The player opens at vblank 1143 (threads 11–13, priority 40): Create, five AddCallback, two AddStrCallback (video and PCM). The video arrives as expected (the first payload starts with the sequence header, 512 × 448, not low-delay; PES PTS every few packets), backpressure refuses while four pictures wait, and pictures are delivered every second vblank from 1146 in I B B P order; with `play` dq8-movie decodes them with 0 errors and 0 tag mismatches (the first eleven pictures are black). At vblank 1162 the video stops arriving: the PCM stream callback `0x001A0470` is called (the TAKA flyover carries the PCM stream), and with the sound modules as null servers the game's PCM ring never drains, so DemuxPssRing stops in front of it and the decoder waits in GetPicture's nodata loop for ever. Accepting and dropping the PCM packets instead (a local experiment) stalls earlier: the reader starts playback only when the audio preload threshold is reached | Open, B7 after A+B: movies need PCMPLAY's play position to advance (session A's interpreted PCMPLAY and session B's SPU2). Until then `--movies auto` with dq8-movie built (or `play`, `nodecode`) stops the title sequence at the flyover; use `--movies skip` or `blank` |
 
 ## Results
 

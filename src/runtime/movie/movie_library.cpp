@@ -21,6 +21,8 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#else
+#include <dlfcn.h>
 #endif
 
 namespace dq8::rt {
@@ -166,6 +168,14 @@ std::unique_ptr<IMovieDecoder> make_library_movie_decoder(const MovieLibraryConf
     } catch (const DynlibError& e) {
         throw MovieDecoderError(std::string("cannot load the movie decoder library: ") + e.what());
     }
+#if !defined(_WIN32)
+    // dq8-movie stays loaded for the rest of the process (one more reference, never closed, and no unload):
+    // FFmpeg's dependencies allocate in their load-time constructors, and unloading them would orphan that
+    // memory (LeakSanitizer reports it). The decoder is created again per movie, the library only once.
+    if (::dlopen(file.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD | RTLD_NODELETE) == nullptr) {
+        throw MovieDecoderError(file.string() + ": cannot keep the library loaded");
+    }
+#endif
     Api api;
     resolve(library, "dq8_mvd_abi_version", file, api.abi_version);
     if (const std::uint32_t version = api.abi_version(); version != DQ8_MVD_ABI_VERSION) {

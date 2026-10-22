@@ -24,6 +24,9 @@
 #if defined(__linux__)
 #include <elf.h>
 #endif
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif
 
 using namespace dq8::rt;
 using namespace dq8::test;
@@ -284,6 +287,11 @@ TEST_CASE("movie decoder: dq8-movie's C ABI refuses bad calls", "[movie][dq8_mov
     REQUIRE_MOVIE_LIBRARY();
 #if defined(DQ8_MOVIE_LIBRARY)
     const auto library = DynamicLibrary::open(library_file);
+#if !defined(_WIN32)
+    // Never unloaded, as the host's loader keeps it (movie_library.cpp): FFmpeg's dependencies allocate at
+    // load.
+    REQUIRE(::dlopen(library_file.c_str(), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD | RTLD_NODELETE) != nullptr);
+#endif
     for (const std::string& name : abi_functions) {
         INFO(name);
         CHECK(library.symbol(name.c_str()) != nullptr);
