@@ -6,6 +6,8 @@ target_sources(dq8_unit_tests PRIVATE
     test_pad_feedback.cpp
     test_vu0_registers.cpp
     test_kernel_m4.cpp
+    # wire_feedback is linked into dq8-game only; its test builds it here.
+    ${PROJECT_SOURCE_DIR}/src/host/feedback_wiring.cpp
 )
 # dq8-game's card options on the synthetic machine program (the inputs come from the host.machine_inputs
 # fixture of CMakeLists.txt).

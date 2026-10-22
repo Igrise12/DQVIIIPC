@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+#include "host/m4_wiring.h"
+#include "runtime/gs/gs_backends.h"
+#include "runtime/gs/gs_pipeline.h"
 #include "runtime/io/pad_feedback.h"
 #include "runtime/io/pad_state.h"
 #include "runtime/platform/platform.h"
@@ -11,6 +14,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace rt = dq8::rt;
@@ -257,4 +261,44 @@ TEST_CASE("pad feedback: the latest motor state reaches the platform on the main
     feedback.apply(platform);
     CHECK(platform.calls.size() == 2);
     CHECK(rt::LivePadFeedback::low_frequency(rt::PadActuators{false, 0x80}) == 0x8080);
+}
+
+TEST_CASE("wire_feedback: rumble reaches the window's platform, unless headless or --rumble off", "[pad]") {
+    dq8::gs::GsPipelineConfig config;
+    config.backend = dq8::gs::make_null_gs_backend();
+    config.inline_mode = true;
+    dq8::gs::GsPipeline pipeline(std::move(config));
+    FakePlatform platform;
+    const auto wire = [&](bool rumble, rt::IPlatform* with) {
+        dq8::host::Options o;
+        o.rumble = rumble;
+        rt::IopConfig iop;
+        auto w = std::make_unique<dq8::host::M4Wiring>(
+            dq8::host::M4Wiring{o, nullptr, pipeline, iop, with, {}, {}, {}, {}, {}, {}, {}});
+        dq8::host::wire_feedback(*w);
+        return std::make_pair(std::move(w), iop.pad_feedback);
+    };
+    {
+        auto [w, sink] = wire(true, nullptr); // headless
+        CHECK(sink == nullptr);
+        CHECK(w->on_frame.empty());
+    }
+    {
+        auto [w, sink] = wire(false, &platform);
+        CHECK(sink == nullptr);
+    }
+    auto [w, sink] = wire(true, &platform);
+    REQUIRE(sink != nullptr);
+    REQUIRE(w->on_frame.size() == 1);
+    sink->actuators(0, 5, rt::PadActuators{true, 0x40});
+    w->on_frame[0]();
+    REQUIRE(platform.calls.size() == 1);
+    CHECK(platform.calls[0].low == 0x4040);
+    CHECK(platform.calls[0].high == 0xFFFF);
+    for (const auto& stop : w->on_stop) {
+        stop();
+    }
+    REQUIRE(platform.calls.size() == 3); // both ports' motors off at the end
+    CHECK(platform.calls[1].low == 0);
+    CHECK(platform.calls[2].port == 1);
 }

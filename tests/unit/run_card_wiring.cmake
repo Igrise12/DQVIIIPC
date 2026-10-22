@@ -5,7 +5,8 @@
 #   - in-memory cards by default headless: the end event carries card_sha1 (port 0) and no card2_sha1;
 #   - --save-dir with two cards: both digests, the same for the same options, and no folder written while the
 #     guest changed nothing;
-#   - --memory-card none: no digest; an --rtc date that does not exist is a usage error (exit 2).
+#   - --memory-card none: no digest; an --rtc date that does not exist is a usage error (exit 2);
+#   - the start event records the clock's epoch and where it came from.
 #   cmake -DDQ8_GAME=<exe> -DELF=<elf> -DMODULE_DIR=<dir> -DISO=<iso> -DWORK_DIR=<dir> -P run_card_wiring.cmake
 cmake_minimum_required(VERSION 3.25)
 
@@ -27,6 +28,14 @@ function(run prefix)
             list(GET lines -1 end)
         endif()
     endif()
+    set(start "")
+    if(EXISTS "${events}")
+        file(STRINGS "${events}" starts REGEX "\"ev\":\"start\"")
+        if(starts)
+            list(GET starts 0 start)
+        endif()
+    endif()
+    set(${prefix}_start "${start}" PARENT_SCOPE)
     set(${prefix}_end "${end}" PARENT_SCOPE)
     set(${prefix}_err "${err}" PARENT_SCOPE)
 endfunction()
@@ -55,6 +64,11 @@ if(NOT memory_rc EQUAL 0)
 endif()
 expect_digest("in-memory" "${memory_end}" card_sha1)
 expect_no("in-memory" "${memory_end}" card2_sha1)
+string(JSON rtc GET "${memory_start}" rtc)
+string(JSON rtc_source GET "${memory_start}" rtc_source)
+if(NOT rtc STREQUAL "2005-11-15T12:00:00" OR NOT rtc_source STREQUAL "default")
+    message(FATAL_ERROR "the start event's clock: ${rtc} (${rtc_source})")
+endif()
 
 set(saves "${WORK_DIR}/saves")
 run(folder --save-dir "${saves}" --memory-card formatted --memory-card2 unformatted --rtc 2005-11-15T12:00:00)
@@ -63,6 +77,10 @@ if(NOT folder_rc EQUAL 0)
 endif()
 expect_digest("folder" "${folder_end}" card_sha1)
 expect_digest("folder" "${folder_end}" card2_sha1)
+string(JSON rtc_source GET "${folder_start}" rtc_source)
+if(NOT rtc_source STREQUAL "date")
+    message(FATAL_ERROR "--rtc DATE recorded as ${rtc_source}")
+endif()
 if(EXISTS "${saves}/dev/card1" OR EXISTS "${saves}/dev/card2")
     message(FATAL_ERROR "a card folder was written although the guest changed nothing")
 endif()

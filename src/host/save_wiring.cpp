@@ -3,7 +3,8 @@
 // M4 session D: the memory cards (--save-dir, --memory-card, --memory-card2) and the virtual RTC (--rtc),
 // ADR-0016. Each port holds an in-memory card (headless by default, or --save-dir none) or a folder card at
 // <save-dir>/<profile>/card<N>/ (the window's default save directory is the user data directory); the
-// folder's writes finish when the machine has stopped. The end event carries each card's digest.
+// folder's writes finish when the machine has stopped. The start event records the RTC's epoch, the end event
+// each card's digest.
 #include "core/platform/paths.h"
 #include "host/m4_wiring.h"
 #include "runtime/io/memcard/memory_card.h"
@@ -95,6 +96,14 @@ void wire_saves(M4Wiring& w) {
         w.iop.cards[port] = saves->cards[port].get();
     }
     w.iop.rtc = &saves->rtc;
+
+    // The start event records the console clock's epoch, so that a run with --rtc host can be repeated with
+    // --rtc DATE.
+    const std::string epoch = rt::format_rtc(saves->rtc.epoch());
+    const std::string rtc_source = !o.rtc ? "default" : (*o.rtc == "host" ? "host" : "date");
+    w.start_fields.push_back([epoch, rtc_source](rt::MachineEvent& start) {
+        start.add("rtc", epoch).add("rtc_source", rtc_source);
+    });
 
     SaveDevice* s = saves.get();
     w.on_stop.push_back([s] {
