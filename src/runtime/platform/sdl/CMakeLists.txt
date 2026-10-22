@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 # dq8_platform_sdl: IPlatform over SDL3 (runtime/platform/platform.h, ADR-0005): the window, live input and the M3
-# presentation. Linked only by the host and its tests; the machine thread never calls SDL.
+# presentation; the audio sink (sdl_audio.h, M4 session B). Linked only by the host and its tests; the machine
+# thread never calls SDL.
 add_library(dq8_platform_sdl STATIC
+    sdl_audio.cpp
     sdl_mapping.cpp
     sdl_platform.cpp
 )

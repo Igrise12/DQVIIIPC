@@ -232,25 +232,7 @@ struct Outcome {
 
 } // namespace
 
-// M4 options whose subsystem has not arrived on this build yet (Docs/milestones/M4-playable.md): the session
-// that brings each one removes its line. Refused at start-up rather than silently ignored.
-std::optional<std::string> unwired_m4_option(const Options& o) {
-    if (o.audio == "sdl" && o.display == Display::headless) {
-        return std::string("--audio sdl arrives with the audio output (M4 session B)");
-    }
-    if (o.audio_dump) {
-        return std::string("--audio-dump arrives with the SPU2 (M4 session B)");
-    }
-    if (!o.dump_spu2_at.empty()) {
-        return std::string("--dump-spu2-at arrives with the SPU2 (M4 session B)");
-    }
-    return std::nullopt;
-}
-
 int run_game(const Options& o, const char* argv0) {
-    if (const auto unwired = unwired_m4_option(o)) {
-        throw UsageError(*unwired);
-    }
     Session s;
     setup_session(o, argv0, s);
     const core::RegionProfile* profile = s.profile();

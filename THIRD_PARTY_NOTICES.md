@@ -24,15 +24,21 @@ repositories are never fetched.
 | [volk](https://github.com/zeux/volk) (nested in Granite) | 1.4.350-4 | `47cddf7ed97b94118a08aacb548a411188e016cc` | MIT | Vulkan loader for `dq8-gs-parallel` |
 | [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) (nested in Granite) | v1.4.358 | `11d6898377797e07dbd543aaaa367e4465074597` | Apache-2.0 or MIT | Vulkan API headers for `dq8-gs-parallel` |
 
+## Adapted into first-party source files (not submodules)
+
+| Component | Version | Commit | License | Used for |
+|---|---|---|---|---|
+| [PCSX2](https://github.com/PCSX2/pcsx2) `pcsx2/SPU2/` | v2.7.524 | `3e29183a37e74cbc8c17bda8afb63c2d9bc6fd14` | GPL-3.0-or-later | The SPU2 model in `src/runtime/spu2/` (ADR-0014): registers, ADPCM, the decode FIFO and Gaussian table, envelopes, volume sweeps, noise, the mix, reverb and its resampling filters, DMA and AutoDMA; each adapted file keeps GPL-3.0-or-later and names the PCSX2 Dev Team |
+
+`src/runtime/movie/ipu_csc.cpp` adapts PCSX2's IPU colour conversion (PCSX2 Dev Team, GPL-3.0-or-later, attributed
+in the file); the movie HLE's elementary-stream model, macroblock layout and `dq8-movie` decoder set-up adapt
+PS2Recomp's `MPEG.cpp` (GPL-3.0-only, attributed in each file).
+
 ## System libraries linked at build time, not bundled
 
 | Component | Version | License | Used for |
 |---|---|---|---|
 | [FFmpeg](https://ffmpeg.org) libavcodec and libavutil | the system's (Ubuntu 24.04: 6.1, libavcodec 60; also built with 8.0, libavcodec 63) | LGPL-2.1-or-later (GPL-2.0-or-later when the system's build enables GPL parts) | The `mpeg2video` decoder inside the separate shared library `dq8-movie` (ADR-0015), which `dq8-game` loads at run time and a user can replace; `DQ8_FFMPEG=auto\|system\|off` (`cmake/Movie.cmake`). Dynamically linked, never copied into this repository; a bundled LGPL build comes with packaging (M5) |
-
-`src/runtime/movie/ipu_csc.cpp` adapts PCSX2's IPU colour conversion (PCSX2 Dev Team, GPL-3.0-or-later, attributed
-in the file); the movie HLE's elementary-stream model, macroblock layout and `dq8-movie` decoder set-up adapt
-PS2Recomp's `MPEG.cpp` (GPL-3.0-only, attributed in each file).
 
 ## Tools used during development, not bundled or redistributed
 

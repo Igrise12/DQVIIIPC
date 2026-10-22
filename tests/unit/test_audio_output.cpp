@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
-// The audio output path of M4 day 0 (platform/audio.h): the lock-free ring between the machine thread and the
-// audio thread, and AudioOutput's audio hash, which must not depend on how writes are split.
-#include "runtime/ee/guest_stop.h"
+// The audio output path (platform/audio.h): the lock-free ring between the machine thread and the audio
+// thread, AudioOutput's audio hash, which must not depend on how writes are split, and the WAV tap, whose
+// file does not either.
 #include "runtime/platform/audio.h"
-#include "runtime/spu2/spu2.h"
-#include "support/fake_iop_host.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -97,19 +99,51 @@ TEST_CASE("audio output: the hash is the same for one write and for many small o
     CHECK(sink->stats().frames_played == 0);
 }
 
-TEST_CASE("spu2 day-0 stub: maps on the IOP bus and stops on any access", "[audio][spu2]") {
-    dq8::test::FakeMachine machine;
-    dq8::test::FakeIopHost host(machine);
-    AudioOutput out;
-    Spu2 spu2(Spu2Config{&out});
-    spu2.attach(machine);
-    spu2.connect(host);
-    const IopDeviceMapping m = spu2.mapping();
-    CHECK(m.base == 0x1F900000u);
-    CHECK(m.device == &spu2);
-    CHECK(m.dma_channels == std::vector<std::uint32_t>{4, 7});
-    std::uint32_t value = 0;
-    CHECK_THROWS_AS(spu2.read(0x19A, 2, value, IopAccess{}), GuestStop);
-    CHECK_THROWS_AS(spu2.dma_start(IopDmaRequest{4, 0, 0, 0, 0}), GuestStop);
-    CHECK_FALSE(machine.events().next_time()); // the stub schedules nothing
+namespace {
+
+std::vector<std::uint8_t> read_file(const std::filesystem::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+std::uint32_t le32(const std::vector<std::uint8_t>& b, std::size_t at) {
+    return std::uint32_t{b[at]} | std::uint32_t{b[at + 1]} << 8 | std::uint32_t{b[at + 2]} << 16 |
+           std::uint32_t{b[at + 3]} << 24;
+}
+
+} // namespace
+
+TEST_CASE("wav tap: a 48 kHz stereo 16-bit file, the same however the writes are split", "[audio]") {
+    const auto dir = std::filesystem::temp_directory_path() / "dq8-test-wav-tap";
+    std::filesystem::create_directories(dir);
+    const auto frames = ramp(3000, -1500);
+    {
+        AudioOutput one(64);
+        one.add_tap(make_wav_tap((dir / "one.wav").string()));
+        one.write(frames);
+        one.finish();
+        AudioOutput many(64);
+        many.add_tap(make_wav_tap((dir / "many.wav").string()));
+        for (std::size_t at = 0; at < frames.size(); at += 113) {
+            many.write(std::span<const StereoFrame>(frames.data() + at,
+                                                    std::min<std::size_t>(113, frames.size() - at)));
+        }
+        many.finish();
+        many.finish(); // finishing twice is harmless
+    }
+    const auto a = read_file(dir / "one.wav");
+    const auto b = read_file(dir / "many.wav");
+    REQUIRE(a.size() == 44 + 3000 * 4);
+    CHECK(a == b);
+    CHECK(std::string(a.begin(), a.begin() + 4) == "RIFF");
+    CHECK(le32(a, 4) == 36 + 3000 * 4);
+    CHECK(std::string(a.begin() + 8, a.begin() + 16) == "WAVEfmt ");
+    CHECK(le32(a, 24) == 48'000);
+    CHECK(le32(a, 28) == 192'000);
+    CHECK(le32(a, 40) == 3000 * 4);
+    // Frame 2 is (-1498, 1498), little-endian left then right.
+    CHECK(a[44 + 8] == static_cast<std::uint8_t>(static_cast<std::uint16_t>(-1498)));
+    CHECK(a[44 + 11] == static_cast<std::uint8_t>(1498 >> 8));
+    CHECK_THROWS_AS(make_wav_tap((dir / "missing" / "x.wav").string()), std::runtime_error);
+    std::filesystem::remove_all(dir);
 }
