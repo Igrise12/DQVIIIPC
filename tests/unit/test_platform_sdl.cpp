@@ -3,7 +3,7 @@
 //
 // The SDL3 platform (runtime/platform/sdl) on SDL's dummy video driver: no display needed. Covers the fixed
 // M3 input mapping, the aspect fit, keyboard events reaching PadState, presentation through the texture path
-// (checked with a copy of the window), and the window closing.
+// (checked with a copy of the window), the window closing, and rumble reaching a (virtual) gamepad.
 
 #include "runtime/gs/gs_backend.h"
 #include "runtime/io/pad_state.h"
@@ -200,4 +200,42 @@ TEST_CASE("a second SDL platform can follow the first", "[platform_sdl]") {
     }
     auto second = dummy_platform();
     CHECK(second->pump_events());
+}
+
+TEST_CASE("set_rumble drives the port's gamepad through SDL", "[platform][sdl]") {
+    auto platform = dummy_platform();
+    struct Seen {
+        int calls = 0;
+        Uint16 low = 0;
+        Uint16 high = 0;
+    } seen;
+    SDL_VirtualJoystickDesc desc;
+    SDL_INIT_INTERFACE(&desc);
+    desc.type = SDL_JOYSTICK_TYPE_GAMEPAD;
+    desc.naxes = SDL_GAMEPAD_AXIS_COUNT;
+    desc.nbuttons = SDL_GAMEPAD_BUTTON_COUNT;
+    desc.name = "dq8 virtual pad";
+    desc.userdata = &seen;
+    desc.Rumble = [](void* userdata, Uint16 low, Uint16 high) {
+        auto* s = static_cast<Seen*>(userdata);
+        ++s->calls;
+        s->low = low;
+        s->high = high;
+        return true;
+    };
+    const SDL_JoystickID id = SDL_AttachVirtualJoystick(&desc);
+    if (id == 0) {
+        SKIP("no virtual joystick: " << SDL_GetError());
+    }
+    platform->pump_events(); // the gamepad arrives as port 0
+    platform->set_rumble(0, 0x8080, 0xFFFF);
+    CHECK(seen.calls >= 1);
+    CHECK(seen.low == 0x8080);
+    CHECK(seen.high == 0xFFFF);
+    platform->set_rumble(0, 0, 0);
+    CHECK(seen.low == 0);
+    CHECK(seen.high == 0);
+    platform->set_rumble(1, 0x1000, 0); // no gamepad on port 1: nothing to drive, nothing fails
+    SDL_DetachVirtualJoystick(id);
+    platform->pump_events();
 }

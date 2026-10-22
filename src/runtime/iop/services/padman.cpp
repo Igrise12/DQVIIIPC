@@ -7,8 +7,10 @@
 #include "runtime/iop/services/services.h"
 #include "runtime/machine/machine_services.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <memory>
 #include <span>
@@ -17,13 +19,15 @@
 #include <utility>
 #include <vector>
 
-// The pad server (server ids 0x80000100 and 0x80000101; "Protocol notes", padman). The catalogue calls it
-// "padman.v1" after the server id pair; the EE library speaks the command-word protocol: one function number,
-// a 128-byte block whose first word is the command, the same block back with the results in it. A port open
-// hands the server an EE area of two 128-byte frames; from then on, in the IOP vblank phase of every field,
-// the server samples the port from the IInputSource and writes a DualShock 2 frame into the older frame with
-// the next counter value, as the IOP pad driver does over SIF DMA. The second server id binds but is never
-// called.
+// The pad server (server ids 0x80000100 and 0x80000101; "Protocol notes", padman, in M3-boots.md and
+// M4-playable.md). The catalogue calls it "padman.v1" after the server id pair; the EE library speaks the
+// command-word protocol: one function number, a 128-byte block whose first word is the command, the same
+// block back with the results in it. A port open hands the server an EE area of two 128-byte frames; from
+// then on, in the IOP vblank phase of every field, the server samples the port from the IInputSource and
+// writes a DualShock 2 frame into the older frame with the next counter value, as the IOP pad driver does
+// over SIF DMA. The motors: the EE DMAs SetActDirect blocks into the IOP actuator buffer; each field the
+// newest block, mapped through the SetActAlign table, gives the two motors' state, and a change goes to the
+// feedback sink and out as a pad_rumble event. The second server id binds but is never called.
 namespace dq8::rt::iop_services {
 
 namespace {
@@ -38,14 +42,36 @@ constexpr std::size_t cmd_area = 0x10;    // open: the EE pad area
 constexpr std::size_t cmd_result2 = 0x14; // open: the IOP actuator buffer; mode and alignment: accepted
 constexpr std::size_t cmd_mode = 0x0C;    // SetMainMode: the mode-table index (0 digital, 1 analog)
 
+constexpr std::size_t cmd_align = 0x0C; // SetActAlign: six bytes, actuator number per direct byte
+constexpr std::size_t cmd_mask = 0x0C;  // SetButtonInfo: the pressure-sensitive buttons (0 = none)
+constexpr std::size_t cmd_btn_result = 0x10;
+constexpr std::size_t cmd_vref_result = 0x1C;
+constexpr std::size_t cmd_callback = 0x04; // the SIF-command callback switch: 0 off, 1 on
+
+// Every command word the game's libpad can send (M4-playable.md, "Protocol notes", padman).
 constexpr std::uint32_t cmd_open = 0x01;
 constexpr std::uint32_t cmd_set_main_mode = 0x06;
 constexpr std::uint32_t cmd_set_act_align = 0x08;
+constexpr std::uint32_t cmd_set_button_info = 0x0A;
+constexpr std::uint32_t cmd_set_vref_param = 0x0B;
+constexpr std::uint32_t cmd_get_port_max = 0x0C;
+constexpr std::uint32_t cmd_get_slot_max = 0x0D;
+constexpr std::uint32_t cmd_end = 0x0F;
 constexpr std::uint32_t cmd_init = 0x10;
 constexpr std::uint32_t cmd_module_version = 0x12;
+constexpr std::uint32_t cmd_callback_switch = 0x18;
 constexpr std::uint32_t module_version = 0x0400; // the library needs major version 4
-// SetActDirect needs no command: the EE DMAs two 32-byte actuator blocks to this IOP buffer.
+constexpr std::uint32_t port_max = 2;
+constexpr std::uint32_t slot_max = 1;
+// SetActDirect needs no command: the EE DMAs a 32-byte block into one half of this IOP buffer, chosen by
+// the block's counter; the half with the larger counter is the newest. +0 counter, +0x0C the six bytes.
 constexpr std::uint32_t actuator_buffer_size = 0x40;
+constexpr std::uint32_t actuator_block = 0x20;
+constexpr std::size_t actuator_block_counter = 0x00;
+constexpr std::size_t actuator_block_bytes = 0x0C;
+constexpr std::uint8_t align_none = 0xFF;
+constexpr std::uint8_t actuator_small = 0; // on or off
+constexpr std::uint8_t actuator_large = 1; // strength 0..255
 
 // One 128-byte frame of the EE pad area, as the IOP driver fills it.
 constexpr std::uint32_t frame_size = 0x80;
@@ -78,6 +104,7 @@ constexpr int mode_switch_fields = 2;
 // after seeing it not yet analog (M3 bring-up, Docs/milestones/M3-boots.md).
 constexpr std::uint8_t id_digital = 0x41;
 constexpr std::uint8_t id_analog = 0x73;
+constexpr std::uint8_t id_pressure = 0x79; // analog with the twelve pressure bytes (SetButtonInfo asked)
 constexpr std::uint16_t mode_digital = 0x0004;
 constexpr std::uint16_t mode_analog = 0x0007;
 constexpr std::uint32_t data_length = 32;
@@ -87,12 +114,17 @@ struct OpenPort {
     std::uint32_t area = 0;      // EE address of the two frames
     std::uint32_t actuators = 0; // IOP address of the actuator buffer
     std::int32_t counter = 0;
-    bool analog = false; // the current mode: digital at power-up
-    int switching = 0;   // fields left of a mode change
+    bool analog = false;   // the current mode: digital at power-up
+    bool pressure = false; // pressure bytes reported (SetButtonInfo with a non-zero mask)
+    int switching = 0;     // fields left of a mode change
+    std::array<std::uint8_t, 6> align{align_none, align_none, align_none, align_none, align_none, align_none};
+    PadActuators motors; // as last reported
 };
 
 struct PadmanState {
     IInputSource* input = nullptr;
+    IPadFeedbackSink* feedback = nullptr;
+    const IopMemory* iop = nullptr; // where the actuator buffers live (set at the first open)
     std::map<std::pair<std::uint32_t, std::uint32_t>, OpenPort> open; // (port, slot)
 };
 
@@ -103,7 +135,7 @@ void put16(std::vector<std::uint8_t>& f, std::size_t offset, std::uint16_t value
 
 std::vector<std::uint8_t> make_frame(const PadState& pad, const OpenPort& port) {
     const std::int32_t counter = port.counter;
-    const std::uint8_t id = port.analog ? id_analog : id_digital;
+    const std::uint8_t id = port.analog ? (port.pressure ? id_pressure : id_analog) : id_digital;
     std::vector<std::uint8_t> f(frame_size, 0);
     put32(f, frame_counter, static_cast<std::uint32_t>(counter));
     f[frame_request] = request_complete;
@@ -120,8 +152,10 @@ std::vector<std::uint8_t> make_frame(const PadState& pad, const OpenPort& port) 
     f[frame_data + 5] = pad.ry;
     f[frame_data + 6] = pad.lx;
     f[frame_data + 7] = pad.ly;
-    for (std::size_t i = 0; i < pad.pressure.size(); ++i) {
-        f[frame_data + 8 + i] = pad.pressure[i];
+    if (port.analog && port.pressure) {
+        for (std::size_t i = 0; i < pad.pressure.size(); ++i) {
+            f[frame_data + 8 + i] = pad.pressure[i];
+        }
     }
     for (std::size_t a = 0; a < 2; ++a) {
         for (std::size_t t = 0; t < 4; ++t) {
@@ -193,7 +227,40 @@ class PadmanServer final : public IopRpcServer, public IopVblankClient {
             put32(block, cmd_result2, 1); // accepted; the frames report it busy, then the new mode
             break;
         case cmd_set_act_align:
+            if (OpenPort* p = find(args)) {
+                for (std::size_t i = 0; i < p->align.size(); ++i) {
+                    p->align[i] = args.size() > cmd_align + i ? args[cmd_align + i] : align_none;
+                }
+            }
             put32(block, cmd_result2, 1); // accepted; the next frame reports it complete
+            break;
+        case cmd_set_button_info:
+            if (OpenPort* p = find(args)) {
+                p->pressure = arg32(args, cmd_mask) != 0;
+            }
+            put32(block, cmd_btn_result, 1);
+            break;
+        case cmd_set_vref_param:
+            put32(block, cmd_vref_result, 1);
+            break;
+        case cmd_get_port_max:
+            put32(block, cmd_result, port_max);
+            break;
+        case cmd_get_slot_max:
+            put32(block, cmd_result, arg32(args, cmd_port) < port_max ? slot_max : 0);
+            break;
+        case cmd_end:
+            for (auto& [key, port] : state_->open) {
+                report(call.machine, key.first, call.machine.vblank_count(), port, PadActuators{});
+            }
+            state_->open.clear();
+            put32(block, cmd_result, 1);
+            break;
+        case cmd_callback_switch:
+            // The library's own SIF-command callback (0x80000019); the IOP never needs to send it.
+            if (arg32(args, cmd_callback) > 1) {
+                unsupported(call, name(), "callback switch " + std::to_string(arg32(args, cmd_callback)));
+            }
             break;
         default:
             unsupported(call, name(), "command " + std::to_string(command) + " not implemented");
@@ -214,10 +281,59 @@ class PadmanServer final : public IopRpcServer, public IopVblankClient {
             if (port.switching > 0) {
                 --port.switching;
             }
+            report(machine, key.first, field, port, pad.connected ? motors(port) : PadActuators{});
         }
     }
 
   private:
+    OpenPort* find(std::span<const std::uint8_t> args) {
+        const auto it = state_->open.find({arg32(args, cmd_port), arg32(args, cmd_slot)});
+        return it != state_->open.end() ? &it->second : nullptr;
+    }
+
+    // The motors as the newest SetActDirect block sets them through the alignment table.
+    PadActuators motors(const OpenPort& port) const {
+        if (state_->iop == nullptr || port.actuators == 0) {
+            return {};
+        }
+        std::array<std::uint8_t, 2 * actuator_block> buffer{};
+        state_->iop->read(port.actuators, buffer);
+        const auto counter = [&](std::size_t half) {
+            std::int32_t v = 0;
+            std::memcpy(&v, buffer.data() + half * actuator_block + actuator_block_counter, 4);
+            return v;
+        };
+        if (counter(0) == 0 && counter(1) == 0) {
+            return {}; // nothing sent yet
+        }
+        const std::size_t newest = counter(1) > counter(0) ? 1 : 0;
+        const std::uint8_t* direct = buffer.data() + newest * actuator_block + actuator_block_bytes;
+        PadActuators out;
+        for (std::size_t i = 0; i < port.align.size(); ++i) {
+            if (port.align[i] == actuator_small) {
+                out.small = direct[i] != 0;
+            } else if (port.align[i] == actuator_large) {
+                out.large = direct[i];
+            }
+        }
+        return out;
+    }
+
+    void report(MachineServices& machine, std::uint32_t pad_port, std::uint64_t field, OpenPort& port,
+                const PadActuators& now) {
+        if (now == port.motors) {
+            return;
+        }
+        port.motors = now;
+        machine.emit(MachineEvent{"pad_rumble", {}}
+                         .add("port", std::uint64_t{pad_port})
+                         .add("small", now.small)
+                         .add("large", std::uint64_t{now.large}));
+        if (state_->feedback != nullptr) {
+            state_->feedback->actuators(pad_port, field, now);
+        }
+    }
+
     bool open(IopCallContext& call, std::span<const std::uint8_t> args) {
         const std::uint32_t port = arg32(args, cmd_port);
         const std::uint32_t slot = arg32(args, cmd_slot);
@@ -228,7 +344,9 @@ class PadmanServer final : public IopRpcServer, public IopVblankClient {
         p.area = arg32(args, cmd_area);
         p.counter = 0;
         p.analog = false;
+        p.pressure = false;
         p.switching = 0;
+        state_->iop = &call.iop;
         if (p.actuators == 0) {
             const auto buffer = call.iop.allocate(actuator_buffer_size);
             if (!buffer) {
@@ -249,6 +367,7 @@ class PadmanServer final : public IopRpcServer, public IopVblankClient {
 std::vector<std::unique_ptr<IopRpcServer>> make_padman_v1(const IopServiceDeps& deps) {
     auto state = std::make_shared<PadmanState>();
     state->input = deps.input;
+    state->feedback = deps.pad_feedback;
     std::vector<std::unique_ptr<IopRpcServer>> out;
     out.push_back(std::make_unique<PadmanServer>(sid_padman, state, true));
     out.push_back(std::make_unique<PadmanServer>(sid_padman_ext, state, false));

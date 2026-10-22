@@ -87,9 +87,10 @@ TEST_CASE("padman: version, init and port open as the pad library asks", "[iop][
     CHECK(SifClient::get(command(c, 0x06, 0, 0, 3), 0x14) == 1);
     CHECK(SifClient::get(command(c, 0x08, 0, 0), 0x14) == 1);
     CHECK(SifClient::get(command(c, 0x01, 2, 0, area), 0x0C) == 0); // no third port
-    // 0x80000101 binds but the library never calls it.
+    // 0x80000101 binds but the library never calls it. Command 0x14, whose meaning the library does not show
+    // and which nothing calls, stops.
     CHECK(c.bind(0x00012040, 0x80000101u) != 0);
-    c.write32(block, 0x0B);
+    c.write32(block, 0x14);
     c.call(pad_client, 1, block, 0x80, block, 0x80, false);
     CHECK_THROWS_AS(c.wait_for([] { return false; }), rt::GuestStop);
 }

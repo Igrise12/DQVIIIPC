@@ -5,7 +5,8 @@
 // PadState by the fixed M3 table of sdl_mapping.h, and present() as a texture upload drawn with a 4:3 or 16:9
 // fit and bilinear filtering (the scaling PCSX2's presentation used in S5b). Main thread only. Key state is
 // tracked from events rather than SDL's keyboard snapshot, so injected events (tests, automation) behave like
-// real ones.
+// real ones. Rumble (M4): set_rumble drives SDL_RumbleGamepad on the port's gamepad and renews it while the
+// game keeps a motor running.
 
 #include "runtime/platform/sdl/sdl_platform.h"
 
@@ -76,7 +77,23 @@ class SdlPlatform final : public IPlatform {
                 break;
             }
         }
+        // SDL ends a rumble after its duration: a motor the game keeps running is renewed.
+        for (unsigned port = 0; port < rumble_.size(); ++port) {
+            const Rumble& r = rumble_[port];
+            if ((r.low != 0 || r.high != 0) && SDL_GetTicks() - r.sent >= rumble_renew_ms) {
+                send_rumble(port);
+            }
+        }
         return open_;
+    }
+
+    void set_rumble(unsigned port, std::uint16_t low, std::uint16_t high) override {
+        if (port >= rumble_.size()) {
+            return;
+        }
+        rumble_[port].low = low;
+        rumble_[port].high = high;
+        send_rumble(port);
     }
 
     PadState pad(unsigned port) const override {
@@ -248,6 +265,22 @@ class SdlPlatform final : public IPlatform {
             return;
         }
         gamepads_.push_back(gamepad);
+        send_rumble(static_cast<unsigned>(gamepads_.size() - 1)); // a pad plugged in while a motor runs
+    }
+
+    // Drives the motors of the gamepad at `port`, if there is one, for twice the renewal period.
+    void send_rumble(unsigned port) {
+        if (port >= rumble_.size() || port >= gamepads_.size()) {
+            return;
+        }
+        Rumble& r = rumble_[port];
+        const bool on = r.low != 0 || r.high != 0;
+        if (!SDL_RumbleGamepad(gamepads_[port], r.low, r.high, on ? 2 * rumble_renew_ms : 0) && on &&
+            !rumble_warned_) {
+            rumble_warned_ = true;
+            std::fprintf(stderr, "SDL3: the gamepad does not rumble: %s\n", SDL_GetError());
+        }
+        r.sent = SDL_GetTicks();
     }
 
     void remove_gamepad(SDL_JoystickID id) {
@@ -296,6 +329,14 @@ class SdlPlatform final : public IPlatform {
     int texture_h_ = 0;
     std::array<bool, SDL_SCANCODE_COUNT> keys_{};
     std::vector<SDL_Gamepad*> gamepads_; // in the order they were attached: index = pad port
+    struct Rumble {
+        std::uint16_t low = 0;
+        std::uint16_t high = 0;
+        std::uint64_t sent = 0; // SDL_GetTicks() of the last request
+    };
+    static constexpr std::uint32_t rumble_renew_ms = 1000;
+    std::array<Rumble, 2> rumble_{};
+    bool rumble_warned_ = false;
     bool capture_requested_ = false;
     bool capture_ready_ = false;
     gs::FrameImage capture_;
