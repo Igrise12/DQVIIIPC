@@ -323,7 +323,9 @@ TEST_CASE("spu2 chip: reverb on and off", "[spu2]") {
         const auto out = mix(chip, 4800);
         std::uint64_t written = 0;
         for (std::uint32_t a = 0x80000; a < 0x90000; ++a) {
-            written += chip.ram()[a] != 0 ? 1 : 0;
+            if (chip.ram()[a] != 0) {
+                ++written;
+            }
         }
         return std::pair{frames_sha1(out), written};
     };

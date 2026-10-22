@@ -14,6 +14,9 @@ namespace dq8::rt::spu2 {
 
 namespace {
 
+constexpr std::uint16_t clear_bits(std::uint16_t v, std::uint32_t bits) {
+    return static_cast<std::uint16_t>(v & ~bits);
+}
 constexpr std::uint16_t lo16(std::uint32_t v) {
     return static_cast<std::uint16_t>(v);
 }
@@ -535,7 +538,7 @@ void Chip::write_attr(Core& c, std::uint16_t value) {
     c.noise_clock = (value >> 8) & 0x3F;
     c.attr = value;
     if (c.dma_mode == 0 && (c.statx & 0x400) == 0) {
-        c.statx &= ~0x80;
+        c.statx = clear_bits(c.statx, 0x80);
     } else if (old_dma_mode == 0 && c.dma_mode != 0) {
         c.statx |= 0x80;
     }
@@ -667,7 +670,7 @@ DmaPlan Chip::begin_dma(std::uint32_t core, bool read, std::uint32_t madr, std::
     DmaPlan plan;
     if (read) {
         c.active_tsa = c.tsa & address_mask;
-        c.statx &= ~0x80;
+        c.statx = clear_bits(c.statx, 0x80);
         c.statx |= 0x400;
         d = DmaState{true, true, madr, words};
         // Reads wait a chunk's time before moving each chunk, and one word's time after the last.
@@ -676,7 +679,7 @@ DmaPlan Chip::begin_dma(std::uint32_t core, bool read, std::uint32_t madr, std::
         return plan;
     }
     if (words < 2) {
-        c.statx &= ~0x80;
+        c.statx = clear_bits(c.statx, 0x80);
         d = DmaState{true, false, madr, 0};
         plan.first_step = plan.total = 1;
         return plan;
@@ -700,7 +703,7 @@ DmaPlan Chip::begin_dma(std::uint32_t core, bool read, std::uint32_t madr, std::
         plan.first_step = plan.total = words;
         return plan;
     }
-    c.statx &= ~0x80;
+    c.statx = clear_bits(c.statx, 0x80);
     c.statx |= 0x400;
     d = DmaState{true, false, madr, words};
     plan.first_step = dma_write_chunk(c);
@@ -787,7 +790,7 @@ void Chip::finish_dma(Core& c) {
     if (c.dma_mode != 0) {
         c.statx |= 0x80;
     }
-    c.statx &= ~0x400;
+    c.statx = clear_bits(c.statx, 0x400);
     c.tsa = c.active_tsa;
 }
 
