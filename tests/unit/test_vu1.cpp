@@ -124,6 +124,11 @@ uint32_t makeVuJr(uint8_t is) {
     return (0x24u << 25) | (static_cast<uint32_t>(is & 0xFu) << 11);
 }
 
+uint32_t makeVuJalr(uint8_t it, uint8_t is) {
+    return (0x25u << 25) | (static_cast<uint32_t>(it & 0xFu) << 16) |
+           (static_cast<uint32_t>(is & 0xFu) << 11);
+}
+
 uint32_t makeVuIbne(uint8_t is, uint8_t it, int16_t imm) {
     return (0x29u << 25) | (static_cast<uint32_t>(it & 0xFu) << 16) |
            (static_cast<uint32_t>(is & 0xFu) << 11) | (static_cast<uint32_t>(imm) & 0x7FFu);
@@ -734,6 +739,33 @@ TEST_CASE("vu1: conditional branch sees the previous VI value for one instructio
     CHECK((vu1.state().vi[4]) == (0)); // elapsed stall cycles must not expire the one-instruction VI bypass
 }
 
+TEST_CASE("vu1: JR and JALR jump through the VI value the previous instruction wrote", "[vu1]") {
+    // Unlike the conditional branches, the jumps get no pre-write value (as in PCSX2): a jump table that adds
+    // an offset right before JALR lands on the sum. With the old value the jump would go back to 0 and run
+    // the first instruction again.
+    constexpr uint32_t e_bit = 1u << 30;
+    for (const bool link : {false, true}) {
+        Vu1Fixture fx;
+        writeVuInstructionPair(fx.code, 0u, makeVuIaddiu(1u, 1u, 4), kVuUpperNop); // vi1 += 4: target 32
+        writeVuInstructionPair(fx.code, 8u, link ? makeVuJalr(15u, 1u) : makeVuJr(1u), kVuUpperNop);
+        writeVuInstructionPair(fx.code, 16u, makeVuIaddiu(2u, 0u, 2), kVuUpperNop); // delay slot
+        writeVuInstructionPair(fx.code, 24u, makeVuIaddiu(3u, 0u, 3), kVuUpperNop); // skipped
+        writeVuInstructionPair(fx.code, 32u, makeVuIaddiu(4u, 0u, 4), kVuUpperNop | e_bit);
+        writeVuInstructionPair(fx.code, 40u, 0x8000033Cu, kVuUpperNop);
+
+        VuInterpreter vu1;
+        vu1.execute(fx.code, PS2_VU1_CODE_SIZE, fx.data, PS2_VU1_DATA_SIZE, fx.host, 0u, 0u, 0u, 64u);
+
+        CHECK_FALSE(vu1.running());
+        CHECK((vu1.state().vi[1]) == (4)); // the first instruction ran once
+        CHECK((vu1.state().vi[2]) == (2));
+        CHECK((vu1.state().vi[3]) == (0));
+        CHECK((vu1.state().vi[4]) == (4));
+        CHECK((vu1.state().vi[15]) == (link ? 3 : 0)); // JALR links the address after its delay slot
+        CHECK((vu1.state().pc) == (48u));
+    }
+}
+
 TEST_CASE("vu1: flag checks are visible to an immediately following branch", "[vu1]") {
     Vu1Fixture fx;
 
@@ -751,26 +783,6 @@ TEST_CASE("vu1: flag checks are visible to an immediately following branch", "[v
     CHECK((vu1.state().vi[2]) == (2)); // the taken branch should still execute its delay slot
     CHECK((vu1.state().vi[3]) == (0)); // the immediately following branch must consume the flag-check result
     CHECK((vu1.state().vi[4]) == (4)); // the flag-driven branch should arrive at its target
-}
-
-TEST_CASE("vu1: JR shares the one-instruction VI branch visibility rule", "[vu1]") {
-    Vu1Fixture fx;
-
-    writeVuInstructionPair(fx.code, 0u, makeVuIaddiu(1u, 0u, 2), kVuUpperNop);
-    writeVuInstructionPair(fx.code, 8u, makeVuJr(1u), kVuUpperNop);
-    writeVuInstructionPair(fx.code, 16u, makeVuIaddiu(2u, 0u, 2), kVuUpperNop);
-    writeVuInstructionPair(fx.code, 24u, makeVuIaddiu(3u, 0u, 3), kVuUpperNop);
-    writeVuInstructionPair(fx.code, 32u, makeVuIaddiu(4u, 0u, 4), kVuUpperNop);
-
-    VuInterpreter vu1;
-    vu1.state().vi[1] = 4;
-    vu1.execute(fx.code, PS2_VU1_CODE_SIZE, fx.data, PS2_VU1_DATA_SIZE, fx.host, 0u, 0u, 0u, 4u);
-
-    CHECK((vu1.state().vi[1]) == (2)); // the pending IALU write should still commit normally
-    CHECK((vu1.state().vi[2]) == (2)); // JR should execute exactly one delay-slot pair
-    CHECK((vu1.state().vi[3]) == (0)); // JR should skip the sequential instruction after its delay slot
-    CHECK((vu1.state().vi[4]) ==
-          (4)); // JR immediately after a VI write should branch using the previous VI value
 }
 
 TEST_CASE("vu1: MPG upload invalidates cached VU1 decode before MSCAL", "[vu1]") {
