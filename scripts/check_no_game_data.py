@@ -11,8 +11,12 @@ Modes (pick one):
   --archive PATH      members of a release archive (.zip, .tar, .tar.gz, .tar.zst)
   PATH ...            explicit files or directories
   --deep              also compare against the local boot ELF and overlays in baserom/raw (contributors only)
-  --release           the files are a release tree (an install, an unpacked AppImage): host executables and
-                      libraries (ELF or PE, never MIPS) and copies of allowlisted files are allowed at any size
+  --release           the files are a release tree or archive (an install, an unpacked AppImage, the Windows
+                      zip): host executables and libraries (ELF or PE, never MIPS) and copies of allowlisted
+                      files are allowed at any size
+
+In every mode a MIPS ELF (the boot file, an IRX, a unit ELF), an MWo3 overlay container and an ISO 9660 image are
+refused whatever their names, as are files with a hash the region profiles record and generated code.
 
 Published function maps (data/maps/<profile>/<unit>.toml, share/dq8/maps/... in a release) must hold exactly
 the format of Docs/formats/function-map.md: addresses, sizes, counts and kernel/SDK names, no table entries, no
@@ -207,12 +211,25 @@ def published_map_problems(rel_path: str, data: bytes, names: tuple[set[str], se
     return problems
 
 
-def host_binary(data: bytes) -> bool:
-    """An ELF for anything but MIPS (the game's code is MIPS), or a PE file: what a release tree is built of."""
+def game_shape(data: bytes) -> str | None:
+    """The kind of game file `data` looks like whatever its name: PS2 code (a MIPS ELF: the boot file, an IRX
+    module or a unit ELF), an MWo3 overlay container, or a disc image (ISO 9660). None for anything else."""
     if data[:4] == b"\x7fELF" and len(data) >= 20:
         machine = int.from_bytes(data[18:20], "little" if data[5] == 1 else "big")
-        return machine != ELF_MACHINE_MIPS
-    return data[:2] == b"MZ"
+        if machine == ELF_MACHINE_MIPS:
+            return "mips-elf"
+    if data[:4] == b"MWo3":
+        return "mwo3-container"
+    if data[0x8001:0x8006] == b"CD001":
+        return "disc-image"
+    return None
+
+
+def host_binary(data: bytes) -> bool:
+    """An ELF for anything but MIPS (the game's code is MIPS), or a PE file: what a release tree is built of."""
+    if game_shape(data) is not None:
+        return False
+    return data[:4] == b"\x7fELF" or data[:2] == b"MZ"
 
 
 def entropy(data: bytes) -> float:
@@ -274,6 +291,9 @@ class Checker:
             crc = f"{zlib.crc32(data) & 0xFFFFFFFF:08x}"
             if sha1 in self.hashes or crc in self.hashes:
                 self.refuse(rel, "known-game-file-hash")
+        shape = game_shape(data)
+        if shape is not None:
+            self.refuse(rel, shape)
         if re.search(r"(?:^|/)(?:data|share/dq8)/maps/", path) and path.endswith(".toml"):
             for problem in published_map_problems(path, data, self.call_names):
                 self.refuse(rel, "published-map", problem)

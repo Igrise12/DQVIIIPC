@@ -6,8 +6,8 @@
 #   bin/        dq8-game, dq8-launcher, dq8ctl, ps2_recomp
 #   lib/        dq8-gs-parallel, dq8-movie and, with DQ8_FFMPEG=bundled, libavcodec and libavutil
 #   share/dq8/  regions/ (region profiles), maps/ (published function maps), settings/ (schema and strings),
-#               cmake/module/ (the game-module template), include/dq8/abi/ (the headers modules compile against),
-#               fonts/ (when the launcher bundles one)
+#               cmake/module/ (the game-module template), cmake/toolchains/ (llvm-mingw, for Windows modules),
+#               include/dq8/abi/ (the headers modules compile against), fonts/ (when the launcher bundles one)
 #   share/doc/dq8-native/  LICENSE, README.md, THIRD_PARTY_NOTICES.md, licenses/, the libraries' notices
 #
 # The programs find share/dq8 from bin/ (find_maps_dir, find_settings_dir, dq8ctl's data search all look under
@@ -31,6 +31,11 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/cmake/module/" DESTINATION "${DQ8_INSTA
         COMPONENT recompiler)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/dq8/abi/" DESTINATION "${DQ8_INSTALL_DATADIR}/include/dq8/abi"
         COMPONENT recompiler PATTERN ".clang-format-ignore" EXCLUDE)
+# The Windows module build's toolchain file and application manifest (M5 session E), next to the template.
+if(IS_DIRECTORY "${PROJECT_SOURCE_DIR}/cmake/toolchains")
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/cmake/toolchains/" DESTINATION "${DQ8_INSTALL_DATADIR}/cmake/toolchains"
+            COMPONENT recompiler)
+endif()
 if(IS_DIRECTORY "${PROJECT_SOURCE_DIR}/data/fonts")
     install(DIRECTORY "${PROJECT_SOURCE_DIR}/data/fonts/" DESTINATION "${DQ8_INSTALL_DATADIR}/fonts"
             COMPONENT launcher)
