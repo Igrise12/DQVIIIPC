@@ -11,6 +11,7 @@
 #include "runtime/platform/audio.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -372,6 +373,7 @@ void Spu2::stop_unsupported(const std::string& what, std::uint32_t pc) const {
         throw std::logic_error(info.message);
     }
     machine_->stop(std::move(info));
+    std::abort(); // stop() never returns; GCC cannot see that through the virtual call
 }
 
 } // namespace dq8::rt
