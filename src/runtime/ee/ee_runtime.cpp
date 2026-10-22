@@ -3,6 +3,8 @@
 #include "runtime/ee/ee_runtime.h"
 
 #include "runtime/ee/context.h"
+#include "runtime/ee/dispatch_table.h"
+#include "runtime/ee/overlay_manager.h"
 #include "runtime/kernel/ee_kernel.h"
 #include "runtime/kernel/kernel_calls.h"
 #include "runtime/kernel/kernel_services.h"
@@ -68,6 +70,147 @@ std::string_view exception_name(std::uint32_t code) noexcept {
     default:
         return "unknown exception";
     }
+}
+
+// ---- Locating code for stop messages (M4 session D).
+
+// The table that holds `pc`: the main unit's, or the resident overlay's for the overlay window; null else.
+const DispatchTable* table_for(const Dispatcher& d, std::uint32_t pc) {
+    if (d.main_table().covers(pc)) {
+        return &d.main_table();
+    }
+    if (d.overlays().in_window(pc)) {
+        if (const OverlayUnit* res = d.overlays().resident()) {
+            return res->table.covers(pc) ? &res->table : nullptr;
+        }
+    }
+    return nullptr;
+}
+
+// The entry of the function whose code holds `pc`: the nearest filled slot at or below pc gives the
+// function (a resume entry points at its owner), whose lowest slot is the entry. nullopt when no function
+// lies below pc in its table.
+std::optional<std::uint32_t> function_entry(const DispatchTable& table, std::uint32_t pc) {
+    std::uint32_t a = pc & ~3u;
+    while (table.covers(a) && table.lookup(a) == nullptr) {
+        if (a < table.base() + 4) {
+            return std::nullopt;
+        }
+        a -= 4;
+    }
+    const dq8_guest_fn fn = table.lookup(a);
+    if (fn == nullptr) {
+        return std::nullopt;
+    }
+    while (a >= table.base() + 4 && table.lookup(a - 4) == fn) {
+        a -= 4;
+    }
+    return a;
+}
+
+// "function 0x0013CC70 of main", or "no known function (unit main)".
+std::string describe_function(const Dispatcher& d, std::uint32_t pc) {
+    const DispatchTable* table = table_for(d, pc);
+    if (table == nullptr) {
+        return "outside every code unit";
+    }
+    const std::string& unit_name = table == &d.main_table() ? d.main_name() : d.overlays().resident()->name;
+    if (const auto entry = function_entry(*table, pc)) {
+        return "function " + hex32(*entry) + " of " + unit_name;
+    }
+    return "no known function of " + unit_name;
+}
+
+constexpr std::uint32_t op_special = 0x00;
+constexpr std::uint32_t op_regimm = 0x01;
+constexpr std::uint32_t op_j = 0x02;
+constexpr std::uint32_t op_beq = 0x04;
+constexpr std::uint32_t funct_jr = 0x08;
+constexpr std::uint32_t funct_break = 0x0D;
+
+bool is_break(std::uint32_t w) {
+    return (w >> 26) == op_special && (w & 0x3Fu) == funct_break;
+}
+bool is_trap(std::uint32_t w) {
+    const std::uint32_t op = w >> 26;
+    if (op == op_special) {
+        const std::uint32_t f = w & 0x3Fu;
+        return f >= 0x30u && f <= 0x36u && f != 0x35u; // tge, tgeu, tlt, tltu, teq, tne
+    }
+    if (op == op_regimm) {
+        const std::uint32_t rt = (w >> 16) & 0x1Fu;
+        return rt >= 0x08u && rt <= 0x0Eu && rt != 0x0Du; // tgei, tgeiu, tlti, tltiu, teqi, tnei
+    }
+    return false;
+}
+// jr (not jalr), j, and beq $0, $0 (b): control never falls past them.
+bool ends_straight_line(std::uint32_t w) {
+    const std::uint32_t op = w >> 26;
+    return (op == op_special && (w & 0x3Fu) == funct_jr) || op == op_j ||
+           (op == op_beq && ((w >> 16) & 0x3FFu) == 0);
+}
+
+std::string_view trap_name(std::uint32_t w) {
+    static constexpr std::array<std::string_view, 7> special{"tge", "tgeu", "tlt", "tltu", "teq", "?", "tne"};
+    static constexpr std::array<std::string_view, 7> regimm{"tgei", "tgeiu", "tlti", "tltiu",
+                                                            "teqi", "?",     "tnei"};
+    return (w >> 26) == op_special ? special[(w & 0x3Fu) - 0x30u] : regimm[((w >> 16) & 0x1Fu) - 0x08u];
+}
+
+// What the conventional codes mean: compilers emit break 7 (or a trap with code 7) after a division by zero
+// check and break 6 for an overflow check.
+std::string code_meaning(std::uint32_t code) {
+    switch (code) {
+    case 7:
+        return " (the compiler's division-by-zero check)";
+    case 6:
+        return " (the compiler's overflow check)";
+    default:
+        return "";
+    }
+}
+
+// Generated code does not set pc before break and trap instructions: pc holds the function's entry or the
+// last branch target. The faulting instruction is the first one of its kind from there on. Decodes it and
+// says where it is; flags one that lies past an unconditional jump with no label in between, which straight
+// code cannot reach (data the recompiler decoded as code, or a target the function map does not know).
+std::string describe_exception_site(GuestMemory& memory, const Dispatcher& d, std::uint32_t pc, bool trap) {
+    constexpr std::uint32_t max_scan = 1024; // instructions
+    const DispatchTable* table = table_for(d, pc);
+    bool unreachable = false;
+    for (std::uint32_t i = 0, a = pc & ~3u; i < max_scan && a < 0x02000000u; ++i, a += 4) {
+        if (i != 0 && table != nullptr && table->covers(a) && table->is_function_entry(a)) {
+            break; // the next function
+        }
+        if (i != 0 && table != nullptr && table->covers(a) && table->lookup(a) != nullptr) {
+            unreachable = false; // a label: reachable again
+        }
+        const std::uint32_t w = memory.load32(a);
+        if (trap ? is_trap(w) : is_break(w)) {
+            std::string out;
+            if (trap) {
+                const std::uint32_t code = (w >> 26) == op_special ? (w >> 6) & 0x3FFu : 0;
+                out = std::string(trap_name(w)) + " (code " + std::to_string(code) + code_meaning(code) + ")";
+            } else {
+                const std::uint32_t code = (w >> 6) & 0xFFFFFu;
+                out = "break " + std::to_string(code) + code_meaning(code);
+            }
+            out += " at " + hex32(a) + " in " + describe_function(d, a);
+            if (unreachable) {
+                out += "; straight-line code from " + hex32(pc) +
+                       " cannot reach it: probably data decoded as code, or a jump target the function map "
+                       "does not have";
+            }
+            return out;
+        }
+        if (ends_straight_line(w)) {
+            ++i;
+            a += 4; // the delay slot
+            unreachable = true;
+        }
+    }
+    return std::string("no ") + (trap ? "trap" : "break") + " instruction follows " + hex32(pc) + " in " +
+           describe_function(d, pc) + ": probably data decoded as code";
 }
 
 bool handler_active(const ExecState& state, std::int32_t number) {
@@ -333,6 +476,23 @@ void EeRuntime::stop_missing(std::uint32_t pc, std::uint32_t target, std::uint32
     s.address = target;
     s.source = source;
     s.message = dispatcher_.describe_miss(target);
+    // A jump (a jump table's target, typically) that leaves its own function names where it lands: the
+    // function map splits one function into two, or misses a label.
+    if (how != "run-loop" && source != 0 && how.find("Call") == std::string_view::npos) {
+        const DispatchTable* from = table_for(dispatcher_, source);
+        const DispatchTable* to = table_for(dispatcher_, target);
+        const std::optional<std::uint32_t> own =
+            from != nullptr ? function_entry(*from, source) : std::nullopt;
+        const std::optional<std::uint32_t> lands = to != nullptr ? function_entry(*to, target) : std::nullopt;
+        if (own && lands && from == to && *own != *lands) {
+            s.message += "; the jump at " + hex32(source) + " in function " + hex32(*own) +
+                         " lands outside its function, in function " + hex32(*lands) +
+                         " (a jump-table target the function map gives to another function?)";
+        } else if (own && lands && from == to) {
+            s.message += "; the target lies inside the jumping function " + hex32(*own) +
+                         " but is no label the recompiler knew (a jump-table target the map lacks?)";
+        }
+    }
     if (how == "run-loop") {
         s.message += " (reached from the run loop: a jump unwound to it, or a return or fall-through set pc)";
     } else {
@@ -385,13 +545,11 @@ bool EeRuntime::dispatch_guest_branch(std::uint8_t* rdram, R5900Context* ctx, st
     if (kernel_ != nullptr) {
         kernel_->safe_point(st); // may run other threads; the call below then happens when we are resumed
     }
-#if !defined(NDEBUG)
-    // Stale-return check (M3-boots.md, contract decision 2): a call made from overlay code must return into
-    // the overlay that made it.
+    // Stale-return check (M3-boots.md, contract decision 2), in every build since M4: a call made from
+    // overlay code must return into the overlay that made it. Two compares and a load per dispatched call.
     const OverlayManager& overlays = dispatcher_.overlays();
     const bool from_window = overlays.in_window(source_pc);
     const std::uint64_t generation = from_window ? overlays.generation() : 0;
-#endif
     ++st.depth;
     target.fn(rdram, ctx, &adapter_);
     --st.depth;
@@ -402,7 +560,6 @@ bool EeRuntime::dispatch_guest_branch(std::uint8_t* rdram, R5900Context* ctx, st
         st.unwinding = true; // returned somewhere else (pc 0, a changed $ra, its own entry): unwind
         return false;
     }
-#if !defined(NDEBUG)
     if (from_window && overlays.generation() != generation) {
         StopInfo s;
         s.reason = StopReason::stale_return;
@@ -414,7 +571,6 @@ bool EeRuntime::dispatch_guest_branch(std::uint8_t* rdram, R5900Context* ctx, st
                     std::to_string(generation) + " -> " + std::to_string(overlays.generation()) + ")";
         stop(std::move(s));
     }
-#endif
     return true;
 }
 
@@ -692,6 +848,12 @@ void EeRuntime::signal_exception(R5900Context* ctx, std::uint32_t exception) {
     s.number = exception;
     s.message = "guest exception: " + std::string(exception_name(exception)) + " (code " +
                 std::to_string(exception) + ") at " + hex32(ctx->pc);
+    if (exception == EXCEPTION_BREAKPOINT || exception == EXCEPTION_TRAP) {
+        s.message +=
+            ": " + describe_exception_site(memory_, dispatcher_, ctx->pc, exception == EXCEPTION_TRAP);
+    } else {
+        s.message += " in " + describe_function(dispatcher_, ctx->pc);
+    }
     stop(std::move(s));
 }
 
@@ -700,7 +862,8 @@ void EeRuntime::stop_unsupported(R5900Context* ctx, std::string_view what, std::
     s.reason = StopReason::unsupported;
     s.pc = ctx->pc;
     s.address = address;
-    s.message = std::string(what) + " at " + hex32(ctx->pc) + " is not supported in this build";
+    s.message = std::string(what) + " at " + hex32(ctx->pc) + " (" + describe_function(dispatcher_, ctx->pc) +
+                ") is not supported in this build";
     if (address != 0) {
         s.message += " (address " + hex32(address) + ")";
     }

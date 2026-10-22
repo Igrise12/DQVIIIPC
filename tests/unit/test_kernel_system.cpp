@@ -586,13 +586,8 @@ TEST_CASE("kernel system: a call from the overlay window that returns into a rep
     prepare(m);
     g.overlays = &m.overlays;
     const StopInfo stop = stop_of(m.run_from(k_main));
-#if !defined(NDEBUG)
-    CHECK(stop.reason == StopReason::stale_return);
+    CHECK(stop.reason == StopReason::stale_return); // in every build since M4
     CHECK(to_string(stop.reason) == "stale_return");
     CHECK(stop.source == window + 8);
     CHECK_FALSE(g.after_call);
-#else
-    CHECK(stop.reason == StopReason::requested); // the check is debug-only
-    CHECK(g.after_call);
-#endif
 }

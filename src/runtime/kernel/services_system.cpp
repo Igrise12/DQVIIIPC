@@ -19,13 +19,17 @@
 #include "runtime/kernel/kernel_calls.h"
 #include "runtime/kernel/kernel_services.h"
 #include "runtime/machine/machine_services.h"
+#include "runtime/machine/mmio.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -36,6 +40,40 @@ namespace {
 using detail::guest_block_ok;
 using detail::read_u32;
 using detail::write_u32;
+
+// ---- ResetEE's units and the DMA channels whose STR bit says they are working.
+constexpr std::uint32_t chcr_str = 1u << 8;
+constexpr std::uint32_t reset_ee_units = 0x7Fu;
+struct ResetUnit {
+    std::uint32_t bit;
+    std::string_view name;
+    std::uint32_t channels; // bit n: DMA channel n
+};
+constexpr std::array<ResetUnit, 7> reset_units{{
+    {1u << 0, "DMAC", 0x3FFu},
+    {1u << 1, "VIF0", 1u << 0},
+    {1u << 2, "VIF1", 1u << 1},
+    {1u << 3, "GIF", 1u << 2},
+    {1u << 4, "VU0", 0},
+    {1u << 5, "VU1", 0},
+    {1u << 6, "IPU", (1u << 3) | (1u << 4)},
+}};
+// D0_CHCR..D9_CHCR.
+constexpr std::uint32_t dmac_channel_base(std::uint32_t channel) {
+    constexpr std::uint32_t bases[10] = {0x10008000u, 0x10009000u, 0x1000A000u, 0x1000B000u, 0x1000B400u,
+                                         0x1000C000u, 0x1000C400u, 0x1000C800u, 0x1000D000u, 0x1000D400u};
+    return bases[channel];
+}
+
+// Ends the run at a kernel call the HLE cannot honour. (The message is built by the caller in its own
+// statement: temporaries of the stopping statement would never be destroyed, since the fiber is abandoned.)
+[[noreturn]] void stop_unsupported_call(KernelCallContext& c, std::string message) {
+    StopInfo s;
+    s.reason = StopReason::unsupported;
+    s.pc = c.ctx().pc;
+    s.message = std::move(message);
+    c.machine().stop(std::move(s));
+}
 
 // ---- OSD configuration words (packing from upstream's Helpers/Runtime.h).
 
@@ -369,6 +407,45 @@ void register_system_services(KernelServices& services, EeKernel& kernel) {
          "no TLB is modelled, so a refill never happens; the result is the previous handler, none");
     noop("Deci2Call", kabi::error, "a retail console has no DECI2 debugger: every request fails with -1",
          kernel_service_interrupt_ok);
+    noop("SetMemoryMode", kabi::ok,
+         "the memory mode selects how much RAM the kernel maps (32 MiB for retail programs); guest memory is "
+         "always the console's 32 MiB, so there is nothing to change");
+
+    // ResetEE(units): the EE units the bit field names go back to their power-on state. Accepted, as a noop,
+    // when every named unit is idle: after boot an idle unit is what a reset leaves as far as a program can
+    // see. Resetting a unit in the middle of a transfer is not modelled and stops. Bits (as the EE kernel's
+    // documentation gives them; to confirm in bring-up): 0 DMAC, 1 VIF0, 2 VIF1, 3 GIF, 4 VU0, 5 VU1, 6 IPU.
+    // The VUs are always idle here: their programs run to the end when they start.
+    add("ResetEE", [](KernelCallContext& c) {
+        const std::uint32_t units = c.arg(0);
+        if ((units & ~reset_ee_units) != 0) {
+            std::string message = "ResetEE(" + hex32(units) + ") names units this kernel does not know";
+            stop_unsupported_call(c, std::move(message));
+        }
+        for (const ResetUnit& unit : reset_units) {
+            if ((units & unit.bit) == 0) {
+                continue;
+            }
+            for (std::uint32_t channel = 0; channel < 10; ++channel) {
+                if ((unit.channels & (1u << channel)) == 0) {
+                    continue;
+                }
+                std::uint8_t bytes[4] = {};
+                c.machine().mmio().read(dmac_channel_base(channel), 4, bytes,
+                                        MmioContext{c.ctx().pc, &c.ctx()});
+                std::uint32_t chcr = 0;
+                std::memcpy(&chcr, bytes, sizeof chcr);
+                if ((chcr & chcr_str) != 0) {
+                    std::string message = "ResetEE(" + hex32(units) + ") while the " +
+                                          std::string(unit.name) + " is busy (DMA channel " +
+                                          std::to_string(channel) +
+                                          " running): resetting a working unit is not supported";
+                    stop_unsupported_call(c, std::move(message));
+                }
+            }
+        }
+        c.ret(kabi::ok);
+    });
 
     // ---- The exit paths stop the run. (Messages are built in their own statements: temporaries of the
     // statement that stops would never be destroyed, since the fiber is abandoned.)
