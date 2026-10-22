@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 
 // The VU micro-mode interpreter (architecture §5.4): one instance per VU. It models the pipelines that
 // micro programs can observe (FMAC, FDIV, EFU and integer latencies, the flag pipeline, branch delay and the
@@ -114,6 +115,19 @@ class VuInterpreter {
         bool tBit = false;
         uint8_t upperVfShadowReg = 0;
         uint8_t suppressedLowerVf = 0;
+
+        // Derived from the two usages at decode, for the scheduler: the pair's VF, VI and ACC reads (upper
+        // and lower together), the VI register the lower instruction writes, whether its VF write survives
+        // the upper's, and the latency each write becomes visible after.
+        std::array<VfAccess, 4> vfReads{};
+        uint8_t vfReadCount = 0;
+        uint16_t viReads = 0;
+        uint8_t accReads = 0;
+        uint8_t writtenVi = 0;
+        bool lowerVfWriteKept = false;
+        uint8_t upperVfLatency = 0;
+        uint8_t lowerVfLatency = 0;
+        uint8_t viWriteLatency = 0;
     };
 
     struct FlagPipelineEntry {
@@ -181,6 +195,18 @@ class VuInterpreter {
         uint64_t issueCycle = 0;
         bool active = false;
         bool currentTagEop = false;
+
+        // Everything but the packet buffer: a transfer writes each byte of it before reading or sending it.
+        void clear() {
+            sourceAddress = 0;
+            totalBytes = 0;
+            copiedBytes = 0;
+            currentTagEnd = 0;
+            cycleCredit = 0;
+            issueCycle = 0;
+            active = false;
+            currentTagEop = false;
+        }
     };
 
     static constexpr uint32_t kFmacLatency = 4u;
@@ -190,20 +216,36 @@ class VuInterpreter {
     static constexpr uint32_t kMaxPendingVfWrites = 16u;
     static constexpr uint32_t kMaxPendingViWrites = 8u;
     static constexpr uint32_t kMaxPendingAccWrites = 8u;
+    static constexpr uint32_t kEfuEntries = 2u;
     static constexpr uint32_t kMaxDecodedPairs = 0x4000u / 8u;
+    static constexpr uint64_t kNoPendingCommit = ~uint64_t{0};
+    // More cycles than the longest latency (EFU, 54).
+    static constexpr uint32_t kCommitSlots = 64u;
+    static constexpr uint32_t kFlagCommitBit = 0u;
+    static constexpr uint32_t kFdivCommitBit = kFlagCommitBit + kMaxFlagEntries;
+    static constexpr uint32_t kEfuCommitBit = kFdivCommitBit + 1u;
+    static constexpr uint32_t kStoreCommitBit = kEfuCommitBit + kEfuEntries;
+    static constexpr uint32_t kVfWriteCommitBit = kStoreCommitBit + kMaxPendingStores;
+    static constexpr uint32_t kViWriteCommitBit = kVfWriteCommitBit + kMaxPendingVfWrites;
+    static constexpr uint32_t kAccWriteCommitBit = kViWriteCommitBit + kMaxPendingViWrites;
+    static_assert(kAccWriteCommitBit + kMaxPendingAccWrites <= 64u, "a commit slot is one 64-bit mask");
 
     Unit m_unit;
     VuState m_state;
     std::array<DecodedInstructionPair, kMaxDecodedPairs> m_decodedCodeCache{};
+    DecodedInstructionPair m_uncachedPair{};
     const uint8_t* m_cachedVuCode = nullptr;
     const IVuHost* m_cachedHost = nullptr;
     uint32_t m_cachedCodeSize = 0;
     uint64_t m_cachedCodeGeneration = 0;
     bool m_decodedCodeCacheValid = false;
+    // Micro memory and its generation change only while the interpreter is not running or inside a host
+    // call, so the decode cache is checked against them at the first fetch after either.
+    bool m_codeCheckPending = true;
 
     std::array<FlagPipelineEntry, kMaxFlagEntries> m_flagPipeline{};
     ScalarPipelineEntry m_fdiv{};
-    std::array<ScalarPipelineEntry, 2> m_efu{};
+    std::array<ScalarPipelineEntry, kEfuEntries> m_efu{};
     std::array<PendingStore, kMaxPendingStores> m_storePipeline{};
     std::array<PendingVfWrite, kMaxPendingVfWrites> m_vfWritePipeline{};
     std::array<PendingViWrite, kMaxPendingViWrites> m_viWritePipeline{};
@@ -217,10 +259,33 @@ class VuInterpreter {
     std::array<uint64_t, 4> m_accLatestWrite{};
 
     uint64_t m_cycle = 0;
+    // The valid entries of each pipeline array, one bit per index (alongside the entries' valid flags).
+    uint32_t m_flagValid = 0;
+    uint32_t m_efuValid = 0;
+    uint32_t m_storeValid = 0;
+    uint32_t m_vfWriteValid = 0;
+    uint32_t m_viWriteValid = 0;
+    uint32_t m_accWriteValid = 0;
+    // The entries due at each of the next kCommitSlots cycles (slot = cycle % kCommitSlots), as bits in
+    // commit order (k*CommitBit + index), the slots in use, and the first cycle with a slot in use (no
+    // later).
+    std::array<uint64_t, kCommitSlots> m_commitSlots{};
+    uint64_t m_commitSlotsInUse = 0;
+    uint64_t m_nextCommitCycle = kNoPendingCommit;
     uint64_t m_nextWriteSequence = 0;
     uint64_t m_efuResourceReady = 0;
     uint32_t m_workingClip = 0;
     uint32_t m_currentUpperInstruction = 0;
+    // The current upper instruction's operands as execUpper normalized them, for its FMAC flags (they point
+    // into execUpper's frame: valid while it runs).
+    struct FmacOperands {
+        const float* vs = nullptr;
+        const float* vt = nullptr;
+        const float* acc = nullptr;
+        float q = 0.0f;
+        float i = 0.0f;
+    };
+    FmacOperands m_fmacOperands{};
     int32_t m_viBranchBackupValue = 0;
     uint8_t m_viBranchBackupReg = 0;
     bool m_viBranchBackupValid = false;
@@ -241,8 +306,8 @@ class VuInterpreter {
     static void addVfWrite(InstructionUsage& usage, uint8_t reg, uint8_t lanes);
     static uint8_t vfReadLanes(const InstructionUsage& usage, uint8_t reg);
     DecodedInstructionPair decodeInstructionPair(const uint8_t* vuCode, uint32_t pc) const;
-    DecodedInstructionPair getDecodedInstructionPairForPc(const uint8_t* vuCode, uint32_t codeSize,
-                                                          IVuHost& host, uint32_t pc);
+    const DecodedInstructionPair& getDecodedInstructionPairForPc(const uint8_t* vuCode, uint32_t codeSize,
+                                                                 IVuHost& host, uint32_t pc);
     void rebuildDecodedCodeCache(const uint8_t* vuCode, uint32_t codeSize, const IVuHost& host,
                                  uint64_t generation);
 
@@ -254,8 +319,6 @@ class VuInterpreter {
     void applyFmacDest(float* dst, float* result, uint8_t dest);
     void applyFmacDestAcc(float* result, uint8_t dest);
     void normalizeFmacResult(float* result, uint8_t dest, uint8_t laneFlags[4]);
-    bool calculateFmacExactResult(uint32_t component, long double& result) const;
-    uint8_t normalizeFmacExactResult(float& value, long double exactResult) const;
     uint32_t calculateFmacProductSticky(uint8_t dest) const;
     void updateFmacFlags(const uint8_t laneFlags[4], uint8_t dest, uint32_t extraSticky);
     void queueFsset(uint16_t immediate);
@@ -270,7 +333,13 @@ class VuInterpreter {
     void startXgkick(uint32_t qwordAddress);
 
     void resetScheduler();
-    void commitReadyPipelines();
+    // Puts entry `bit` (k*CommitBit + index) in the commit slot of its ready cycle.
+    void scheduleCommit(uint32_t bit, uint64_t readyCycle);
+    void commitReadyPipelines() {
+        if (m_cycle >= m_nextCommitCycle)
+            commitDueEntries();
+    }
+    void commitDueEntries();
     void advanceOneCycle();
     void advanceTo(uint64_t targetCycle);
     void flushPipelines();
@@ -280,8 +349,38 @@ class VuInterpreter {
     void markPairWrites(const DecodedInstructionPair& decoded);
     bool pipelinesPending() const;
 
-    float normalizeOperand(float value) const;
-    float normalizeResult(float value, uint32_t& laneFlags) const;
+    // Inline and without branches: every FMAC operand goes through normalizeOperand. Zero and denormals
+    // become signed zero, infinities and NaNs the signed largest float.
+    float normalizeOperand(float value) const {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        const uint32_t sign = bits & 0x80000000u;
+        const uint32_t exponent = bits & 0x7F800000u;
+        bits = exponent == 0u ? sign : exponent == 0x7F800000u ? (sign | 0x7F7FFFFFu) : bits;
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    }
+    float normalizeResult(float value, uint32_t& laneFlags) const {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        const uint32_t sign = bits & 0x80000000u;
+        const uint32_t magnitude = bits & 0x7FFFFFFFu;
+        const uint32_t exponent = (bits >> 23) & 0xFFu;
+
+        laneFlags = sign != 0u ? 0x2u : 0u;
+        if (magnitude == 0u) {
+            laneFlags |= 0x1u;
+        } else if (exponent == 0u) {
+            laneFlags |= 0x5u;
+            bits = sign;
+        } else if (exponent == 0xFFu) {
+            laneFlags |= 0x8u;
+            bits = sign | 0x7F7FFFFFu;
+        }
+
+        std::memcpy(&value, &bits, sizeof(value));
+        return value;
+    }
     uint32_t microAddressMask() const;
     int32_t readBranchVi(uint8_t reg) const;
     void recordViWriteForBranch(uint8_t reg, int32_t oldValue);
