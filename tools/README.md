@@ -10,5 +10,11 @@ by running `ghidra/ExportFunctionMap.java` read-only on the Ghidra projects of s
 writes `<unit>.csv` (`Name,Start,End,Size`, functions only, End exclusive), `<unit>.jump_tables.toml`
 (`[[jump_tables.table]]` keyed by the table's data address) and `<unit>.stats.toml`
 (`link_return_entries`, counts, unresolved sites, holes) to `work/recomp/maps/`; the script's header
-lists the options and the exporter's header the rules. The maps are game-derived and stay local (brief
-§14, D9). About 30 s for all seven.
+lists the options and the exporter's header the rules. These contributor maps carry Ghidra's names and
+the jump tables' entries, so they stay local. About 30 s for all seven.
+
+`python3 -I tools/ghidra/publish_maps.py` turns them into the published maps in `data/maps/<profile>/`
+(ADR-0017, `Docs/formats/function-map.md`): starts and sizes, link-return entries, table shapes and the call
+list's kernel and SDK names only. It refuses a table whose indices are not 0..n-1; `--check` fails when
+`data/maps` is out of date. Commit the result after `dq8ctl recomp` from the published maps gives the same
+code as `--maps work/recomp/maps`.
