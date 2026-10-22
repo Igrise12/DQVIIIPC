@@ -275,9 +275,9 @@ int run_game(const Options& o, const char* argv0) {
             throw UsageError(std::string("--input-script: ") + e.what());
         }
     }
-    // --movies play and nodecode run the sceMpeg HLE (movie_wiring.cpp), auto too when dq8-movie loads, else
-    // it skips.
-    const auto movie_policy = game::resolve_movie_policy(o.movies, o.movie_decoder);
+    // --movies play and nodecode run the sceMpeg HLE (movie_wiring.cpp), auto too when dq8-movie loads and
+    // the sound modules can drain the movies' audio, else it skips.
+    const auto movie_policy = game::resolve_movie_policy(o.movies, o.movie_decoder, profile);
     EventLog log(o.events, o.trace_events);
 
     // Disc.

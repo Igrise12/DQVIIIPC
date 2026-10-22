@@ -37,6 +37,20 @@ TEST_CASE("movies: --movies values resolve to a policy", "[game][movie]") {
     }
 }
 
+TEST_CASE("movies: auto skips while a sound module is still a null server", "[game][movie]") {
+    core::RegionProfile profile;
+    profile.iop.modules.push_back({"PADMAN", {"padman.v1"}});
+    CHECK_FALSE(game::movie_audio_problem(profile));
+    profile.iop.modules.push_back({"SDRDRV", {"null:0x80000701"}});
+    const auto problem = game::movie_audio_problem(profile);
+    REQUIRE(problem);
+    CHECK(problem->find("SDRDRV") != std::string::npos);
+    // auto skips whether or not a decoder would load; play and nodecode are not asked.
+    CHECK(game::resolve_movie_policy("auto", std::nullopt, &profile) == game::MoviePolicy::skip);
+    CHECK(game::resolve_movie_policy("play", std::nullopt, &profile) == game::MoviePolicy::hle);
+    CHECK(game::resolve_movie_policy("nodecode", std::nullopt, &profile) == game::MoviePolicy::hle);
+}
+
 TEST_CASE("movies: the HLE's overrides sit at the profile's sceMpeg addresses", "[game][movie]") {
     core::RegionProfile profile;
     profile.movie.player_entries = {0x00100100u, 0x00100200u};

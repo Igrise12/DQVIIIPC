@@ -58,15 +58,33 @@ std::string_view to_string(MoviePolicy policy) noexcept {
 }
 
 std::optional<MoviePolicy> resolve_movie_policy(std::string_view option,
-                                                const std::optional<std::filesystem::path>& library) {
+                                                const std::optional<std::filesystem::path>& library,
+                                                const core::RegionProfile* profile) {
     if (option == "play" || option == "nodecode") {
         return MoviePolicy::hle;
     }
     if (option == "auto") {
+        if (profile != nullptr && movie_audio_problem(*profile)) {
+            return MoviePolicy::skip;
+        }
         const rt::MovieLibraryConfig config{library ? library->string() : std::string()};
         return rt::movie_library_problem(config) ? MoviePolicy::skip : MoviePolicy::hle;
     }
     return parse_movie_policy(option);
+}
+
+std::optional<std::string> movie_audio_problem(const core::RegionProfile& profile) {
+    for (const core::RegionProfile::IopModule& module : profile.iop.modules) {
+        for (const std::string& service : module.services) {
+            if (service.rfind("null:", 0) == 0) {
+                return "the IOP module " + module.name + " is still answered by a null server (" + service +
+                       "), so a movie's audio would never drain; --movies auto skips until the sound modules "
+                       "are "
+                       "interpreted (M4 bring-up B8), --movies play or nodecode plays anyway";
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 std::vector<rt::OverrideSpec> movie_overrides(const core::RegionProfile& profile, MoviePolicy policy) {

@@ -4,7 +4,8 @@
 // the sceMpeg HLE with its decoder (the library, or black pictures for nodecode) and install its overrides at
 // the profile's [movie.sce_mpeg] addresses. play without the library is a start-up failure (exit 3); auto
 // without it skips the movies (run_machine.cpp installs the skip overrides through
-// game::resolve_movie_policy) and says why once, as a `movie_decoder` event.
+// game::resolve_movie_policy) and says why once, as a `movie_decoder` event; so does auto while a sound
+// module is still a null server (game::movie_audio_problem), since the movies' audio could not drain.
 #include "game/movies.h"
 #include "host/m4_wiring.h"
 #include "host/run.h"
@@ -49,9 +50,13 @@ void wire_movies(M4Wiring& w) {
     }
     const rt::MovieLibraryConfig library{o.movie_decoder ? o.movie_decoder->string() : std::string()};
     std::function<std::unique_ptr<rt::IMovieDecoder>()> make_decoder;
+    std::optional<std::string> audio_problem;
+    if (o.movies == "auto" && w.profile != nullptr) {
+        audio_problem = game::movie_audio_problem(*w.profile);
+    }
     if (o.movies == "nodecode") {
         make_decoder = [] { return rt::make_blank_movie_decoder(); };
-    } else if (const auto problem = rt::movie_library_problem(library)) {
+    } else if (const auto problem = audio_problem ? audio_problem : rt::movie_library_problem(library)) {
         if (o.movies == "play") {
             throw BackendError("--movies play: " + *problem);
         }

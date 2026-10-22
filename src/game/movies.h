@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -38,10 +39,17 @@ std::optional<MoviePolicy> parse_movie_policy(std::string_view text) noexcept;
 std::string_view to_string(MoviePolicy policy) noexcept;
 
 // What a --movies value resolves to: play and nodecode are hle; auto is hle when the dq8-movie library
-// (`library`, or the default search when empty) loads and creates a decoder, else skip; the others as
-// parse_movie_policy. nullopt for an unknown value.
+// (`library`, or the default search when empty) loads and creates a decoder and `profile`, when given, has no
+// movie_audio_problem, else skip; the others as parse_movie_policy. nullopt for an unknown value.
 std::optional<MoviePolicy> resolve_movie_policy(std::string_view option,
-                                                const std::optional<std::filesystem::path>& library);
+                                                const std::optional<std::filesystem::path>& library,
+                                                const core::RegionProfile* profile = nullptr);
+
+// Why --movies auto must not play on this profile yet, or nullopt. A movie's audio drains only through the
+// game's sound modules: while one of the profile's IOP modules is still answered by a null server (M3's
+// stand-ins, until bring-up step B8 interprets the sound modules), the first movie with audio waits forever,
+// so auto skips. play and nodecode do not ask.
+std::optional<std::string> movie_audio_problem(const core::RegionProfile& profile);
 
 // The $v0 a skipped player entry returns (the scenes do not read it).
 inline constexpr std::int32_t movie_skip_entry_result = 0;
