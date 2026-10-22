@@ -8,9 +8,10 @@ DQ8-Native: an open-source native PC port of *Dragon Quest VIII* (PS2, NTSC-U, b
 static recompilation of the game's EE code to C++, run on a purpose-built runtime. Not an emulator. GPL-3.0-or-later.
 
 **Current state: M1 (disc intake), M2 (first recompile) and M3 (boots, done 2026-10-21) complete: the disc boots to
-the title menu headless or in an SDL3 window, with paraLLEl-GS frames at PCSX2 parity. M4 (playable core) is planned
-(2026-10-21) and its day 0 is on `main`: the contracts for four sessions and the VU0 bridge, which takes New Game
-into the field (BATTLE resident; the 3D world does not draw yet).**
+the title menu headless or in an SDL3 window, with paraLLEl-GS frames at PCSX2 parity. M4 (playable core) is in
+progress: sessions A–D are merged (2026-10-22); the field draws in 3D, the menu opens, saves are written to and
+reloaded from a host-folder card, the movies play, and the game's own sound modules run on an IOP interpreter
+with a register-level SPU2. Town, shop and battle await the owner's playtest.**
 - `src/core` (`libdq8core`): ISO 9660 reader, SHA-1/CRC-32, ELF32 reader and writer, `MWo3` parser, region profiles
   (`data/regions/SLUS_21207.toml`: hashes, sizes, addresses and the S3 loader facts, never bytes), `verify_image()` /
   `extract()`, a portable process runner, and the recompile pipeline (`core/recomp/`: function maps, per-unit
@@ -158,11 +159,13 @@ gamepad (`tools/bringup/window_smoke.py`). CI is green on all six jobs at `38fdf
 
 **M4 (playable core) is in progress**, planned with the project owner on 2026-10-21 (`Docs/milestones/M4-playable.md`;
 ADRs 0014–0016):
-- day 0 is on `main`: the contracts (IOP hardware seam, SPU2 stub, audio ring, movie ABI and IPU stub, pad feedback,
-  native-to-guest calls for overrides, host options and per-session wiring, `.dq8in` version 2, `[movie.sce_mpeg]`,
-  cost model "m4-v1") and the VU0 bridge;
-- next: sessions A (IOP interpreter and sound hosting), B (SPU2 and audio output), C (movies) and D (saves, pad,
-  robustness) in parallel, and the coordinator's bring-up from step B1 (the field draws no 3D yet: VU1 never runs).
+- day 0 (contracts, the VU0 bridge) and sessions A (IOP interpreter), B (SPU2, audio output), C (movies) and D
+  (memory card, pad, VU0 registers, robustness) are on `main`, with the VU1 interpreter speed-up (2026-10-22);
+- bring-up (`Docs/milestones/M4-playable.md`, "Bring-up status"): B1 field 3D (VF0, VU JR/JALR), B2 menu (function
+  maps: main's callback tables, mis-flagged no-return calls), B5/B6 save and reload, B7 movies, B8 sound modules
+  interpreted are done; B3/B4 (town, shop, battle) are left to the owner's playtest;
+- open: the movie scan-out geometry (4/3 horizontally against PCSX2), the menu's separator dots, two bright glows,
+  WAV and frame parity tooling, VU1 speed (about 13 vblanks/s in the field, release preset).
 
 M2's and M3's records are `Docs/milestones/M2-first-recompile.md` and `M3-boots.md`.
 Do not start implementation work the user has not asked for.
