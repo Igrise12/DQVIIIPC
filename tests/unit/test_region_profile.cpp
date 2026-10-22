@@ -289,7 +289,7 @@ TEST_CASE("the shipped region profiles are valid", "[core][profile]") {
             REQUIRE(p.iop.modules.size() == 15); // S7's load order
             CHECK(p.iop.modules.front().name == "SIO2MAN");
             CHECK(p.iop.modules.back().name == "PCMPLAY");
-            CHECK(p.iop.modules.back().services == std::vector<std::string>{"null:0x123456"});
+            CHECK(p.iop.modules.back().services == std::vector<std::string>{"interpret"}); // since B8
             REQUIRE(p.movie.player_entries.size() == 2);
             CHECK(p.movie.scene_unit == "TITLE");
             CHECK(p.movie.scene_functions.size() == 3);

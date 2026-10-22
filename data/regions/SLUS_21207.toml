@@ -48,10 +48,11 @@ ctor_walker = 0x00100DE0
 flush_cache_stub = 0x00116AA0
 mode_variable = 0x003D2740
 
-# The IOP modules the game loads from MODULES/ (spike S7's load order) and the native services that answer for
-# each (ADR-0011, Docs/milestones/M3-boots.md). Modules with no RPC server of their own get an empty list; the
-# standard services of the IOP image (fileio, iopheap, loadfile, cdvdfsv) exist from power-on. "null:<sid>" is a
-# server that acknowledges every call with zeros and logs it: the sound servers until audio lands (M4).
+# The IOP modules the game loads from MODULES/ (spike S7's load order) and what answers for each: a native
+# service (ADR-0011, Docs/milestones/M3-boots.md), or "interpret", the module's own code on the IOP interpreter
+# (ADR-0014; the ten sound modules since M4 bring-up step B8). Modules with no RPC server of their own get an empty
+# list; the standard services of the IOP image (fileio, iopheap, loadfile, cdvdfsv) exist from power-on. A
+# "null:<sid>" server would acknowledge every call with zeros and log it (M3's stand-in for the sound servers).
 [iop]
 reset_image = "MODULES/IOPRP300.IMG"
 
@@ -73,23 +74,23 @@ services = ["mcserv.v1"]
 
 [[iop.modules]]
 name = "LIBSD"
-services = []
+services = ["interpret"]
 
 [[iop.modules]]
 name = "SDRDRV"
-services = ["null:0x80000701"]
+services = ["interpret"]
 
 [[iop.modules]]
 name = "MODHSYN"
-services = []
+services = ["interpret"]
 
 [[iop.modules]]
 name = "MODMIDI"
-services = []
+services = ["interpret"]
 
 [[iop.modules]]
 name = "MODMSIN"
-services = []
+services = ["interpret"]
 
 [[iop.modules]]
 name = "CDVDSTM"
@@ -97,23 +98,23 @@ services = []
 
 [[iop.modules]]
 name = "SKSOUND"
-services = []
+services = ["interpret"]
 
 [[iop.modules]]
 name = "SKHSYNTH"
-services = []
+services = ["interpret"]
 
 [[iop.modules]]
 name = "SKMIDI"
-services = []
+services = ["interpret"]
 
 [[iop.modules]]
 name = "SKMSIN"
-services = []
+services = ["interpret"]
 
 [[iop.modules]]
 name = "PCMPLAY"
-services = ["null:0x123456"]
+services = ["interpret"]
 
 # The movie player (spike S6; confirmed in M3 bring-up): a scene opens the player (0x001A2450), starts it
 # (0x001A1A00), then loops on the per-frame call until finished_query (0x001A1380) reports the movie done.
