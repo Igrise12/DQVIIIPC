@@ -672,7 +672,8 @@ FunctionMap make_function_map(const PublishedMap& map, std::span<const std::uint
         table.address = t.address;
         table.base_register = t.base_register;
         table.line = t.line;
-        table.entries.reserve(t.count);
+        // A damaged count fails at its first word outside the image, not in this reservation.
+        table.entries.reserve(std::min<std::uint32_t>(t.count, 4096));
         for (std::uint32_t i = 0; i < t.count; ++i) {
             const std::uint32_t address = t.address + 4 * i;
             const std::optional<std::uint32_t> target = word_at(address);
