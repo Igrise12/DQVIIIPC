@@ -127,7 +127,10 @@ scene_functions = [0x00461E40, 0x00462110, 0x00463C50]
 
 # The movie HLE (M4 session C, ADR-0015, Docs/milestones/M4-playable.md): the sceMpeg SDK entry points it
 # replaces or hooks (spike S6b and the M4 design review). The player's own IPU init runs recompiled against the
-# IPU register stub. `delete` is to be confirmed by session C.
+# IPU register stub. `delete` is confirmed by session C (0x00111380 returns 1; its one caller is the stop routine).
+# player_open: the player's open routine 0x001A1C60 is entered by a tail jump from 0x001A2450, which the
+# dispatcher cannot intercept, so the hook sits on the open's first call, 0x0019E430 (its only caller is the
+# open), which takes the movie's name in $a0 before sceMpegCreate. The `movie` events carry that name.
 [movie.sce_mpeg]
 create = 0x00110728
 delete = 0x00111380
@@ -140,6 +143,8 @@ is_end = 0x001114E8
 reset = 0x00111468
 ipu_init = 0x001112D0
 video_stream_callback = 0x001A06C0
+player_open = 0x0019E430
+player_open_name_arg = 0
 
 # The title's flyover (M3 bring-up, Docs/milestones/M3-boots.md): TITLE stage 10 (the halfword at 0x003D2630)
 # zeroes the word at 0x004670C0, then steps it once per 30 Hz frame, whether or not its movie plays; the title

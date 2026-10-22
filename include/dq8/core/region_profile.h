@@ -138,6 +138,12 @@ struct RegionProfile {
             std::uint32_t reset = 0;
             std::uint32_t ipu_init = 0;
             std::uint32_t video_stream_callback = 0;
+            // Optional: where the HLE learns the movie's name (0: nowhere), a main-program function the
+            // player's open calls through the dispatcher before sceMpegCreate (the open itself, or its first
+            // call when the open is reached by a tail jump), and which of its arguments ($a0 = 0 .. $a3 = 3)
+            // is the name.
+            std::uint32_t player_open = 0;
+            std::uint32_t player_open_name_arg = 0;
             bool present() const noexcept { return create != 0; }
         } sce_mpeg;
     } movie;
