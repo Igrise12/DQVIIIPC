@@ -4,7 +4,8 @@
 // What the Windows build relies on beyond the per-file tests (M5 session E): UTF-8 everywhere (the code page
 // the application manifest selects, arguments to child processes, file names given as std::string) and game
 // modules loaded from a directory whose name is not ASCII, as under many Windows user profiles. The checks
-// hold on every platform; on Windows they fail without cmake/toolchains/windows-app.manifest.
+// hold on every platform; on Windows the UTF-8 ones need cmake/toolchains/windows-app.manifest (linked by
+// llvm-mingw builds) and skip without it.
 #include "dq8/core/process.h"
 #include "dq8/core/recomp/module_build.h"
 #include "runtime/platform/dynlib.h"
@@ -28,6 +29,13 @@
 
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
+
+// Windows builds without the manifest (MSVC, a compile check under ADR-0018) keep the ANSI code page.
+#if defined(_WIN32) && !defined(DQ8_TEST_UTF8_MANIFEST)
+#define DQ8_SKIP_WITHOUT_UTF8_MANIFEST() SKIP("this Windows build links no UTF-8 application manifest")
+#else
+#define DQ8_SKIP_WITHOUT_UTF8_MANIFEST() static_cast<void>(0)
+#endif
 
 namespace {
 
@@ -60,11 +68,13 @@ struct ScratchDir {
 
 #if defined(_WIN32)
 TEST_CASE("windows: the UTF-8 code page is active", "[windows]") {
+    DQ8_SKIP_WITHOUT_UTF8_MANIFEST();
     CHECK(GetACP() == CP_UTF8);
 }
 #endif
 
 TEST_CASE("windows: a non-ASCII argument reaches a child process unchanged", "[windows][process]") {
+    DQ8_SKIP_WITHOUT_UTF8_MANIFEST();
     dq8::core::ProcessOptions o;
     o.program = DQ8_TEST_CHILD;
     o.args = {"echo-args", non_ascii};
@@ -77,6 +87,7 @@ TEST_CASE("windows: a non-ASCII argument reaches a child process unchanged", "[w
 }
 
 TEST_CASE("windows: a file named in UTF-8 through std::string round-trips", "[windows][paths]") {
+    DQ8_SKIP_WITHOUT_UTF8_MANIFEST();
     const ScratchDir scratch;
     // A narrow string converts through the code page: the same file as the UTF-8 path only when it is UTF-8.
     const fs::path narrow = scratch.dir / fs::path(non_ascii + ".txt");

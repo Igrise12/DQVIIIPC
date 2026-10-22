@@ -18,3 +18,8 @@ else()
 endif()
 set_property(SOURCE test_toolchain_download.cpp APPEND PROPERTY COMPILE_DEFINITIONS
              "DQ8_TEST_CMAKE=\"${_dq8_test_cmake}\"")
+# llvm-mingw builds link the UTF-8 application manifest (cmake/toolchains/llvm-mingw.cmake); the UTF-8 tests of
+# test_windows_platform.cpp skip on Windows builds without it (MSVC).
+if(WIN32 AND DQ8_WINDOWS_MANIFEST)
+    set_property(SOURCE test_windows_platform.cpp APPEND PROPERTY COMPILE_DEFINITIONS DQ8_TEST_UTF8_MANIFEST=1)
+endif()
