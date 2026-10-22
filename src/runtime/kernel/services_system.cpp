@@ -73,6 +73,8 @@ constexpr std::uint32_t dmac_channel_base(std::uint32_t channel) {
     s.pc = c.ctx().pc;
     s.message = std::move(message);
     c.machine().stop(std::move(s));
+    std::abort(); // MachineServices::stop never returns; GCC does not trust [[noreturn]] through a virtual
+                  // call
 }
 
 // ---- OSD configuration words (packing from upstream's Helpers/Runtime.h).

@@ -481,18 +481,20 @@ void EeRuntime::stop_missing(std::uint32_t pc, std::uint32_t target, std::uint32
     // Generated code names its dispatches J, JAL, JR and JALR; host calls use the branch kind's name.
     const bool call = how == "JAL" || how == "JALR" || how.find("Call") != std::string_view::npos;
     if (how != "run-loop" && source != 0 && !call) {
-        const DispatchTable* from = table_for(dispatcher_, source);
-        const DispatchTable* to = table_for(dispatcher_, target);
-        const std::optional<std::uint32_t> own =
-            from != nullptr ? function_entry(*from, source) : std::nullopt;
-        const std::optional<std::uint32_t> lands = to != nullptr ? function_entry(*to, target) : std::nullopt;
-        if (own && lands && from == to && *own != *lands) {
-            s.message += "; the jump at " + hex32(source) + " in function " + hex32(*own) +
-                         " lands outside its function, in function " + hex32(*lands) +
-                         " (a jump-table target the function map gives to another function?)";
-        } else if (own && lands && from == to) {
-            s.message += "; the target lies inside the jumping function " + hex32(*own) +
-                         " but is no label the recompiler knew (a jump-table target the map lacks?)";
+        const DispatchTable* table = table_for(dispatcher_, source);
+        if (table != nullptr && table == table_for(dispatcher_, target)) {
+            // `none`: no function lies below the address (no entry is ever 0xFFFFFFFF).
+            constexpr std::uint32_t none = 0xFFFFFFFFu;
+            const std::uint32_t own = function_entry(*table, source).value_or(none);
+            const std::uint32_t lands = function_entry(*table, target).value_or(none);
+            if (own != none && lands != none && own != lands) {
+                s.message += "; the jump at " + hex32(source) + " in function " + hex32(own) +
+                             " lands outside its function, in function " + hex32(lands) +
+                             " (a jump-table target the function map gives to another function?)";
+            } else if (own != none && lands != none) {
+                s.message += "; the target lies inside the jumping function " + hex32(own) +
+                             " but is no label the recompiler knew (a jump-table target the map lacks?)";
+            }
         }
     }
     if (how == "run-loop") {
