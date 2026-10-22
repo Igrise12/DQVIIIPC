@@ -10,6 +10,7 @@ add_library(dq8_game STATIC
     movie_timelines.cpp
     mode_watcher.cpp
     title_watcher.cpp
+    display_watcher.cpp
     until.cpp
 )
 add_library(dq8::game ALIAS dq8_game)

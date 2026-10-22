@@ -557,6 +557,30 @@ RegionProfile load_region_profile(const std::filesystem::path& file) {
         p.title_screen.value = r.u32(*title, "value", "title");
     }
 
+    // M5 session C: the screen-size option.
+    if (const toml::value* display = r.optional(root, "display")) {
+        if (!display->is_table()) {
+            r.fail(*display, "[display] must be a table");
+        }
+        p.display.widescreen_width = r.u32(*display, "widescreen_width", "display");
+        if (p.display.widescreen_width != 1 && p.display.widescreen_width != 2 &&
+            p.display.widescreen_width != 4) {
+            r.fail(display->at("widescreen_width"), "[display].widescreen_width must be 1, 2 or 4");
+        }
+        p.display.widescreen_variable = r.u32(*display, "widescreen_variable", "display");
+        if (p.display.widescreen_variable % p.display.widescreen_width != 0 ||
+            p.display.widescreen_variable < main_begin ||
+            p.display.widescreen_variable + p.display.widescreen_width > main_end) {
+            r.fail(display->at("widescreen_variable"),
+                   "[display].widescreen_variable must be aligned to its width and inside the main program");
+        }
+        p.display.widescreen_value = r.u32(*display, "widescreen_value", "display");
+        if (p.display.widescreen_width < 4 &&
+            p.display.widescreen_value >> (8 * p.display.widescreen_width) != 0) {
+            r.fail(display->at("widescreen_value"), "[display].widescreen_value does not fit the width");
+        }
+    }
+
     if (const toml::value* movie = r.optional(root, "movie")) {
         if (!movie->is_table()) {
             r.fail(*movie, "[movie] must be a table");

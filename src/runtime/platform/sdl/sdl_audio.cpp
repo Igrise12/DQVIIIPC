@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <mutex>
 #include <span>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -76,6 +77,14 @@ class Sink final : public SdlAudioSink {
     std::uint64_t skipped() const override { return skipped_.load(std::memory_order_relaxed); }
     std::uint64_t reopens() const override { return reopens_.load(std::memory_order_relaxed); }
     float ratio() const override { return ratio_.load(std::memory_order_relaxed); }
+    std::string device_name() const override {
+        std::lock_guard lock(mutex_);
+        return device_name_;
+    }
+    bool device_found() const override {
+        std::lock_guard lock(mutex_);
+        return device_found_;
+    }
 
     void simulate_device_loss() override {
         std::lock_guard lock(mutex_);
@@ -134,11 +143,41 @@ class Sink final : public SdlAudioSink {
         SDL_PutAudioStreamData(stream, buffer_.data(), static_cast<int>(frames) * bytes_per_frame);
     }
 
+    // The playback device named in the configuration, or the default one when it names none or no device
+    // has that name (now: it is looked for again at every reopen).
+    SDL_AudioDeviceID device_locked() {
+        device_found_ = config_.device.empty();
+        if (config_.device.empty()) {
+            return SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+        }
+        SDL_AudioDeviceID found = 0;
+        int count = 0;
+        if (SDL_AudioDeviceID* ids = SDL_GetAudioPlaybackDevices(&count)) {
+            for (int i = 0; i < count && found == 0; ++i) {
+                const char* name = SDL_GetAudioDeviceName(ids[i]);
+                if (name != nullptr && config_.device == name) {
+                    found = ids[i];
+                }
+            }
+            SDL_free(ids);
+        }
+        if (found == 0) {
+            if (!device_warned_) {
+                std::fprintf(stderr, "audio: no playback device is called \"%s\"; using the default device\n",
+                             config_.device.c_str());
+                device_warned_ = true;
+            }
+            return SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK;
+        }
+        device_found_ = true;
+        return found;
+    }
+
     void open_locked() {
         const SDL_AudioSpec spec{SDL_AUDIO_S16, 2, static_cast<int>(spu2_sample_rate)};
         last_open_ns_ = SDL_GetTicksNS();
         last_callback_ns_.store(last_open_ns_, std::memory_order_relaxed);
-        stream_ = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, &Sink::callback, this);
+        stream_ = SDL_OpenAudioDeviceStream(device_locked(), &spec, &Sink::callback, this);
         if (stream_ == nullptr) {
             if (!warned_) {
                 std::fprintf(stderr, "audio: no audio device (%s); retrying\n", SDL_GetError());
@@ -146,6 +185,14 @@ class Sink final : public SdlAudioSink {
             }
             return;
         }
+        // The volume: a gain on the device side of the stream, after the hash and the taps.
+        if (config_.volume != 100 &&
+            !SDL_SetAudioStreamGain(
+                stream_, static_cast<float>(std::min<std::uint32_t>(config_.volume, 100)) / 100.0f)) {
+            std::fprintf(stderr, "audio: cannot set the volume: %s\n", SDL_GetError());
+        }
+        const char* name = SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(stream_));
+        device_name_ = name != nullptr ? name : "";
         ratio_.store(1.0f, std::memory_order_relaxed);
         SDL_ResumeAudioStreamDevice(stream_);
     }
@@ -180,11 +227,14 @@ class Sink final : public SdlAudioSink {
 
     SdlAudioConfig config_;
     std::size_t target_;
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
     std::condition_variable wake_;
     std::thread monitor_;
     bool running_ = false;
     bool warned_ = false;
+    bool device_warned_ = false;
+    bool device_found_ = false;
+    std::string device_name_;
     SDL_AudioStream* stream_ = nullptr;
     std::uint64_t last_open_ns_ = 0;
     AudioRing* ring_ = nullptr;
@@ -203,6 +253,24 @@ class Sink final : public SdlAudioSink {
 
 std::unique_ptr<SdlAudioSink> make_sdl_audio_sink(const SdlAudioConfig& config) {
     return std::make_unique<Sink>(config);
+}
+
+std::vector<std::string> sdl_audio_playback_devices() {
+    std::vector<std::string> names;
+    if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) {
+        return names;
+    }
+    int count = 0;
+    if (SDL_AudioDeviceID* ids = SDL_GetAudioPlaybackDevices(&count)) {
+        for (int i = 0; i < count; ++i) {
+            if (const char* name = SDL_GetAudioDeviceName(ids[i])) {
+                names.emplace_back(name);
+            }
+        }
+        SDL_free(ids);
+    }
+    SDL_QuitSubSystem(SDL_INIT_AUDIO);
+    return names;
 }
 
 } // namespace dq8::rt

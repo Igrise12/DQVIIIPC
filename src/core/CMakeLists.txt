@@ -31,6 +31,7 @@ add_library(dq8_core STATIC
     setup/diagnostics.cpp
     toolchain/toolchain.cpp
     registry/registry.cpp
+    input/input_profile.cpp
 )
 add_library(dq8::core ALIAS dq8_core)
 target_include_directories(dq8_core PUBLIC "${PROJECT_SOURCE_DIR}/include")

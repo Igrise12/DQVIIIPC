@@ -1,13 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 //
-// The SDL3 platform (runtime/platform/sdl) on SDL's dummy video driver: no display needed. Covers the fixed
-// M3 input mapping, the aspect fit, keyboard events reaching PadState, presentation through the texture path
-// (checked with a copy of the window), the window closing, and rumble reaching a (virtual) gamepad.
+// The SDL3 platform (runtime/platform/sdl) on SDL's dummy video driver: no display needed. Covers the
+// built-in input profile (M3's mapping), the aspect fit, keyboard events reaching PadState, presentation
+// through the texture path (checked with a copy of the window), the window closing, and rumble reaching a
+// (virtual) gamepad.
 
 #include "runtime/gs/gs_backend.h"
 #include "runtime/io/pad_state.h"
 #include "runtime/platform/platform.h"
+#include "runtime/platform/sdl/sdl_bindings.h"
 #include "runtime/platform/sdl/sdl_mapping.h"
 #include "runtime/platform/sdl/sdl_platform.h"
 
@@ -19,6 +21,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <string>
+#include <vector>
 
 namespace {
 
@@ -68,49 +72,94 @@ std::array<std::uint8_t, 4> pixel(const gs::FrameImage& image, std::uint32_t x, 
 
 } // namespace
 
-TEST_CASE("the fixed M3 keyboard and gamepad mapping", "[platform_sdl]") {
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_K) == pad_cross);
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_L) == pad_circle);
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_J) == pad_square);
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_I) == pad_triangle);
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_RETURN) == pad_start);
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_BACKSPACE) == pad_select);
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_UP) == pad_up);
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_DOWN) == pad_down);
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_Q) == pad_l1);
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_3) == pad_r2);
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_W) == 0); // a stick key, not a button
-    CHECK(sdl::button_for_scancode(SDL_SCANCODE_ESCAPE) == 0);
+TEST_CASE("the built-in input profile is the M3 keyboard and gamepad table", "[platform_sdl]") {
+    const dq8::core::input::Profile profile = dq8::core::input::default_profile();
+    std::vector<std::string> unknown;
+    const sdl::DeviceMap keys = sdl::keyboard_map(profile.keyboard, &unknown);
+    const sdl::DeviceMap pad = sdl::gamepad_map(profile.gamepad, &unknown);
+    CHECK(unknown.empty());
 
-    CHECK(sdl::button_for_gamepad_button(SDL_GAMEPAD_BUTTON_SOUTH) == pad_cross);
-    CHECK(sdl::button_for_gamepad_button(SDL_GAMEPAD_BUTTON_EAST) == pad_circle);
-    CHECK(sdl::button_for_gamepad_button(SDL_GAMEPAD_BUTTON_WEST) == pad_square);
-    CHECK(sdl::button_for_gamepad_button(SDL_GAMEPAD_BUTTON_NORTH) == pad_triangle);
-    CHECK(sdl::button_for_gamepad_button(SDL_GAMEPAD_BUTTON_START) == pad_start);
-    CHECK(sdl::button_for_gamepad_button(SDL_GAMEPAD_BUTTON_BACK) == pad_select);
-    CHECK(sdl::button_for_gamepad_button(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) == pad_l1);
-    CHECK(sdl::button_for_gamepad_button(SDL_GAMEPAD_BUTTON_DPAD_LEFT) == pad_left);
-    CHECK(sdl::button_for_gamepad_button(SDL_GAMEPAD_BUTTON_GUIDE) == 0);
+    // One key at a time, as M3's button_for_scancode() mapped it.
+    const auto key_buttons = [&keys](SDL_Scancode down) {
+        PadState state;
+        sdl::apply_map(state, keys, [down](const sdl::Source& s) {
+            return s.kind == sdl::Source::Kind::key && s.code == down ? 1.0f : 0.0f;
+        });
+        return state.buttons;
+    };
+    CHECK(key_buttons(SDL_SCANCODE_K) == pad_cross);
+    CHECK(key_buttons(SDL_SCANCODE_L) == pad_circle);
+    CHECK(key_buttons(SDL_SCANCODE_J) == pad_square);
+    CHECK(key_buttons(SDL_SCANCODE_I) == pad_triangle);
+    CHECK(key_buttons(SDL_SCANCODE_RETURN) == pad_start);
+    CHECK(key_buttons(SDL_SCANCODE_BACKSPACE) == pad_select);
+    CHECK(key_buttons(SDL_SCANCODE_UP) == pad_up);
+    CHECK(key_buttons(SDL_SCANCODE_DOWN) == pad_down);
+    CHECK(key_buttons(SDL_SCANCODE_Q) == pad_l1);
+    CHECK(key_buttons(SDL_SCANCODE_E) == pad_r1);
+    CHECK(key_buttons(SDL_SCANCODE_1) == pad_l2);
+    CHECK(key_buttons(SDL_SCANCODE_3) == pad_r2);
+    CHECK(key_buttons(SDL_SCANCODE_2) == pad_l3);
+    CHECK(key_buttons(SDL_SCANCODE_4) == pad_r3);
+    CHECK(key_buttons(SDL_SCANCODE_W) == 0); // a stick key, not a button
+    CHECK(key_buttons(SDL_SCANCODE_ESCAPE) == 0);
+
+    // One gamepad button at a time, as M3's button_for_gamepad_button() mapped it.
+    const auto pad_buttons = [&pad](SDL_GamepadButton down) {
+        sdl::GamepadReading reading;
+        reading.buttons[static_cast<std::size_t>(down)] = true;
+        PadState state;
+        sdl::apply_map(state, pad, [&reading](const sdl::Source& s) { return reading.amount(s); });
+        return state.buttons;
+    };
+    CHECK(pad_buttons(SDL_GAMEPAD_BUTTON_SOUTH) == pad_cross);
+    CHECK(pad_buttons(SDL_GAMEPAD_BUTTON_EAST) == pad_circle);
+    CHECK(pad_buttons(SDL_GAMEPAD_BUTTON_WEST) == pad_square);
+    CHECK(pad_buttons(SDL_GAMEPAD_BUTTON_NORTH) == pad_triangle);
+    CHECK(pad_buttons(SDL_GAMEPAD_BUTTON_START) == pad_start);
+    CHECK(pad_buttons(SDL_GAMEPAD_BUTTON_BACK) == pad_select);
+    CHECK(pad_buttons(SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) == pad_l1);
+    CHECK(pad_buttons(SDL_GAMEPAD_BUTTON_RIGHT_STICK) == pad_r3);
+    CHECK(pad_buttons(SDL_GAMEPAD_BUTTON_DPAD_LEFT) == pad_left);
+    CHECK(pad_buttons(SDL_GAMEPAD_BUTTON_GUIDE) == 0);
+
+    // The triggers press L2 and R2 past a quarter; the sticks map straight through.
+    sdl::GamepadReading reading;
+    reading.axes[SDL_GAMEPAD_AXIS_LEFT_TRIGGER] = sdl::axis_amount(32767 / 4 + 200);
+    reading.axes[SDL_GAMEPAD_AXIS_RIGHT_TRIGGER] = sdl::axis_amount(32767 / 4 - 200);
+    reading.axes[SDL_GAMEPAD_AXIS_LEFTX] = sdl::axis_amount(-32768);
+    reading.axes[SDL_GAMEPAD_AXIS_RIGHTY] = sdl::axis_amount(32767);
+    PadState state;
+    sdl::apply_map(state, pad, [&reading](const sdl::Source& s) { return reading.amount(s); });
+    CHECK(state.buttons == pad_l2);
+    CHECK(state.lx == 0x00);
+    CHECK(state.ly == 0x80);
+    CHECK(state.rx == 0x80);
+    CHECK(state.ry == 0xFF);
 
     CHECK(sdl::stick_byte(-32768) == 0x00);
     CHECK(sdl::stick_byte(0) == 0x80);
     CHECK(sdl::stick_byte(32767) == 0xFF);
-    CHECK_FALSE(sdl::trigger_pressed(0));
-    CHECK(sdl::trigger_pressed(32767));
+    CHECK(sdl::stick_byte_of(-1.0f) == 0x00);
+    CHECK(sdl::stick_byte_of(0.0f) == 0x80);
+    CHECK(sdl::stick_byte_of(1.0f) == 0xFF);
 
-    PadState state;
-    sdl::apply_keyboard(state, [](SDL_Scancode code) {
+    PadState keyboard;
+    sdl::apply_map(keyboard, keys, [](const sdl::Source& s) {
+        const auto code = static_cast<SDL_Scancode>(s.code);
         return code == SDL_SCANCODE_K || code == SDL_SCANCODE_LEFT || code == SDL_SCANCODE_W ||
-               code == SDL_SCANCODE_H || (code == SDL_SCANCODE_A) || (code == SDL_SCANCODE_D);
+                       code == SDL_SCANCODE_H || code == SDL_SCANCODE_A || code == SDL_SCANCODE_D
+                   ? 1.0f
+                   : 0.0f;
     });
-    CHECK(state.buttons == (pad_cross | pad_left));
-    CHECK(state.ly == 0x00); // W: up
-    CHECK(state.lx == 0x80); // A and D cancel out
-    CHECK(state.rx == 0xFF); // H: right
-    CHECK(state.ry == 0x80);
-    sdl::fill_pressure(state);
+    CHECK(keyboard.buttons == (pad_cross | pad_left));
+    CHECK(keyboard.ly == 0x00); // W: up
+    CHECK(keyboard.lx == 0x80); // A and D cancel out
+    CHECK(keyboard.rx == 0xFF); // H: right
+    CHECK(keyboard.ry == 0x80);
+    sdl::fill_pressure(keyboard);
     // Report order: right, left, up, down, triangle, circle, cross, square, L1, R1, L2, R2.
-    CHECK(state.pressure == std::array<std::uint8_t, 12>{0, 0xFF, 0, 0, 0, 0, 0xFF, 0, 0, 0, 0, 0});
+    CHECK(keyboard.pressure == std::array<std::uint8_t, 12>{0, 0xFF, 0, 0, 0, 0, 0xFF, 0, 0, 0, 0, 0});
 }
 
 TEST_CASE("aspect_fit centres the largest 4:3 or 16:9 rectangle", "[platform_sdl]") {
