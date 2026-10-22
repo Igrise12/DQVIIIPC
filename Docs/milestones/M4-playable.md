@@ -305,6 +305,68 @@ decode ms per picture, VU0 cycles, save latency.
 HLE; mcserv requests and replies; padman commands and the actuator layout. Offsets and ids only, re-derived; no
 ps2sdk text.)*
 
+### The sceMpeg HLE (session C, 2026-10-22)
+
+Static evidence from the boot ELF (headless Ghidra on a copy of `work/ghidra/base`, outputs in `work/ghidra/m4c-*`,
+git-ignored). Every address is in the main unit.
+
+**What the player registers.** The open routine `0x001A1C60` creates the decoder on the player's `mp` (`0x00410A60`)
+and registers five general callbacks with AddCallback (type, function, data 0): 0 error `0x001A0B30`, 1 nodata
+`0x001A0B00`, 2 stop-DMA `0x001A0AD0`, 3 restart-DMA `0x001A0AA0`, 5 timestamp `0x001A0A50`. AddStrCallback then
+registers stream type 0 (video), channel 0, `0x001A06C0`, and, when the movie has audio, type 2 (PCM), channel 0,
+`0x001A0470`; the data word of both is the demux ring's base. The HLE takes the nodata callback from the AddCallback
+hook (type 1), never from this table.
+
+**The open entry's arguments.** The player entry `0x001A2450` (context, request block) calls the open with $a0 the
+work area, $a1 the request block, **$a2 the movie name** (a NUL-terminated string at request + 0x80, the name before
+`0x0019F2F0` turns it into the `cdrom0:` path with the `.MVI` extension), $a3 a table of allocation handles, $t0 and
+$t1 the picture width and height in pixels (request + 0xD8 and + 0xDC), $t2 the audio flag byte and $t3 a second
+flag byte. The decoder thread asks GetPicture for (width / 16) × (height / 16) macroblocks.
+
+**The nodata callback yields.** `0x001A0B00` calls RotateThreadReadyQueue at the priority in the word at
+`0x003D200C` (`gp - 0x7764`), the priority all three player threads are created with (helper `0x001A1050`, decoder
+`0x001A0FE0`, reader `0x001A0B40`), then the staging-ring refill `0x0019FD80`, and returns 1. The refill waits on the
+ring's semaphore and, while the flag at ring + 0x44 is set (the open and `0x001A0150` set it, the stop-DMA callback
+clears it), stops DMA channel 4 (CHCR written without STR), reads its CHCR and MADR, turns the whole 2 KiB slots the
+video callback has written since into REF tags, and starts channel 4 again only when a slot is queued. Under the HLE
+the video callback is replaced, so no slot is ever queued: the callback yields, writes CHCR without STR, reads two
+registers, and never starts the channel. Calling it through `OverrideCall::call_guest` is therefore safe; the yield is
+what lets the reader thread demux more data.
+
+**Delete.** `0x00111380` is sceMpegDelete: 8 bytes that return 1. Its only caller is the stop routine `0x001A13D0`,
+with the player's `mp`, after the three threads are terminated, channel 4 is stopped and cleared, and the ring's
+semaphore is deleted.
+
+**DemuxPssRing and a refusing callback.** `0x001155C0` takes (mp, start, bytes, ring base, ring size). It parses
+pack headers and PES packets from `start`, wrapping at the ring's end, and calls the stream callback whose (id, mask)
+row matches, with a block on its stack: +0x00 type (6, a stream), +0x04 the PES header, +0x08 the payload, +0x0C the
+payload length, +0x10 PTS and +0x18 DTS (64-bit, negative when absent). The payload pointer is wrapped into the ring,
+but the payload itself may run past the ring's end and continue at its base. **A callback that returns 0 stops the
+demux at once**; the return value is the byte count up to the end of the last accepted packet (a packet no callback
+matches counts as accepted). The reader `0x001A0B40` subtracts that count from the ring's fill word, so the refused
+packet stays in the ring and is offered first on the next call. A refusing video callback is therefore a working
+backpressure signal; the reader yields between calls.
+
+**How `.MVI` data arrives.** Neither fileio nor CD streaming: the read routine `0x0019F130` reads through the game's
+file layer (request slot `0x0024E6E0`, data ring `0x0024FEB0`), whose I/O thread (`0x0024F5E0` → `0x0024E990`) picks a
+device kind from the path's prefix (`0x00162980`, a five-entry name table at `0x00395030`). The `cdrom0:` prefix is
+kind 4: sceCdSearchFile (`0x0012A970`, via `0x00161ED0`) and then sceCdRead by LSN (`0x0012B5B8`, via `0x001611A0` →
+`0x00161880`), the same libcdvd N-command path M3's native cdvdfsv serves for the game's other files. No sceCdSt* call
+is involved; nothing in cdvdfsv needs to change for movies. (Kind 0, the host device, would use fileio.)
+
+**The decoder loop and `mp`.** `0x0019E840` loops while IsEnd returns 0: it waits (RotateThreadReadyQueue) for a free
+decode slot, calls GetPicture (mp, the slot's uncached address, the macroblock count), prints a message when the
+result is negative, and builds the slot's GIF packets when `mp + 8` reads 0 after the call (the first picture). After
+the loop it calls Reset. The sceMpeg structure the HLE fills: +0x00 width, +0x04 height, +0x08 the index of the
+picture just delivered (0 for the first), +0x10 PTS and +0x18 DTS (64-bit), +0x40 the SDK's private work area (the
+library's own; the HLE does not read it). GetPicture's outer half `0x001113C8` stores the destination, the count and
+two zero words in that work area and calls the inner decode `0x00110B28`, which the HLE never reaches (it stops).
+
+**The stop routine.** `0x001A13D0` first calls `0x001A1170`, which appends a four-byte code to the IPU staging ring and
+bumps the ring's byte counters (harmless under the HLE: no DMA), sets the reader's stop flag and waits for the reader
+to return, then terminates and deletes the three threads. The decoder thread may be inside GetPicture, and so inside
+the nodata callback: the HLE keeps no host state across that call.
+
 ## Bring-up log
 
 | Unknown | Local evidence | Resolution (addresses, ids, offsets, chosen values) | Change |
@@ -313,6 +375,11 @@ ps2sdk text.)*
 | The first VU0 micro program | Stop at vblank 1786: VCALLMS at `0x0013CC7C` (`FUN_0013CC70`); the other site is `FUN_0013CCE0`; both start at 0 | VU0 micro mode from EE code was unsupported | Day-0 VU0 bridge (`vu0_bridge.*`, `VuUnits::run_from_ee`) |
 | VU0 time growing with every call | With the bridge: about 9,500 programs by vblank 2300 at a mean of 125,000 VU cycles, rising; one frame every 6–7 vsyncs | The interpreter's cycle count runs on across programs; the copy-in zeroed the visible field and the bridge charged the running total each call (16, 32, 48, … for a 16-cycle program) | The copy-in keeps the count and the bridge returns the difference (unit test "a second run … costs the same"); now about 25 cycles per program and 30 Hz again |
 | The field draws no 3D (open, B1) | After the skipped opening movie: a blue screen with Yangus's dialogue on top at 30 Hz. `machine.vu`: VU1 runs 0 programs. GS: about 1,250 sprite kicks per frame, no triangles, no PATH1. VIF1: about 158,000 quadwords per frame (texture uploads through DIRECT, 2D sprites), 254,000 call/ret sub-chains with no MSCAL in their tag words, no MSCAL/MSCNT VIFcodes at all. The disc loads the field at vblanks 1600–1900 | MSCAL (`0x1400xxxx`) and MSCNT (`0x1700xxxx`) VIFcodes are built only in `FUN_00141EA0` (reached once, vblank 1992, as a `ret` tag with MSCAL 0x64), `FUN_0028C870` and `FUN_00149DD0` (never reached). The game builds no 3D draw list. Leading hypothesis: VU0 results (visibility or culling) differ, so every object is culled; to check against PCSX2 VU0 register state | Open: bring-up step B1 |
+| Does the movie player's nodata callback yield? (session C, 2026-10-22) | Ghidra: `0x001A0B00`, its callee `0x0019FD80`, the thread set-up `0x001A1A00` | Yes: RotateThreadReadyQueue at the player threads' common priority, then a staging-ring refill that starts DMA channel 4 only when the video callback has queued a slot, which the HLE never does | GetPicture calls it through `call_guest` (Protocol notes) |
+| Delete's address (session C) | Ghidra: `0x00111380` and its one caller | `0x00111380` is sceMpegDelete (returns 1; called once from the stop routine `0x001A13D0` with the player's mp) | `delete` in `[movie.sce_mpeg]` confirmed |
+| DemuxPssRing with a refusing callback (session C) | Ghidra: `0x001155C0`, the reader `0x001A0B40` | Stops at the refused packet and returns the bytes up to the last accepted one; the reader keeps the rest in its ring, so the packet is offered again | The video callback replacement refuses at four pending pictures |
+| The open's name argument (session C) | Ghidra: `0x001A2450`, `0x001A1C60`, `0x0019F2F0` | $a2 of the open, a C string (the name before the path and extension rewrite); $t0/$t1 width and height | The `movie` events carry it |
+| How `.MVI` data arrives (session C) | Ghidra: `0x0019F130` → the file layer `0x0024E990` → `0x00162980`, `0x00161ED0`, `0x00161880` | The `cdrom0:` device: sceCdSearchFile, then sceCdRead by LSN through libcdvd's N-commands; not fileio, not CD streaming | None: M3's cdvdfsv already serves both |
 
 ## Results
 
