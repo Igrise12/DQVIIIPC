@@ -175,7 +175,7 @@ struct DeviceState {
     VuUnits* vu = nullptr;
     float main_vf3 = 0;
 };
-DeviceState d;
+DeviceState g_dev;
 
 // A real machine with the EE devices (so the VU device sees the kernel) running `p`.
 struct DeviceMachine {
@@ -184,10 +184,10 @@ struct DeviceMachine {
         for (auto& dev : devices) {
             m.machine->attach(*dev);
             if (auto* vu = dynamic_cast<VuUnits*>(dev.get())) {
-                d.vu = vu;
+                g_dev.vu = vu;
             }
         }
-        REQUIRE(d.vu != nullptr);
+        REQUIRE(g_dev.vu != nullptr);
     }
     dq8::test::CaptureSink sink;
     TestMachine m;
@@ -200,7 +200,7 @@ void load_vadd() {
     for (const std::uint32_t w : {lower_nop, vadd(3, 1, 2) | e_bit, lower_nop, upper_nop}) {
         dq8::test::put32(code, w);
     }
-    d.vu->write_micro(0, 0x40, code);
+    g_dev.vu->write_micro(0, 0x40, code);
 }
 
 } // namespace
@@ -211,11 +211,11 @@ TEST_CASE("vu0 registers: VIF0's MSCAL runs on the VU0 registers the running thr
         load_vadd();
         ctx->vu0_vf[1] = _mm_set_ps(4.0f, 3.0f, 2.0f, 1.0f);
         ctx->vu0_vf[2] = _mm_set_ps(40.0f, 30.0f, 20.0f, 10.0f);
-        d.vu->start(0, 0x40, 0, 0); // what VIF0 does for an MSCAL while this thread holds the CPU
-        d.main_vf3 = lane(ctx->vu0_vf[3], 1);
+        g_dev.vu->start(0, 0x40, 0, 0); // what VIF0 does for an MSCAL while this thread holds the CPU
+        g_dev.main_vf3 = lane(ctx->vu0_vf[3], 1);
         guest_request_stop(*g.machine);
     });
-    d = DeviceState{};
+    g_dev = DeviceState{};
     DeviceMachine dm(p);
     g = State{};
     g.machine = dm.m.machine.get();
@@ -223,7 +223,7 @@ TEST_CASE("vu0 registers: VIF0's MSCAL runs on the VU0 registers the running thr
     REQUIRE(r.stopped);
     INFO(r.stop->message);
     CHECK(r.stop->reason == StopReason::requested);
-    CHECK(d.main_vf3 == 22.0f);
+    CHECK(g_dev.main_vf3 == 22.0f);
 }
 
 TEST_CASE("vu0 registers: the first VU0 program of another thread is reported", "[vu0][kernel]") {
@@ -244,7 +244,7 @@ TEST_CASE("vu0 registers: the first VU0 program of another thread is reported", 
         guest_syscall(rdram, ctx, rt, sys_wakeup_thread, {1});
         guest_return(ctx);
     });
-    d = DeviceState{};
+    g_dev = DeviceState{};
     DeviceMachine dm(p);
     g = State{};
     g.machine = dm.m.machine.get();
@@ -260,5 +260,5 @@ TEST_CASE("vu0 registers: the first VU0 program of another thread is reported", 
         }
     }
     CHECK(seen == std::vector<std::string>{"1->2", "2->1"});
-    CHECK(d.vu->stats(0).programs == 5);
+    CHECK(g_dev.vu->stats(0).programs == 5);
 }
