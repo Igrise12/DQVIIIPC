@@ -650,6 +650,75 @@ allowlisted repository files keep their permission in release scans (matched by 
 under llvm-mingw passes `--enable-cross-compile --arch --target-os=mingw32` and installs the DLLs to `bin/`;
 the release scan accepts PE files.
 
+### Session B: the launcher (2026-10-22)
+
+**Shape.** `src/launcher/model/` is a static library (`dq8_launcher_model`: core and nlohmann/json, no SDL, no
+Dear ImGui) with every decision: the wizard's state machine, setup progress per stage, the game supervisor and status
+parser, the settings pages, the controller model, the library, the diagnostics export, About's Markdown. `ui/` draws
+it (one `page_*.cpp` per page) and `main.cpp` owns the window, DPI and the frame loop. Slow calls run on a worker
+thread and report through a mailbox the UI thread drains once a frame, so view-model state is only touched on the UI
+thread; tests run the same jobs inline. `tests/unit/m5_launcher_tests.cmake` builds `dq8_launcher_tests` (47 cases,
+786 assertions, a fake `dq8-game` for the supervisor's end-to-end cases) and adds `launcher.preview_<page>`: each of
+the six pages drawn for 24 frames on SDL's dummy driver over `--preview` stand-ins, which start the page's work by
+themselves under `--frames` so the running states are drawn too.
+
+**How the contracts are used.**
+- dq8-game is started as `--iso I --module-dir M --window [--config F] --status -`. `--window` is added to the
+  brief's list (without it dq8-game runs headless). `--config` is passed only once the user's settings file exists;
+  before the first change the schema defaults, M4's `--window` behaviour, apply anyway.
+- Status lines: the five events as specified; an unknown `ev` is ignored; stdout lines that are not status objects
+  and all of stderr go to the Play page's log. The exit summary takes the exit line first (`reason: error` with an
+  `ErrorCode` name gets `error_text()`, any other code keeps the game's message), else the exit status (1 a guest
+  stop, 2 refused to start, 3 graphics or window, a signal a crash).
+- `setup::Options`: `iso`, `jobs` (0 = `default_jobs()`), `force`, `cancel`, `on_event`; `executable_dir` is the
+  directory dq8-game was found in (`src/host` in a build tree, which holds neither `ps2_recomp` nor `dq8ctl`, so A's
+  setup has to find those itself); `work_dir`, `maps_dir`, `regions_dir` stay empty (A's defaults).
+- Settings: edits go to `Layer::user` (`Store::set`/`reset`) and are saved with `Store::save(Layer::user,
+  default_user_file(exe_dir))` once no field is being edited; `requires` compares `"key=value"` against the effective
+  value spelled `true`, `1280`, `16:9`; an unknown key or a malformed condition hides the row. An integer range of at
+  most 100 steps is a slider, a wider one a number field. A missing description string is left out; a missing label
+  shows its key. The settings test reads `config/settings/schema.toml` and `strings/en.toml` with toml11 (independent
+  of A's loader) and checks that every row and choice has its texts.
+- Error names: `error_code_from_name()` walks `ErrorCode` until `to_string()` answers "unknown", which relies on the
+  enum staying gapless (true: no explicit values).
+- Controllers: the launcher's `InputProfile` mirrors session C's in-progress `dq8/core/input_profile.h` field for field
+  (the 24 controls in C's order, SDL's names, per-device overrides and a fixed port), behind a `ProfileStore`. Until
+  C lands the store is in memory and the page says that changes last until the launcher closes. Escape cancels a
+  live capture, so Escape cannot be bound from the page. The game uses the profile `input.profile` names; the page's
+  "Use this profile in the game" sets it.
+- Diagnostics: day 0 has no C++ diagnose API, so the page runs `dq8ctl diagnose --out FILE` (A's CLI contract,
+  two-minute limit) behind a `DiagnosticsExporter`; the default name is `dq8-diagnostics-YYYYMMDD-HHMMSS.txt`. This
+  keeps the layering (the launcher starts dq8ctl as it starts dq8-game). Session A adds `dq8/core/diagnostics.h`;
+  at the rebase the exporter moves to the in-process API only if that turns out simpler.
+
+**Findings.**
+- SDL3's `SDL_GetBasePath()` ends with a separator, so `parent_path()` of it is the same directory; the launcher
+  strips it before looking for `../host/dq8-game` and `../cli/dq8ctl` in a build tree.
+- The UI scale is `SDL_GetWindowDisplayScale() / SDL_GetWindowPixelDensity()` (the content scale; the renderer covers
+  the density), re-applied on `SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED`; Dear ImGui 1.92 rasterises the font at the
+  scaled size through `style.FontScaleDpi`, so text stays sharp at any scale.
+- SDL's software renderer (the dummy driver in CI, and machines without a GPU renderer) drops Dear ImGui's textured
+  anti-aliased lines, so window borders vanish; `style.AntiAliasedLinesUseTex = false` draws them as geometry.
+- A frame costs about 90 ms on the software renderer in a Debug build, hence 24 frames per page in the smoke tests.
+- The font is Noto Sans Regular 2.015 (SIL OFL 1.1, as tech-stack §10 asks of fonts; no Reserved Font Name), a
+  subset made with fontTools' `pyftsubset` to Basic Latin, Latin-1, Latin Extended-A, general punctuation, arrows
+  and a few symbols, without hinting (Dear ImGui's rasteriser ignores it): 34,308 bytes, 493 glyphs, sha256
+  `a2e7a6a8…38cd5`; the full font (621,572 bytes) is over pre-commit's 512 KB file limit. The command and the full
+  hash are in `data/fonts/NotoSans-Regular.ttf.license`. `src/launcher/embed_file.cmake` compiles it into the
+  launcher. With the coordinator's approval it comes in its own commit with the shared files it needs:
+  `LICENSES/OFL-1.1.txt` (the SIL text from a local copy; no network was used), a row in a new "Bundled files (not
+  submodules)" table in `THIRD_PARTY_NOTICES.md`, and `data/fonts/*.ttf` in `.no-game-data-allow`. A language whose
+  string table needs more glyphs needs a wider subset.
+- The launcher remembers the last disc image, page and advanced toggle in `user_config_dir()/launcher.json`; nothing
+  is written under `--frames` or `--preview`.
+
+**Waits on A:** the settings store (the Settings page shows the stub's message until then), `toolchain::detect`/`check`,
+`setup::run`, `Registry::load` (Play lists nothing until then), `dq8-game --config/--status` (until then Play ends with
+"refused to start" and dq8-game's usage message in the log) and `dq8ctl diagnose`. **Waits on C:** the profile files
+(a `ProfileStore` over `load_profile`/`save_profile`/`profile_file`/`default_profile`). **For D:** About looks for
+`THIRD_PARTY_NOTICES.md` in `share/doc/dq8-native/` beside `bin/` (and in the source tree). **For E:** the GUI
+subsystem (`WIN32_EXECUTABLE`) is left to E; `--version` and `--help` print to stdout.
+
 ## Bring-up log
 
 | Date | Step | Result |
