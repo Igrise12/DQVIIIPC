@@ -19,6 +19,10 @@ set_target_properties(dq8_gs_parallel PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:dq8-game>")
 dq8_set_warnings(dq8_gs_parallel)
 dq8_enable_sanitizers(dq8_gs_parallel)
+if(WIN32)
+    # dq8-gs-parallel.dll, the name the backend looks for; MinGW would add a "lib" prefix (M5 session E).
+    set_target_properties(dq8_gs_parallel PROPERTIES PREFIX "")
+endif()
 if(NOT MSVC)
     # paraLLEl-GS's headers are C++14 and use std::is_pod, which C++20 deprecates (S5a open question).
     target_compile_options(dq8_gs_parallel PRIVATE -Wno-deprecated-declarations)

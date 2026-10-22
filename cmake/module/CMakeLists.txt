@@ -157,7 +157,10 @@ else()
     else()
         target_compile_options(${_target} PRIVATE -g0)
     endif()
-    if(NOT APPLE)
+    # Windows (llvm-mingw, ADR-0018; cmake/toolchains/llvm-mingw.cmake): a DLL resolves every symbol at link time
+    # and exports only what is marked dllexport (DQ8_MODULE_EXPORT), so the ELF linker options below do not apply.
+    # libc++ stays a DLL, shared with the host.
+    if(NOT APPLE AND NOT WIN32)
         # No undefined references to the host, nothing re-exported from static archives, and one exported
         # symbol: the version script hides everything else, including weak template instantiations that
         # -fvisibility=hidden leaves visible.

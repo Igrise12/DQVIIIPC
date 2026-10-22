@@ -8,6 +8,7 @@
 #include "dq8/core/hash.h"
 
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <map>
 #include <set>
@@ -203,6 +204,12 @@ inline fs::path executable_dir(const char* argv0) {
     const fs::path self = fs::read_symlink("/proc/self/exe", ec);
     if (!ec) {
         return self.parent_path();
+    }
+#elif defined(_WIN32)
+    // The CRT's full path of this executable: argv[0] may be a bare name typed at a prompt (M5 session E).
+    char* self = nullptr;
+    if (_get_pgmptr(&self) == 0 && self != nullptr && self[0] != '\0') {
+        return fs::path(self).parent_path();
     }
 #endif
     const fs::path p = fs::canonical(argv0, ec);

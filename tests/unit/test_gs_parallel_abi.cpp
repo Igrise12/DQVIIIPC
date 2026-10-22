@@ -32,6 +32,15 @@
 #if defined(__linux__)
 #include <elf.h>
 #endif
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+#endif
 
 namespace {
 
@@ -44,26 +53,30 @@ const std::set<std::string> abi_functions = {
     "dq8_gsp_gif_transfer", "dq8_gsp_vsync",  "dq8_gsp_read_scanout_rgba", "dq8_gsp_read_transfer",
     "dq8_gsp_flush"};
 
-// Sets an environment variable for the lifetime of the object (POSIX; the library is not built on MSVC).
+// Sets (nullptr: removes) an environment variable.
+void set_env(const char* name, const char* value) {
+#if defined(_WIN32)
+    // llvm-mingw (M5 session E): the CRT's _putenv_s; an empty value removes the variable.
+    ::_putenv_s(name, value != nullptr ? value : "");
+#else
+    if (value != nullptr) {
+        ::setenv(name, value, 1);
+    } else {
+        ::unsetenv(name);
+    }
+#endif
+}
+
+// Sets an environment variable for the lifetime of the object (the library is not built on MSVC).
 class ScopedEnv {
   public:
     ScopedEnv(const char* name, const char* value) : name_(name) {
         if (const char* old = std::getenv(name); old != nullptr) {
             old_ = old;
         }
-        if (value != nullptr) {
-            ::setenv(name, value, 1);
-        } else {
-            ::unsetenv(name);
-        }
+        set_env(name, value);
     }
-    ~ScopedEnv() {
-        if (old_) {
-            ::setenv(name_.c_str(), old_->c_str(), 1);
-        } else {
-            ::unsetenv(name_.c_str());
-        }
-    }
+    ~ScopedEnv() { set_env(name_.c_str(), old_ ? old_->c_str() : nullptr); }
     ScopedEnv(const ScopedEnv&) = delete;
     ScopedEnv& operator=(const ScopedEnv&) = delete;
 
@@ -71,6 +84,24 @@ class ScopedEnv {
     std::string name_;
     std::optional<std::string> old_;
 };
+
+#if defined(_WIN32)
+// Wine's vulkan-1.dll passes the host's devices through and reads the Vulkan loader's variables at process
+// start on the Unix side, so they cannot hide a device there (M5 session E). Windows's own loader honours
+// them.
+bool running_under_wine() {
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    return ntdll != nullptr && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+#define DQ8_SKIP_UNDER_WINE()                                                                                \
+    do {                                                                                                     \
+        if (running_under_wine()) {                                                                          \
+            SKIP("Wine passes the host's Vulkan devices through");                                           \
+        }                                                                                                    \
+    } while (false)
+#else
+#define DQ8_SKIP_UNDER_WINE() static_cast<void>(0)
+#endif
 
 // Points the Vulkan loader at a driver manifest that does not exist: instance creation then fails as on a
 // machine without a GPU driver, whether or not this one has a GPU.
@@ -193,6 +224,7 @@ TEST_CASE("dq8_gsp_* tolerate a null handle", "[gs_parallel]") {
 }
 
 TEST_CASE("dq8_gsp_create fails cleanly without a Vulkan device", "[gs_parallel]") {
+    DQ8_SKIP_UNDER_WINE();
     const NoVulkanDriver no_driver;
     const auto library = dq8::rt::DynamicLibrary::open(library_file);
     const auto create = get<dq8_gsp_create_fn>(library, "dq8_gsp_create");
@@ -215,6 +247,7 @@ TEST_CASE("make_parallel_gs_backend reports a missing library and a missing devi
     options.library = "/nonexistent/libdq8-gs-parallel.so";
     CHECK_THROWS_AS(dq8::gs::make_parallel_gs_backend(options), dq8::gs::ParallelGsError);
 
+    DQ8_SKIP_UNDER_WINE();
     const NoVulkanDriver no_driver;
     options.library = library_file;
     try {

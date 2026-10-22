@@ -17,6 +17,10 @@ set_target_properties(dq8_movie PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:dq8-game>")
 dq8_set_warnings(dq8_movie)
 dq8_enable_sanitizers(dq8_movie)
+if(WIN32)
+    # dq8-movie.dll, the name movie_library.cpp looks for; MinGW would add a "lib" prefix (M5 session E).
+    set_target_properties(dq8_movie PROPERTIES PREFIX "")
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME MATCHES "BSD")
     set(_dq8_mvd_map "${CMAKE_CURRENT_SOURCE_DIR}/dq8_mvd.map")

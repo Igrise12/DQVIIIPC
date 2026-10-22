@@ -225,8 +225,9 @@ TEST_CASE("run_recompiler swaps output in and keeps unchanged files' times", "[c
     CHECK(second.files == 3);
     CHECK(second.files_unchanged == 2); // a.cpp and register_functions.cpp
     CHECK(second.files_removed == 1);
-    CHECK(fs::last_write_time(out / "a.cpp") == old_time);
-    CHECK(fs::last_write_time(out / "b.cpp") != old_time);
+    // Unexpanded: libc++ on Windows counts file times in __int128, which Catch2 cannot print.
+    CHECK((fs::last_write_time(out / "a.cpp") == old_time));
+    CHECK((fs::last_write_time(out / "b.cpp") != old_time));
     CHECK_FALSE(fs::exists(out / "stale.cpp"));
     CHECK_FALSE(fs::exists(fs::path(out.string() + ".previous")));
 
@@ -242,7 +243,7 @@ TEST_CASE("run_recompiler swaps output in and keeps unchanged files' times", "[c
     std::ifstream b(out / "b.cpp");
     const std::string kept((std::istreambuf_iterator<char>(b)), std::istreambuf_iterator<char>());
     CHECK(kept == "// b two\n");
-    CHECK(fs::last_write_time(out / "a.cpp") == old_time);
+    CHECK((fs::last_write_time(out / "a.cpp") == old_time));
     b.close();
 
     o.ps2_recomp = dir / "no-such-recompiler";

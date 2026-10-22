@@ -60,6 +60,11 @@ target_include_directories(dq8-launcher PRIVATE "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(dq8-launcher PRIVATE dq8_launcher_model dq8::imgui SDL3::SDL3)
 dq8_set_warnings(dq8-launcher)
 dq8_enable_sanitizers(dq8-launcher)
+if(WIN32)
+    # A GUI-subsystem program on Windows: no console window (M5 session E). Output redirected to a pipe or a file
+    # still arrives (the tests read --version that way).
+    set_target_properties(dq8-launcher PROPERTIES WIN32_EXECUTABLE ON)
+endif()
 
 include(GNUInstallDirs)
 install(TARGETS dq8-launcher RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT launcher)

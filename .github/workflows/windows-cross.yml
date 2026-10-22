@@ -1,0 +1,85 @@
+name: Windows cross
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The Windows host cross-built on Linux with the pinned llvm-mingw (ADR-0018, packaging/windows/README.md): unit
+# tests under Wine, then the portable zip, scanned for game data. CI never has game data. The MSVC job in ci.yml
+# stays a compile check.
+
+env:
+  WINEPREFIX: ${{ github.workspace }}/.wineprefix
+  WINEDEBUG: -all
+  # No Mono or Gecko prompt in a fresh prefix; no Mesa warnings before a program's output.
+  WINEDLLOVERRIDES: mscoree,mshtml=
+  EGL_LOG_LEVEL: fatal
+  # Wine maps Windows file names to Unix ones through the locale: non-ASCII names need a UTF-8 one.
+  LANG: C.UTF-8
+  LC_ALL: C.UTF-8
+  SDL_VIDEO_DRIVER: dummy
+  SDL_AUDIO_DRIVER: dummy
+  TOOLS: ${{ github.workspace }}/.windows-tools
+
+jobs:
+  windows-cross:
+    name: Windows cross (llvm-mingw, Wine)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Submodules (pinned subset, scripts/init_submodules.sh)
+        shell: bash
+        run: bash scripts/init_submodules.sh
+      # wine-binfmt lets the CMake scripts of some tests start .exe files directly; xvfb gives Wine a display.
+      - name: Install Ninja, Wine and Xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build wine wine64 wine-binfmt xvfb
+          sudo update-binfmts --import wine || true
+          wine --version
+      - name: Pinned toolchain, CMake and Ninja (cache)
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.TOOLS }}/downloads
+          key: windows-tools-${{ hashFiles('cmake/toolchains/llvm-mingw-pin.cmake') }}
+      - name: Fetch and unpack the pinned tools (SHA-256 checked)
+        run: cmake -DDEST="$TOOLS" -P packaging/windows/fetch_tools.cmake
+      - name: Wine prefix
+        run: xvfb-run -a wineboot -i
+      - run: echo "::add-matcher::.github/problem-matchers/gcc.json"
+      - name: Configure
+        run: >-
+          cmake -S . -B build/windows -G Ninja
+          -DCMAKE_TOOLCHAIN_FILE="$PWD/cmake/toolchains/llvm-mingw.cmake"
+          -DLLVM_MINGW_ROOT="$TOOLS/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64"
+          -DCMAKE_BUILD_TYPE=Release -DDQ8_WERROR=ON -DDQ8_FFMPEG=off -DDQ8_BUILD_RECOMP=ON
+          -DDQ8_TEST_WINDOWS_CMAKE="$TOOLS/cmake-4.4.4-windows-x86_64/bin/cmake.exe"
+      - name: Build (Catch2 lists the tests under Wine)
+        run: xvfb-run -a cmake --build build/windows --parallel
+      - name: Unit tests under Wine
+        run: |
+          export WINEPATH="Z:$TOOLS/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64/x86_64-w64-mingw32/bin"
+          xvfb-run -a ctest --test-dir build/windows -L unit --output-on-failure --parallel 4 --timeout 600
+      - name: The Windows zip
+        run: cmake -DBUILD=build/windows -DTOOLS="$TOOLS" -DOUT=build/windows/package -P packaging/windows/make_zip.cmake
+      - name: No game-derived content in the zip
+        run: python3 -I scripts/check_no_game_data.py --archive build/windows/package/DQ8-Native-*-windows-x86_64.zip
+      - name: Smoke-run the zip's programs
+        run: |
+          export WINEPATH=""
+          cd build/windows/package/DQ8-Native-*-windows-x86_64
+          for tool in dq8ctl.exe dq8-game.exe dq8-launcher.exe; do xvfb-run -a wine "./$tool" --version; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dq8-native-windows-x86_64
+          path: |
+            build/windows/package/*.zip
+            build/windows/package/*.zip.sha256
+          if-no-files-found: error
+      - name: Keep the test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cross-logs
+          path: build/windows/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore

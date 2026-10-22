@@ -34,3 +34,9 @@ descriptor. On ELF platforms the link uses `-z defs` (no undefined references to
 version script that leaves exactly one exported symbol. The module shares the host's C++ runtime, because exceptions
 cross the boundary in M2 (the milestone doc's documented deviation): never `-static-libstdc++`; on MSVC
 `/EHs /GR- /MD` (that path is written but not yet built anywhere).
+
+On Windows the modules are built with llvm-mingw, the toolchain the host is built with (ADR-0018): pass
+`-DCMAKE_TOOLCHAIN_FILE=<this dir>/../toolchains/llvm-mingw.cmake -DLLVM_MINGW_ROOT=<unpacked llvm-mingw>` (and on
+Windows itself `-DCMAKE_MAKE_PROGRAM=<ninja.exe>`). The DLL exports only the `dllexport`ed descriptor, resolves every
+symbol at link time and imports `libc++.dll` like the host; the ELF linker options above are skipped.
+`packaging/windows/cross-build-modules.sh` does this from Linux for Wine smoke runs.
