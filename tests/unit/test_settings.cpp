@@ -93,7 +93,7 @@ ErrorCode code_of(const std::function<void()>& f) {
     } catch (const Error& e) {
         return e.code();
     }
-    FAIL("no error thrown");
+    FAIL_CHECK("no error thrown"); // not FAIL: MSVC flags the return after it as unreachable
     return ErrorCode::io_open;
 }
 

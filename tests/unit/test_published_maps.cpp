@@ -70,7 +70,7 @@ ErrorCode code_of(const std::string& text) {
     } catch (const Error& e) {
         return e.code();
     }
-    FAIL("the map was accepted");
+    FAIL_CHECK("the map was accepted"); // not FAIL: MSVC flags the return after it as unreachable
     return ErrorCode::io_open;
 }
 
