@@ -30,7 +30,7 @@ class FakeBackend final : public WizardBackend {
     std::vector<dq8::core::toolchain::Problem> problems;
     bool toolchain_throws = false;
     std::vector<Event> events;
-    dq8::core::setup::Result result{true, std::nullopt, {}, "SLUS_21207", "modules"};
+    dq8::core::setup::Result result{true, std::nullopt, {}, "SLUS_21207", "modules", {}, {}};
     bool setup_throws = false;
     bool wait_for_cancel = false;
     int verifies = 0;
@@ -77,7 +77,7 @@ class FakeBackend final : public WizardBackend {
             }
             options.on_event(
                 ev(Stage::build, State::error, 3, 10, {}, "cancelled", ErrorCode::setup_cancelled));
-            return {false, ErrorCode::setup_cancelled, "cancelled", {}, {}};
+            return {false, ErrorCode::setup_cancelled, "cancelled", {}, {}, {}, {}};
         }
         return result;
     }
@@ -257,7 +257,7 @@ TEST_CASE("launcher: toolchain problems, check again, continue anyway", "[launch
 
 TEST_CASE("launcher: setup failures and the stubbed setup", "[launcher][wizard]") {
     FakeBackend backend;
-    backend.result = {false, ErrorCode::module_build_failed, "ninja: build stopped", {}, {}};
+    backend.result = {false, ErrorCode::module_build_failed, "ninja: build stopped", {}, {}, {}, {}};
     backend.events = {
         ev(Stage::build, State::start, 0, 10),
         ev(Stage::build, State::error, 2, 10, {}, "build stopped", ErrorCode::module_build_failed)};
@@ -274,7 +274,7 @@ TEST_CASE("launcher: setup failures and the stubbed setup", "[launcher][wizard]"
     CHECK(w.progress().stage(Stage::build).state == StageState::failed);
 
     // Resume retries; this time it works, and the stale failure is gone.
-    backend.result = {true, std::nullopt, {}, "SLUS_21207", "modules"};
+    backend.result = {true, std::nullopt, {}, "SLUS_21207", "modules", {}, {}};
     backend.events.clear();
     w.set_force(true);
     w.resume();

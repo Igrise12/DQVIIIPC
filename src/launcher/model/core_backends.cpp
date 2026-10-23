@@ -2,12 +2,15 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #include "model/core_backends.h"
 
+#include "dq8/core/diagnostics.h"
 #include "dq8/core/error.h"
 #include "dq8/core/intake.h"
 #include "dq8/core/region_profile.h"
 #include "dq8/core/registry.h"
+#include "model/environment.h"
 #include "model/library.h"
 
+#include <atomic>
 #include <map>
 #include <system_error>
 #include <utility>
@@ -57,6 +60,28 @@ class CoreWizardBackend final : public WizardBackend {
 
     core::setup::Result run_setup(const core::setup::Options& options) override {
         return core::setup::run(options);
+    }
+
+  private:
+    fs::path executable_dir_;
+};
+
+class CoreDiagnostics final : public DiagnosticsExporter {
+  public:
+    explicit CoreDiagnostics(fs::path executable_dir) : executable_dir_(std::move(executable_dir)) {}
+
+    ExportOutcome write(const fs::path& file, const std::atomic<bool>& /*cancel*/) override {
+        ExportOutcome out;
+        core::diagnostics::Options options;
+        options.executable_dir = executable_dir_;
+        try {
+            core::diagnostics::write_report(options, file);
+            out.ok = true;
+            out.output = "Wrote " + to_utf8(file);
+        } catch (...) {
+            out.problem = explain_current_exception();
+        }
+        return out;
     }
 
   private:
@@ -115,6 +140,10 @@ std::optional<fs::path> find_regions_dir(const fs::path& executable_dir) {
 
 std::unique_ptr<WizardBackend> core_wizard_backend(fs::path executable_dir) {
     return std::make_unique<CoreWizardBackend>(std::move(executable_dir));
+}
+
+std::unique_ptr<DiagnosticsExporter> core_diagnostics(fs::path executable_dir) {
+    return std::make_unique<CoreDiagnostics>(std::move(executable_dir));
 }
 
 std::unique_ptr<LibraryBackend> registry_library(const fs::path& executable_dir) {

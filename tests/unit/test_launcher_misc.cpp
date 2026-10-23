@@ -11,10 +11,12 @@
 #include "model/log_buffer.h"
 #include "model/markdown.h"
 
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <stdexcept>
 #include <thread>
 
@@ -259,4 +261,22 @@ TEST_CASE("launcher: the diagnostics file name", "[launcher][diagnostics]") {
     const std::string name = default_diagnostics_name(std::time_t{0});
     CHECK(name.rfind("dq8-diagnostics-19", 0) == 0); // 1970, or 1969 west of Greenwich
     CHECK(name.size() == std::string("dq8-diagnostics-19700101-000000.txt").size());
+}
+
+TEST_CASE("launcher: the diagnostics export runs core's report in process", "[launcher][diagnostics]") {
+    const std::filesystem::path file =
+        std::filesystem::temp_directory_path() / "dq8-launcher-diagnostics-test.txt";
+    std::error_code ec;
+    std::filesystem::remove(file, ec);
+    const std::unique_ptr<DiagnosticsExporter> exporter =
+        core_diagnostics(std::filesystem::path(DQ8_SOURCE_DIR) / "build");
+    std::atomic<bool> cancel{false};
+    const ExportOutcome out = exporter->write(file, cancel);
+    CHECK(out.ok);
+    CHECK_FALSE(out.problem);
+    std::ifstream in(file);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK(text.find("[system]") != std::string::npos);
+    CHECK(text.find("[settings]") != std::string::npos);
+    std::filesystem::remove(file, ec);
 }

@@ -27,7 +27,7 @@ struct Problem {
 Problem explain(core::ErrorCode code, std::string_view detail = {});
 // A code by name: known names get error_text(); others keep `fallback_message` as the message.
 Problem explain_name(std::string_view code_name, std::string_view fallback_message);
-// A caught exception: core::Error gets its code; anything else (the day-0 stubs throw std::logic_error) is
+// A caught exception: core::Error gets its code; anything else (a std::logic_error, for instance) is
 // shown with its what() and no code.
 Problem explain_exception(const std::exception& e);
 Problem explain_current_exception(); // inside a catch block

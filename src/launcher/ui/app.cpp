@@ -92,7 +92,7 @@ App::App(SDL_Window* window, SDL_Renderer* renderer, Environment env, AppOptions
         wizard_backend_ = core_wizard_backend(exe);
         library_ = std::make_unique<LibraryModel>(registry_library(exe), core::version());
         game_ = std::make_unique<GameSupervisor>(thread_executors());
-        diagnostics_ = std::make_unique<DiagnosticsModel>(ctl_diagnostics(env_.ctl), thread_executors());
+        diagnostics_ = std::make_unique<DiagnosticsModel>(core_diagnostics(exe), thread_executors());
         try {
             settings_.emplace(open_store_settings(exe));
         } catch (...) {
@@ -102,8 +102,13 @@ App::App(SDL_Window* window, SDL_Renderer* renderer, Environment env, AppOptions
     // setup::Options::executable_dir: where dq8-game (the smoke test) and the tools beside it are.
     wizard_ = std::make_unique<Wizard>(*wizard_backend_, thread_executors(),
                                        env_.game.empty() ? exe : env_.game.parent_path());
-    // Session C's profile files replace this store when they land (model/controllers.h).
-    profiles_ = std::make_unique<MemoryProfileStore>();
+    wizard_->set_game_executable(env_.game);
+    // Session C's profile files (the ones dq8-game reads); in memory under --preview or without a home.
+    if (!options_.preview && !env_.config_dir.empty()) {
+        profiles_ = std::make_unique<FileProfileStore>(env_.config_dir);
+    } else {
+        profiles_ = std::make_unique<MemoryProfileStore>();
+    }
     std::string profile = "default";
     if (settings_) {
         try {

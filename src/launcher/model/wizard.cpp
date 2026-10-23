@@ -108,6 +108,7 @@ void Wizard::run_setup() {
     core::setup::Options options;
     options.iso = image_;
     options.executable_dir = executable_dir_;
+    options.game_executable = game_executable_; // empty: found beside executable_dir
     options.jobs = jobs_;
     options.force = force_;
     options.cancel = cancel_.get();

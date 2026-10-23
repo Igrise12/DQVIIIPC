@@ -2,16 +2,19 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #pragma once
 
+#include "dq8/core/input_profile.h"
 #include "model/errors.h"
 
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 // The Controllers page (architecture.md §11.2): input profiles, the bindings of each device, live capture of
@@ -71,11 +74,32 @@ class ProfileStore {
     virtual bool persistent() const = 0;
 };
 
-// M3's fixed bindings (src/runtime/platform/sdl/sdl_mapping.cpp) as a profile, until session C's
-// default_profile() replaces this copy.
+// The built-in bindings: session C's core::input::default_profile() (M3's fixed table), which dq8-game uses
+// when a profile has no file.
 InputProfile builtin_profile();
 
-// Profiles in memory: the tests, the preview, and the page until C's profile files land.
+// The page's profile and core's (dq8/core/input_profile.h): the same fields, control for control.
+InputProfile from_core(const core::input::Profile& profile);
+core::input::Profile to_core(const InputProfile& profile);
+
+// Session C's profile files, <config_dir>/input/<name>.toml, through core::input (load_profile,
+// save_profile): the same files dq8-game reads for `input.profile`. A file that does not parse loads as the
+// built-in bindings, as in dq8-game.
+class FileProfileStore final : public ProfileStore {
+  public:
+    explicit FileProfileStore(std::filesystem::path config_dir) : config_dir_(std::move(config_dir)) {}
+    std::vector<std::string> list() const override;
+    InputProfile load(std::string_view name) const override;
+    void save(std::string_view name, const InputProfile& profile) override;
+    void remove(std::string_view name) override;
+    InputProfile defaults() const override { return builtin_profile(); }
+    bool persistent() const override { return true; }
+
+  private:
+    std::filesystem::path config_dir_;
+};
+
+// Profiles in memory: the tests, the preview, and a launcher without a user configuration directory.
 class MemoryProfileStore final : public ProfileStore {
   public:
     std::vector<std::string> list() const override;

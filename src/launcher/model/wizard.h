@@ -75,6 +75,9 @@ class Wizard {
     Wizard(const Wizard&) = delete;
     Wizard& operator=(const Wizard&) = delete;
 
+    // setup::Options::game_executable: the dq8-game the launcher starts, so the smoke test runs the same one.
+    void set_game_executable(std::filesystem::path game) { game_executable_ = std::move(game); }
+
     // choose_image, verify_failed, toolchain, ready, cancelled, failed or finished: verify `iso` (then check
     // the toolchain). Ignored while work is running.
     void choose_image(const std::filesystem::path& iso);
@@ -138,6 +141,7 @@ class Wizard {
     ExecutorFactory executors_;
     std::unique_ptr<Executor> executor_;
     std::filesystem::path executable_dir_;
+    std::filesystem::path game_executable_;
     std::function<Clock::time_point()> clock_;
     std::shared_ptr<Mailbox<Message>> mailbox_ = std::make_shared<Mailbox<Message>>();
     std::shared_ptr<std::atomic<bool>> cancel_ = std::make_shared<std::atomic<bool>>(false);

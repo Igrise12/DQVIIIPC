@@ -18,7 +18,7 @@ Layout:
     `setup::Event`), `game_session` (Play: `GameSession` from the status lines, `GameSupervisor` running dq8-game),
     `status` (the status-line parser and a line splitter), `settings_model` (pages and rows from the schema over a
     `SettingsBackend`), `controllers` (profiles, devices, live capture and the test view over a `ProfileStore`),
-    `library` (the registry's builds), `diagnostics` (the support bundle through `dq8ctl diagnose`), `markdown`
+    `library` (the registry's builds), `diagnostics` (the support bundle: `dq8/core/diagnostics.h`), `markdown`
     (THIRD_PARTY_NOTICES.md for About), `launcher_state` (launcher.json: the last image, page, advanced toggle),
     `environment` (finding dq8-game, dq8ctl and shipped files), `errors` (codes by name, `error_text()`).
   - `core_backends`: the backends over libdq8core. `preview`: stand-ins for `--preview`.
@@ -33,6 +33,8 @@ Options: `--page NAME`, `--game FILE`, `--dq8ctl FILE`, `--preview` (every page 
 toolchain, no game, nothing written), `--frames N` (smoke tests on `SDL_VIDEO_DRIVER=dummy`; with `--preview` the
 page's work starts by itself), `--screenshot FILE` (with `--frames`, the last frame as BMP), `--version`.
 
-State (M5 session B): every page works; the wizard, Play and Settings run over libdq8core's APIs, which are the
-day-0 stubs until session A lands (the pages then show the stub's "not implemented" as the step's failure).
-Controller profiles live in memory until session C's profile files land (`MemoryProfileStore`).
+State (M5 session B, merged onto A, C and D on 2026-10-23): every page runs over libdq8core: the wizard over
+`setup::run()` and the toolchain check, Play over the registry and dq8-game's status channel, Settings over the
+settings store, Diagnostics over `core::diagnostics::write_report()`, and Controllers over session C's profile files
+(`FileProfileStore`, `user_config_dir()/input/`; in memory under `--preview`). The Windows toolchain download's
+consent dialog arrives with session E.

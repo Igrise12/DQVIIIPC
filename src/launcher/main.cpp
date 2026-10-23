@@ -45,7 +45,7 @@ void usage(std::FILE* out) {
         "usage: dq8-launcher [options]\n"
         "  --page NAME        open on a page: play, setup, settings, controllers, diagnostics, about\n"
         "  --game FILE        the dq8-game to start (default: next to the launcher)\n"
-        "  --dq8ctl FILE      the dq8ctl for the diagnostics export (default: next to the launcher)\n"
+        "  --dq8ctl FILE      the dq8ctl the Diagnostics page lists (default: next to the launcher)\n"
         "  --preview          every page over stand-ins: no disc, no toolchain, no game; nothing is written\n"
         "  --frames N         close after N frames (smoke tests; SDL_VIDEO_DRIVER=dummy needs no display)\n"
         "  --screenshot FILE  with --frames: save the last frame as BMP\n"

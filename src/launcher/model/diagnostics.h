@@ -15,9 +15,10 @@
 #include <string>
 #include <variant>
 
-// The Diagnostics page's support bundle. The export itself is core's (dq8ctl diagnose: system information,
-// toolchain, settings, logs, build manifest; never game data); the launcher only asks for it and shows the
-// result.
+// The Diagnostics page's support bundle. The export itself is core's (dq8/core/diagnostics.h, the report
+// dq8ctl diagnose writes: system information, toolchain, settings, logs, build manifest; never game data);
+// the launcher only asks for it and shows the result. The app uses core_diagnostics()
+// (model/core_backends.h).
 namespace dq8::launcher {
 
 struct ExportOutcome {
@@ -32,7 +33,7 @@ class DiagnosticsExporter {
     virtual ExportOutcome write(const std::filesystem::path& file, const std::atomic<bool>& cancel) = 0;
 };
 
-// `dq8ctl diagnose --out FILE`, the CLI form of session A's diagnose API (Docs/milestones/M5-launcher.md, A).
+// `dq8ctl diagnose --out FILE`: the same report through the CLI (tests, and a launcher without core's API).
 std::unique_ptr<DiagnosticsExporter> ctl_diagnostics(std::filesystem::path ctl, ProcessRunner runner = {});
 
 // "dq8-diagnostics-20261022-215800.txt" for a local time.

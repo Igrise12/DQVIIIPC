@@ -4,8 +4,11 @@
 // that stands in until session C's profile files land.
 #include "model/controllers.h"
 
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <set>
 #include <string>
 
@@ -56,11 +59,13 @@ TEST_CASE("launcher: the 24 controls in session C's order", "[launcher][controll
     CHECK_FALSE(control_from_key("x"));
 }
 
-TEST_CASE("launcher: the built-in profile is M3's table", "[launcher][controllers]") {
+TEST_CASE("launcher: the built-in profile is session C's default", "[launcher][controllers]") {
+    // M3's table plus C's keyboard stick keys (Docs/formats/input-profile.md).
     const InputProfile p = builtin_profile();
     CHECK(p.keyboard.sources[control("cross")] == SourceList{"K"});
     CHECK(p.keyboard.sources[control("start")] == SourceList{"Return"});
-    CHECK(p.keyboard.sources[control("left_stick_up")].empty());
+    CHECK(p.keyboard.sources[control("left_stick_up")] == SourceList{"W"});
+    CHECK(p.keyboard.sources[control("right_stick_left")] == SourceList{"F"});
     CHECK(p.gamepad.sources[control("cross")] == SourceList{"a"});
     CHECK(p.gamepad.sources[control("l2")] == SourceList{"lefttrigger"});
     CHECK(p.gamepad.sources[control("left_stick_left")] == SourceList{"leftx-"});
@@ -267,4 +272,61 @@ TEST_CASE("launcher: input profiles", "[launcher][controllers]") {
     CHECK_FALSE(valid_profile_name(""));
     CHECK_FALSE(valid_profile_name(std::string(65, 'a')));
     CHECK_FALSE(valid_profile_name("../x"));
+}
+
+namespace {
+
+// A fresh directory under the system's temporary directory, removed afterwards.
+struct ScratchDir {
+    std::filesystem::path path;
+    explicit ScratchDir(const char* tag) {
+        static std::atomic<int> counter{0};
+        path = std::filesystem::temp_directory_path() /
+               ("dq8-launcher-" + std::string(tag) + "-" + std::to_string(counter++) + "-" +
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(path);
+    }
+    ~ScratchDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path, ec);
+    }
+    ScratchDir(const ScratchDir&) = delete;
+    ScratchDir& operator=(const ScratchDir&) = delete;
+};
+
+} // namespace
+
+TEST_CASE("launcher: the profiles are session C's, in the files dq8-game reads", "[launcher][controllers]") {
+    // The page's built-in bindings are core's default profile, and the two types convert field for field.
+    CHECK(to_core(builtin_profile()) == dq8::core::input::default_profile());
+    InputProfile p = builtin_profile();
+    p.keyboard.sources[*control_from_key("cross")] = {"Space", "K"};
+    p.gamepad.sources[*control_from_key("start")] = {};
+    DeviceEntry pad;
+    pad.guid = std::string(32, 'a');
+    pad.name = "Test pad";
+    pad.port = 1;
+    pad.overrides[*control_from_key("circle")] = SourceList{"x"};
+    p.devices.push_back(pad);
+    CHECK(from_core(to_core(p)) == p);
+
+    const ScratchDir config("profiles");
+    FileProfileStore store(config.path);
+    CHECK(store.persistent());
+    CHECK(store.list() == std::vector<std::string>{"default"});
+    CHECK(store.load("arcade") == builtin_profile()); // no file: the built-in bindings
+    store.save("arcade", p);
+    const std::filesystem::path file = dq8::core::input::profile_file(config.path, "arcade");
+    REQUIRE(std::filesystem::is_regular_file(file));
+    std::vector<std::string> warnings;
+    CHECK(dq8::core::input::load_profile(file, warnings) == to_core(p)); // what dq8-game reads
+    CHECK(warnings.empty());
+    CHECK(store.load("arcade") == p);
+    CHECK(store.list() == std::vector<std::string>{"arcade", "default"});
+    // A file that is not TOML loads as the built-in bindings, as in dq8-game.
+    std::ofstream(dq8::core::input::profile_file(config.path, "broken")) << "[keyboard\n";
+    CHECK(store.load("broken") == builtin_profile());
+    store.remove("arcade");
+    CHECK_FALSE(std::filesystem::exists(file));
+    CHECK(store.list() == std::vector<std::string>{"broken", "default"});
 }

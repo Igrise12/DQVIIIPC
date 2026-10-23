@@ -3,9 +3,11 @@
 #include "model/controllers.h"
 
 #include "dq8/core/error.h"
+#include "model/environment.h"
 
 #include <algorithm>
 #include <cmath>
+#include <system_error>
 #include <utility>
 
 namespace dq8::launcher {
@@ -103,54 +105,68 @@ bool valid_profile_name(std::string_view name) noexcept {
 }
 
 InputProfile builtin_profile() {
+    return from_core(core::input::default_profile());
+}
+
+InputProfile from_core(const core::input::Profile& profile) {
     InputProfile p;
-    const auto set = [](BindingTable& t, std::string_view key, std::initializer_list<const char*> sources) {
-        SourceList& list = t.sources[*control_from_key(key)];
-        list.assign(sources.begin(), sources.end());
-    };
-    // Keyboard: arrows for the d-pad, IJKL for the face buttons, as M3's table.
-    set(p.keyboard, "up", {"Up"});
-    set(p.keyboard, "down", {"Down"});
-    set(p.keyboard, "left", {"Left"});
-    set(p.keyboard, "right", {"Right"});
-    set(p.keyboard, "triangle", {"I"});
-    set(p.keyboard, "circle", {"L"});
-    set(p.keyboard, "cross", {"K"});
-    set(p.keyboard, "square", {"J"});
-    set(p.keyboard, "l1", {"Q"});
-    set(p.keyboard, "r1", {"E"});
-    set(p.keyboard, "l2", {"1"});
-    set(p.keyboard, "r2", {"3"});
-    set(p.keyboard, "l3", {"2"});
-    set(p.keyboard, "r3", {"4"});
-    set(p.keyboard, "start", {"Return"});
-    set(p.keyboard, "select", {"Backspace"});
-    // Gamepads by position: the south face button is Cross.
-    set(p.gamepad, "up", {"dpup"});
-    set(p.gamepad, "down", {"dpdown"});
-    set(p.gamepad, "left", {"dpleft"});
-    set(p.gamepad, "right", {"dpright"});
-    set(p.gamepad, "triangle", {"y"});
-    set(p.gamepad, "circle", {"b"});
-    set(p.gamepad, "cross", {"a"});
-    set(p.gamepad, "square", {"x"});
-    set(p.gamepad, "l1", {"leftshoulder"});
-    set(p.gamepad, "r1", {"rightshoulder"});
-    set(p.gamepad, "l2", {"lefttrigger"});
-    set(p.gamepad, "r2", {"righttrigger"});
-    set(p.gamepad, "l3", {"leftstick"});
-    set(p.gamepad, "r3", {"rightstick"});
-    set(p.gamepad, "start", {"start"});
-    set(p.gamepad, "select", {"back"});
-    set(p.gamepad, "left_stick_up", {"lefty-"});
-    set(p.gamepad, "left_stick_down", {"lefty+"});
-    set(p.gamepad, "left_stick_left", {"leftx-"});
-    set(p.gamepad, "left_stick_right", {"leftx+"});
-    set(p.gamepad, "right_stick_up", {"righty-"});
-    set(p.gamepad, "right_stick_down", {"righty+"});
-    set(p.gamepad, "right_stick_left", {"rightx-"});
-    set(p.gamepad, "right_stick_right", {"rightx+"});
+    p.keyboard.sources = profile.keyboard.sources;
+    p.gamepad.sources = profile.gamepad.sources;
+    for (const core::input::DeviceProfile& d : profile.devices) {
+        p.devices.push_back(DeviceEntry{d.guid, d.name, d.port, d.overrides});
+    }
     return p;
+}
+
+core::input::Profile to_core(const InputProfile& profile) {
+    core::input::Profile p;
+    p.keyboard.sources = profile.keyboard.sources;
+    p.gamepad.sources = profile.gamepad.sources;
+    for (const DeviceEntry& d : profile.devices) {
+        p.devices.push_back(core::input::DeviceProfile{d.guid, d.name, d.port, d.overrides});
+    }
+    return p;
+}
+
+std::vector<std::string> FileProfileStore::list() const {
+    std::vector<std::string> names{"default"};
+    std::error_code ec;
+    for (auto it = std::filesystem::directory_iterator(config_dir_ / "input", ec);
+         !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+        const std::filesystem::path& file = it->path();
+        if (!it->is_regular_file(ec) || file.extension() != ".toml") {
+            continue;
+        }
+        const std::string name = to_utf8(file.stem());
+        if (valid_profile_name(name) && name != "default") {
+            names.push_back(name);
+        }
+    }
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+InputProfile FileProfileStore::load(std::string_view name) const {
+    const std::filesystem::path file = core::input::profile_file(config_dir_, name);
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(file, ec)) {
+        return builtin_profile();
+    }
+    std::vector<std::string> warnings; // dq8-game reports them when it starts; the page shows the result
+    try {
+        return from_core(core::input::load_profile(file, warnings));
+    } catch (const core::Error&) {
+        return builtin_profile();
+    }
+}
+
+void FileProfileStore::save(std::string_view name, const InputProfile& profile) {
+    core::input::save_profile(core::input::profile_file(config_dir_, name), to_core(profile));
+}
+
+void FileProfileStore::remove(std::string_view name) {
+    std::error_code ec;
+    std::filesystem::remove(core::input::profile_file(config_dir_, name), ec);
 }
 
 std::vector<std::string> MemoryProfileStore::list() const {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
-// The Diagnostics page: the support bundle (dq8ctl diagnose), the facts the launcher itself knows, and the
-// logs.
+// The Diagnostics page: the support bundle (dq8/core/diagnostics.h), the facts the launcher itself knows, and
+// the logs.
 #include "dq8/core/version.h"
 #include "ui/app.h"
 #include "ui/widgets.h"
