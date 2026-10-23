@@ -401,11 +401,11 @@ else published `data/maps/<profile>/<unit>.toml`; `maps-missing` names the units
   --until title --vblanks 3000 --json`, 900 s at most, output in `logs/smoke.log`. A profile without a row runs
   `--until overlay:<its [title] overlay> --vblanks 3000`, one without a `[title]` table 600 vblanks that must end
   without a stop.
-- The maps (session D's request through the coordinator). An empty `Options::maps_dir` means the published maps;
-  until D merges the stage looks for `data/maps/<profile>/<unit>.toml` itself and passes that directory as
-  `PipelineOptions::maps_dir`. D replaces both with `recomp::find_maps_dir(executable_dir)` and
-  `PipelineOptions::published_maps_dir` in `stage_maps` and `pipeline_options()` (setup.cpp). Every
-  `maps-missing` message names `--maps`.
+- The maps (session D's request through the coordinator). An empty `Options::maps_dir` means the published maps.
+  Since D's merge (2026-10-23) `stage_maps` finds them with `recomp::find_maps_dir(executable_dir)` and checks
+  every unit with `recomp::require_published_maps` (the unit file's SHA-1, the code range), and
+  `pipeline_options()` passes the root as `PipelineOptions::published_maps_dir`; `--maps DIR` keeps the
+  contributor CSVs. Every `maps-missing` message names `--maps`.
 
 **dq8ctl.** `setup`, `settings list|get|set|reset|defaults`, `run`, `diagnose` (`src/cli/README.md`). `run` starts
 `dq8-game --iso --module-dir --config <user file> --window` for the registered build; options after `--` pass
