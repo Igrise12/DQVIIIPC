@@ -25,11 +25,12 @@ add_test(NAME host.dq8_game_settings_applied
         -DEXPECT_EXIT=0
         "-DEXPECT=\"settings\":\\[\"display.window_mode=windowed\",\"display.width=1280\",\"display.height=960\",\"display.vsync=true\",\"display.aspect=auto\",\"display.integer_scaling=false\",\"display.filter=linear\",\"audio.output=null\",\"audio.device=\",\"audio.volume=100\",\"audio.latency_ms=200\",\"input.profile=default\",\"input.deadzone=8\",\"input.rumble=false\",\"game.movies=skip\",\"game.save_dir=[^\"]+/saves\",\"game.memory_card2=formatted\"\\]"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
-# A flag on the command line wins over the file: --movies play leaves game.movies out.
+# A flag on the command line wins over the file: --movies blank leaves game.movies out. (blank, not play: play
+# needs the optional dq8-movie library, which a build without FFmpeg lacks, e.g. the Windows cross build.)
 add_test(NAME host.dq8_game_settings_flag_wins
     COMMAND "${CMAKE_COMMAND}"
         "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
-        "-DARGS=${_contract_run}@@--config@@${_m5a}/settings-a.toml@@--movies@@play@@--stop-at-first-syscall@@--json"
+        "-DARGS=${_contract_run}@@--config@@${_m5a}/settings-a.toml@@--movies@@blank@@--stop-at-first-syscall@@--json"
         -DEXPECT_EXIT=0
         "-DEXPECT=\"input.rumble=false\",\"game.save_dir="
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")

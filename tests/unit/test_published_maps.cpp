@@ -279,13 +279,16 @@ TEST_CASE("prepare reads a published map, writes the recompiler's CSV and fills 
     CHECK(u.stubs == 1);
     CHECK(u.map_csv == fs::absolute(dir / "work" / "units" / "main.csv"));
     CHECK(u.published_map == fs::absolute(dir / "maps" / "TEST_00000" / "main.toml"));
-    std::ifstream csv(u.map_csv);
+    // Read and closed at once: Windows refuses to remove a directory holding an open file (remove_all below).
     std::stringstream csv_text;
-    csv_text << csv.rdbuf();
-    CHECK_THAT(csv_text.str(), ContainsSubstring("FUN_00200040,0x00200040,0x00200080,64\n"));
-    std::ifstream config(u.config);
     std::stringstream config_text;
-    config_text << config.rdbuf();
+    {
+        std::ifstream csv(u.map_csv);
+        csv_text << csv.rdbuf();
+        std::ifstream config(u.config);
+        config_text << config.rdbuf();
+    }
+    CHECK_THAT(csv_text.str(), ContainsSubstring("FUN_00200040,0x00200040,0x00200080,64\n"));
     std::istringstream in(config_text.str());
     const toml::value parsed = toml::parse(in, "config.toml");
     const auto& tables = parsed.at("jump_tables").at("table").as_array();
