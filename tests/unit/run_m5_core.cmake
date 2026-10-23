@@ -39,7 +39,9 @@ if(MODE STREQUAL "default_config")
     run_ok(plain "${DQ8_GAME}" ${machine} --vblanks 10 --events "${WORK_DIR}/m4.jsonl" --json)
     run_ok(configured "${DQ8_GAME}" ${machine} --vblanks 10 --events "${WORK_DIR}/default.jsonl" --json
            --config "${WORK_DIR}/defaults.toml")
-    expect_match("the defaults applied" "${configured}" "\"settings\":\\[\"audio.output=sdl\",\"audio.latency_ms=64\"")
+    # Every row in schema order (sessions A and C); headless with --gs trace the internal resolution stays out.
+    expect_match("the defaults applied" "${configured}"
+                 "\"settings\":\\[\"display.window_mode=windowed\",\"display.width=1280\",\"display.height=960\",\"display.vsync=true\",\"display.aspect=auto\",\"display.integer_scaling=false\",\"display.filter=linear\",\"audio.output=sdl\",\"audio.device=\",\"audio.volume=100\",\"audio.latency_ms=64\",\"input.profile=default\",\"input.deadzone=8\",\"input.rumble=true\",\"input.rumble_strength=100\",\"game.movies=auto\",\"game.save_dir=\",\"game.memory_card2=none\"\\]")
     file(SHA1 "${WORK_DIR}/m4.jsonl" a)
     file(SHA1 "${WORK_DIR}/default.jsonl" b)
     if(NOT a STREQUAL b)

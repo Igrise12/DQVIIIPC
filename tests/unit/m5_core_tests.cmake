@@ -23,7 +23,7 @@ add_test(NAME host.dq8_game_settings_applied
         "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
         "-DARGS=${_contract_run}@@--config@@${_m5a}/settings-a.toml@@--set@@game.memory_card2=formatted@@--stop-at-first-syscall@@--json"
         -DEXPECT_EXIT=0
-        "-DEXPECT=\"settings\":\\[\"audio.output=null\",\"audio.latency_ms=200\",\"input.rumble=false\",\"game.movies=skip\",\"game.save_dir=[^\"]+/saves\",\"game.memory_card2=formatted\"\\]"
+        "-DEXPECT=\"settings\":\\[\"display.window_mode=windowed\",\"display.width=1280\",\"display.height=960\",\"display.vsync=true\",\"display.aspect=auto\",\"display.integer_scaling=false\",\"display.filter=linear\",\"audio.output=null\",\"audio.device=\",\"audio.volume=100\",\"audio.latency_ms=200\",\"input.profile=default\",\"input.deadzone=8\",\"input.rumble=false\",\"game.movies=skip\",\"game.save_dir=[^\"]+/saves\",\"game.memory_card2=formatted\"\\]"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
 # A flag on the command line wins over the file: --movies play leaves game.movies out.
 add_test(NAME host.dq8_game_settings_flag_wins
