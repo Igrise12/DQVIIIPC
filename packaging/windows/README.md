@@ -11,7 +11,8 @@ session E). Contributor tools only; nothing here runs on a player's setup path e
 | `cross-build-modules.sh` | Builds the game modules of an existing recompile work directory with the cross compiler, for smoke runs under Wine (the output is derived from your disc: keep it in `work/`) |
 
 The CI job is `.github/workflows/windows-cross.yml`: it cross-builds, runs the unit tests under Wine, builds the
-zip and scans it with `scripts/check_no_game_data.py --archive`.
+zip and scans it with `scripts/check_no_game_data.py --release --archive` (host executables and libraries pass;
+anything game-shaped is refused by content; `.no-game-data-allow` covers only the CMake release's own files).
 
 ## Cross-building and testing under Wine
 

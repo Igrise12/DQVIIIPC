@@ -62,8 +62,10 @@ jobs:
           xvfb-run -a ctest --test-dir build/windows -L unit --output-on-failure --parallel 4 --timeout 600
       - name: The Windows zip
         run: cmake -DBUILD=build/windows -DTOOLS="$TOOLS" -DOUT=build/windows/package -P packaging/windows/make_zip.cmake
+      # --release: host executables and libraries (PE) pass; anything game-shaped (MIPS ELF, IRX, MWo3, disc images,
+      # region-profile hashes, generated code) is refused by content (scripts/check_no_game_data.py).
       - name: No game-derived content in the zip
-        run: python3 -I scripts/check_no_game_data.py --archive build/windows/package/DQ8-Native-*-windows-x86_64.zip
+        run: python3 -I scripts/check_no_game_data.py --release --archive build/windows/package/DQ8-Native-*-windows-x86_64.zip
       - name: Smoke-run the zip's programs
         run: |
           export WINEPATH=""

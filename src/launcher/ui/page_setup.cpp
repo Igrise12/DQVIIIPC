@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <imgui.h>
+#include <string>
 
 namespace dq8::launcher::ui {
 
@@ -196,6 +197,26 @@ void draw_progress(App& app, Wizard& w) {
     (void)app;
 }
 
+// Windows: the setup builds with its own llvm-mingw (ADR-0018), downloaded only with the user's consent,
+// which this checkbox gives (setup::Options::allow_toolchain_download). Nothing is shown where no download
+// exists.
+void draw_download_consent(Wizard& w) {
+    const core::toolchain::BundleOffer offer = w.bundle_offer();
+    if (!offer.available || (w.toolchain() && w.toolchain()->toolchain.bundled)) {
+        return;
+    }
+    const std::string label =
+        "Download the build tools when the setup needs them (llvm-mingw " + offer.version +
+        (offer.download_bytes != 0
+             ? ", " + std::to_string((offer.download_bytes + (1u << 20) - 1) >> 20) + " MB"
+             : std::string()) +
+        ")";
+    bool allow = w.allow_download();
+    if (ImGui::Checkbox(label.c_str(), &allow)) {
+        w.set_allow_download(allow);
+    }
+}
+
 } // namespace
 
 void draw_setup_page(App& app) {
@@ -251,6 +272,7 @@ void draw_setup_page(App& app) {
         if (ImGui::Checkbox("Rebuild everything, even what is up to date", &force)) {
             w.set_force(force);
         }
+        draw_download_consent(w);
         ImGui::Spacing();
         if (w.step() == WizardStep::ready ? primary_button("Start setup")
                                           : ImGui::Button("Start setup anyway")) {
@@ -287,6 +309,9 @@ void draw_setup_page(App& app) {
         }
         ImGui::Spacing();
         draw_progress(app, w);
+        if (w.problem() && w.problem()->code == core::ErrorCode::toolchain_incomplete) {
+            draw_download_consent(w); // the setup stopped at the build tools: allow the download, then retry
+        }
         if (primary_button(w.step() == WizardStep::cancelled ? "Resume setup" : "Try again")) {
             w.resume();
         }

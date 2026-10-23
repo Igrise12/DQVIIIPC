@@ -4,6 +4,7 @@
 
 #include "dq8/core/error.h"
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -83,5 +84,14 @@ std::vector<std::string> cmake_arguments(const Toolchain& toolchain);
 
 // Parallel compile jobs for this machine: recomp::default_build_jobs() (threads, bounded by free memory).
 unsigned default_jobs();
+
+// The toolchain the setup may download, for the launcher's consent question (ADR-0018): on Windows the pinned
+// llvm-mingw (session E's download), elsewhere none (the system compiler builds the modules).
+struct BundleOffer {
+    bool available = false;
+    std::string version;              // "20261020"
+    std::uint64_t download_bytes = 0; // the archive's size; 0 when unknown
+};
+BundleOffer bundle_offer();
 
 } // namespace dq8::core::toolchain
