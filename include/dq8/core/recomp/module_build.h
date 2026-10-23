@@ -66,6 +66,12 @@ unsigned default_build_jobs();
 
 // `cmake -S <template> -B <build> -G <generator> -D...` for the unit.
 std::vector<std::string> module_configure_args(const ModuleBuildOptions& options, const ModuleUnit& unit);
+// True when <build_dir>/CMakeCache.txt was written for another template than `source_dir` (its
+// CMAKE_HOME_DIRECTORY names another directory, or one that no longer exists). cmake refuses to configure
+// such a tree, so build_module() configures it afresh (`cmake --fresh`). The template moves when the program
+// does: an AppImage is mounted at a new path on every launch, an update or reinstall changes the prefix.
+bool configured_for_other_template(const std::filesystem::path& build_dir,
+                                   const std::filesystem::path& source_dir);
 // `cmake --build <build> --config <type> --parallel <jobs>`.
 std::vector<std::string> module_build_args(const ModuleBuildOptions& options);
 // The library's file name on this platform, first the one cmake/module produces ("dq8_unit_main.so",

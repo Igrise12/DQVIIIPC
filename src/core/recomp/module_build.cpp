@@ -165,6 +165,27 @@ std::vector<std::string> module_configure_args(const ModuleBuildOptions& o, cons
     return args;
 }
 
+bool configured_for_other_template(const fs::path& build_dir, const fs::path& source_dir) {
+    std::ifstream cache(build_dir / "CMakeCache.txt");
+    if (!cache) {
+        return false;
+    }
+    constexpr std::string_view key = "CMAKE_HOME_DIRECTORY:INTERNAL=";
+    for (std::string line; std::getline(cache, line);) {
+        if (line.rfind(key, 0) != 0) {
+            continue;
+        }
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        std::error_code ec;
+        const std::string home = line.substr(key.size()); // UTF-8, as cmake writes it
+        const fs::path cached(std::u8string(home.begin(), home.end()));
+        return !fs::equivalent(cached, source_dir, ec) || ec;
+    }
+    return false;
+}
+
 std::vector<std::string> module_build_args(const ModuleBuildOptions& o) {
     return {"--build",    cmake_path(o.build_dir),
             "--config",   o.build_type,
@@ -191,7 +212,13 @@ ModuleBuildResult build_module(const ModuleBuildOptions& o, const ModuleUnit& u)
 
     ModuleBuildResult result;
     result.jobs = std::max(o.jobs, 1u);
-    const ProcessResult configured = run_step(o, module_configure_args(o, u), "configure");
+    std::vector<std::string> configure = module_configure_args(o, u);
+    if (configured_for_other_template(o.build_dir, o.module_source_dir)) {
+        // Configured from a template that moved (an AppImage's mount point, a new install prefix): start the
+        // cache afresh rather than fail on cmake's "does not match the source" check.
+        configure.insert(configure.begin(), "--fresh");
+    }
+    const ProcessResult configured = run_step(o, configure, "configure");
     result.configure_time = configured.elapsed;
     const ProcessResult built = run_step(o, module_build_args(o), "build");
     result.build_time = built.elapsed;

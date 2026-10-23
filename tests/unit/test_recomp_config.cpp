@@ -3,6 +3,7 @@
 #include "dq8/core/elf_writer.h"
 #include "dq8/core/error.h"
 #include "dq8/core/recomp.h"
+#include "support/iso_builder.h"
 #include "support/mips_asm.h"
 
 #include <algorithm>
@@ -259,6 +260,32 @@ TEST_CASE("default_build_jobs follows cores and free memory", "[core][recomp][bu
     CHECK(recomp::default_build_jobs(12, std::nullopt) == 12); // memory unknown
     CHECK(recomp::default_build_jobs(0, std::nullopt) == 1);
     CHECK(recomp::default_build_jobs() >= 1);
+}
+
+TEST_CASE("a module build tree configured from a moved template is configured afresh",
+          "[core][recomp][build]") {
+    const dq8::test::TempDir tmp;
+    const fs::path old_template = tmp.path() / "mount-a" / "cmake" / "module";
+    const fs::path new_template = tmp.path() / "mount-b" / "cmake" / "module";
+    const fs::path build = tmp.path() / "build" / "main";
+    fs::create_directories(old_template);
+    fs::create_directories(new_template);
+    fs::create_directories(build);
+    // No cache yet: a first configure.
+    CHECK_FALSE(recomp::configured_for_other_template(build, new_template));
+    const auto write_cache = [&](const fs::path& home) {
+        std::ofstream(build / "CMakeCache.txt")
+            << "# This is the CMakeCache file.\nCMAKE_BUILD_TYPE:STRING=Release\n"
+            << "CMAKE_HOME_DIRECTORY:INTERNAL=" << home.generic_string()
+            << "\nCMAKE_GENERATOR:INTERNAL=Ninja\n";
+    };
+    write_cache(new_template);
+    CHECK_FALSE(recomp::configured_for_other_template(build, new_template));
+    write_cache(old_template);
+    CHECK(recomp::configured_for_other_template(build, new_template));
+    // The old mount point is gone (an AppImage relaunched).
+    fs::remove_all(tmp.path() / "mount-a");
+    CHECK(recomp::configured_for_other_template(build, new_template));
 }
 
 TEST_CASE("the module build passes the template's cache variables", "[core][recomp][build]") {
