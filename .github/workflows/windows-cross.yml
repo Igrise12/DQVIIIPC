@@ -60,6 +60,10 @@ jobs:
         run: |
           export WINEPATH="Z:$TOOLS/llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64/x86_64-w64-mingw32/bin"
           xvfb-run -a ctest --test-dir build/windows -L unit --output-on-failure --parallel 4 --timeout 600
+      # Job logs need a GitHub sign-in; annotations do not: name each failed test with the end of its output.
+      - name: Failed tests as annotations
+        if: failure()
+        run: python3 -I scripts/ci_test_annotations.py build/windows
       - name: The Windows zip
         run: cmake -DBUILD=build/windows -DTOOLS="$TOOLS" -DOUT=build/windows/package -P packaging/windows/make_zip.cmake
       # --release: host executables and libraries (PE) pass; anything game-shaped (MIPS ELF, IRX, MWo3, disc images,

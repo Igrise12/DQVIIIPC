@@ -50,6 +50,12 @@ jobs:
         run: cmake --build --preset ${{ matrix.preset }} --parallel
       - name: Unit tests
         run: ctest --preset unit-${{ matrix.preset }}
+      # Job logs need a GitHub sign-in; annotations do not: name each failed test with the end of its output.
+      - name: Failed tests as annotations
+        if: failure()
+        shell: bash
+        # `python` on Windows runners (python3 can be the Microsoft Store stub there), python3 elsewhere.
+        run: ${{ runner.os == 'Windows' && 'python' || 'python3' }} -I scripts/ci_test_annotations.py build/${{ matrix.preset }}
       - name: Smoke-run dq8ctl and dq8-game
         shell: bash
         run: |
@@ -71,6 +77,9 @@ jobs:
       - run: cmake --preset asan -DCMAKE_C_COMPILER=clang-18 -DCMAKE_CXX_COMPILER=clang++-18 -DDQ8_FFMPEG=system
       - run: cmake --build --preset asan --parallel
       - run: ctest --preset unit-asan
+      - name: Failed tests as annotations
+        if: failure()
+        run: python3 -I scripts/ci_test_annotations.py build/asan
 
   # ps2_recomp built from the pinned submodules (FetchContent disconnected), then hand-assembled MIPS fixtures
   # through recompile -> game module -> dq8-game (tests/e2e/README.md). No game data.
