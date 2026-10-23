@@ -1,3 +1,9 @@
 # Globs (relative to the repository root) of first-party binary files the no-game-data check may accept.
 # Add a line only for files this project authored (icons, fonts, synthetic fixtures). Never for disc content.
 data/fonts/*.ttf
+
+# The Windows release zip (packaging/windows/, M5 session E), scanned with --release --archive: the release mode
+# accepts the host executables and libraries (PE files) and the region profile; the pinned CMake release
+# (fetched and SHA-256-checked by packaging/windows/fetch_tools.cmake) also ships its own images, icons and
+# templates, which are not ours and not PE files.
+DQ8-Native-*-windows-x86_64.zip:DQ8-Native-*-windows-x86_64/tools/cmake/*

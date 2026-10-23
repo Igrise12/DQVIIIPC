@@ -111,6 +111,7 @@ void Wizard::run_setup() {
     options.game_executable = game_executable_; // empty: found beside executable_dir
     options.jobs = jobs_;
     options.force = force_;
+    options.allow_toolchain_download = allow_download_;
     options.cancel = cancel_.get();
     log_.add("Starting the setup with " +
              (jobs_ == 0 ? std::string("the default number of") : std::to_string(jobs_)) + " parallel jobs" +

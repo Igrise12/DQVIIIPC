@@ -311,7 +311,8 @@ TEST_CASE("extract writes, hashes, records and is idempotent", "[core][intake]")
     const auto before = std::filesystem::last_write_time(out / "TEST_00001" / "BOOT.ELF");
     const auto second = dq8::core::extract(v, out, opts);
     CHECK(second.count(FileStatus::up_to_date) == 4);
-    CHECK(std::filesystem::last_write_time(out / "TEST_00001" / "BOOT.ELF") == before);
+    // Unexpanded: libc++ on Windows counts file times in __int128, which Catch2 cannot print.
+    CHECK((std::filesystem::last_write_time(out / "TEST_00001" / "BOOT.ELF") == before));
 
     // A damaged file is re-extracted even without --force.
     {

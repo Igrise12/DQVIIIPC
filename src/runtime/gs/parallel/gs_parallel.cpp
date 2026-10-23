@@ -39,6 +39,11 @@
 #include <vector>
 
 #if defined(_WIN32)
+// The header declares the ABI without attributes and the definitions export it, which clang reports
+// (llvm-mingw, M5 session E); the export is what we want.
+#if defined(__clang__)
+#pragma clang diagnostic ignored "-Wdll-attribute-on-redeclaration"
+#endif
 #define DQ8_GSP_EXPORT __declspec(dllexport)
 #else
 #define DQ8_GSP_EXPORT __attribute__((visibility("default")))

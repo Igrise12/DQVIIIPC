@@ -719,6 +719,93 @@ themselves under `--frames` so the running states are drawn too.
 `THIRD_PARTY_NOTICES.md` in `share/doc/dq8-native/` beside `bin/` (and in the source tree). **For E:** the GUI
 subsystem (`WIN32_EXECUTABLE`) is left to E; `--version` and `--help` print to stdout.
 
+### Session E: Windows (2026-10-22)
+
+**Pins** (`cmake/toolchains/llvm-mingw-pin.cmake`, mirrored by `pinned_llvm_mingw()`; a unit test compares them):
+llvm-mingw 20261020 (LLVM 23.1.4, UCRT, released 2026-10-21): the Linux-hosted cross compiler
+(`…-ucrt-ubuntu-22.04-x86_64.tar.xz`, 84 MB) and the Windows-hosted one the setup downloads (`…-ucrt-x86_64.zip`,
+190,612,575 bytes, 9,299 entries, 749,515,686 bytes unpacked, one top directory); CMake 4.4.4 and Ninja 1.13.2 for the
+zip (Ninja's `COPYING` from the same tag). SHA-256 values are the ones GitHub publishes for the assets, checked on
+every download.
+
+**The cross build.** `cmake/toolchains/llvm-mingw.cmake` (one file for the Linux cross build and for the module build
+on Windows itself) builds the whole host on the first try: SDL3, paraLLEl-GS with Granite, minicoro fibers, the
+process runner, WinHTTP, the launcher, `dq8ctl` and `ps2_recomp` (its external project now gets the toolchain file).
+What needed a Windows section:
+
+| Finding | Fix |
+|---|---|
+| libc++ on Windows counts `file_time_type` in `__int128`, which Catch2 cannot print | Three `CHECK((a == b))` in `test_intake.cpp`, `test_recomp_config.cpp` |
+| `setenv` does not exist on Windows (`test_gs_parallel_abi.cpp`) | `_putenv_s` |
+| MinGW names shared libraries `libdq8-gs-parallel.dll`; the backend looks for `dq8-gs-parallel.dll` (same for `dq8-movie`) | `PREFIX ""` on WIN32 |
+| clang warns that the GS definitions add `dllexport` to the header's declarations (an error with `-Werror`) | A pragma in the `_WIN32` export macro |
+| `executable_dir(argv0)` fails when `argv[0]` is a bare name typed at a prompt | `_get_pgmptr` on Windows (`host/session.cpp`, `cli/cli.h`) |
+| `argv`, the environment and `fs::path(std::string)` use the ANSI code page on Windows, while the code base assumes UTF-8 | `windows-app.manifest` (UTF-8 active code page, long paths), linked into every executable by the toolchain file; tests for the code page, a non-ASCII child argument, a non-ASCII file name and a module loaded from a non-ASCII directory |
+| `cmake/module` passes ELF-only linker options | Skipped on WIN32: the DLL exports only the `dllexport`ed descriptor and imports `libc++.dll` like the host |
+| The launcher opened a console | `WIN32_EXECUTABLE` (GUI subsystem); `--version` still reaches a pipe |
+
+The programs import only Windows DLLs plus `libc++.dll` and `libunwind.dll` (no winpthread); `make_zip.cmake` fails
+on any other import.
+
+**Wine** (11.20 here; CI uses Ubuntu 24.04's 9.0, which honours the UTF-8 manifest since 7.7). The toolchain file runs
+tests through `wine-run.sh`, which turns absolute path arguments into `Z:` paths: Catch2 on Windows reads a leading
+`/` as an option, so its test discovery failed on `--out /path`. A fresh prefix stops at a Mono dialog without
+`WINEDLLOVERRIDES=mscoree,mshtml=`; Mesa's EGL warnings precede a GUI program's output without `EGL_LOG_LEVEL=fatal`;
+Wine maps file names through the Unix locale, so the non-ASCII path tests fail without a UTF-8 one (`LANG=C.UTF-8`).
+The CI job's setup was rehearsed in an Ubuntu 24.04 container with its Wine 9.0 against this build: the same results
+as Wine 11.20 once the locale was set.
+Tests that a CMake script starts run `.exe` files through binfmt_misc (`wine-binfmt` in CI) and need `WINEPATH` for
+`libc++.dll`. Wine's `vulkan-1.dll` hands the host GPU through and ignores `VK_ICD_FILENAMES`, so the two "no Vulkan
+driver" tests skip under Wine (real Windows runs them). Two dev-box traps: deleting a prefix while its wineserver
+lives leaves every later start waiting on `wineboot`, and a session's first start takes about 40 s under load (device
+enumeration); a prefix on `/tmp` avoided both.
+
+**Results on the dev box.**
+
+- Unit tests of the cross build under Wine: all pass but the two Vulkan skips and the five movie tests
+  (`DQ8_FFMPEG=off` until session D's LGPL build); 614 of 623 passed on the very first run.
+- The seven game modules cross-built from the contributor work tree's generated C++ (`cross-build-modules.sh`):
+  9 min 48 s at 11 jobs under heavy load, `dq8_unit_main.dll` 61 MB.
+- `dq8-game.exe` under Wine, M3a acceptance input (`boot-to-title.dq8in`, `--movies blank`, trace GS): the title at
+  vblank 1207, and the 2,475 event lines are **byte-identical** to the native Linux run (same GS hash and RAM SHA-1),
+  in 17.6 s against Linux's 6.5 s. With `--gs parallel` through Wine's Vulkan (RTX 4060) the frames dumped at
+  vblanks 1100 and 1206 are byte-identical PNGs to Linux's; `--window` (SDL3 window and audio) plays in real time to the title
+  with the same hashes. So exceptions crossing module frames, fibers, the job-object process runner and file I/O behave
+  as on Linux.
+- The end-user path under Wine: the downloader unpacked the real pinned zip (through the Windows `cmake.exe`), the
+  entry count and unpacked size matched the pin, and the bundled `cmake.exe` and `ninja.exe` with the downloaded
+  Windows clang built the TITLE module in 24 s; swapped in, the boot's events were again identical to Linux. The
+  zip's `ps2_recomp.exe` generates TITLE's 75 files identical to Linux's apart from CRLF line endings (it writes in
+  text mode), so a Windows build manifest's `generated_sha1` differs from Linux's for the same disc; the compiled
+  code does not.
+- The zip (`make_zip.cmake`): 18.9 MB. `check_no_game_data.py --archive` refuses every binary in an archive and misses
+  the region-profile exception there (an archive path does not start with `data/regions/`); `.no-game-data-allow`
+  names the zip's programs, DLLs and the pinned tool trees exactly, and everything else in the zip is scanned (clean).
+  With `--deep` (on the dev box, against the disc's ELF and overlays) every large binary in the zip, third-party ones
+  included (`cmake.exe`, `libc++.dll`), "matches" the disc in 32-byte windows that are universal constant runs:
+  int32 1 to 8, powers of two, int16 counting, the doubles 1e3, 1e4 and up. The deep rule needs a floor on window
+  information before it can judge release binaries.
+
+**The download** (`src/core/toolchain/download.h`): consent first (without it only an installed toolchain is
+returned), the free-space check (remaining bytes + unpacked size), `downloads/<archive>.part` resumed from its size
+(WinHTTP with `Range` on Windows, `curl --continue-at` elsewhere, file:// in-process), up to three attempts without new
+bytes, a server that ignores ranges restarts the file, SHA-256 verified (a mismatch deletes the file), `cmake -E tar
+xvf` into `<version>.unpack/` with per-entry progress, then a rename to `<version>/` and the marker
+`.dq8-toolchain` last. Tests: SHA-256 vectors, the pin against the CMake file, consent, a malformed pin, file:// with
+progress and idempotence, resume, cancel then resume, a checksum mismatch, free space, a wrong archive root and an
+interrupted unpack, and over HTTP from a local fake server (redirect, dropped connection, ignored range, 404) through
+curl on Linux and WinHTTP under Wine; a hidden `[real]` case unpacks the real archive.
+
+**For integration.** Session A: `setup::Options` needs a consent flag; the toolchain stage calls `download_toolchain()`
+with the bundled `cmake.exe`; `detect()` uses `installed_toolchain(bundled_root)`; the Windows module build passes
+`-DCMAKE_TOOLCHAIN_FILE=<prefix>/cmake/toolchains/llvm-mingw.cmake -DLLVM_MINGW_ROOT=<bundle>
+-DCMAKE_MAKE_PROGRAM=<prefix>/tools/ninja/ninja.exe`. Session D: the checker's release-archive rules, and installing
+`cmake/toolchains/` next to `cmake/module`. Coordinator: `THIRD_PARTY_NOTICES.md` rows for the llvm-mingw runtime
+DLLs, the downloaded toolchain, CMake and Ninja. **The owner on real Windows (I3):** the zip from the windows-cross CI
+artifact; `dq8-launcher.exe` without a console; the Vulkan "no driver" tests; the WinHTTP download from GitHub through
+a real TLS stack and any proxy; a virus scanner holding freshly unpacked files (the rename retries for 5 s); a user
+name with non-ASCII characters; the 15–40 minute module build with the downloaded clang.
+
 ## Bring-up log
 
 | Date | Step | Result |

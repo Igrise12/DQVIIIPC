@@ -185,6 +185,8 @@ TEST_CASE("launcher: the wizard from the image to a finished setup", "[launcher]
     CHECK(backend.last_options.jobs == 3);
     CHECK_FALSE(backend.last_options.force);
     CHECK(backend.last_options.cancel != nullptr);
+    CHECK_FALSE(backend.last_options.allow_toolchain_download); // no consent unless the user gives it
+    CHECK_FALSE(w.bundle_offer().available);                    // the fake offers no download
     w.pump();
     CHECK(w.step() == WizardStep::finished);
     CHECK_FALSE(w.busy());
@@ -353,4 +355,44 @@ TEST_CASE("launcher: wizard calls that do not fit the step are ignored", "[launc
     w.restart();
     CHECK(w.step() == WizardStep::choose_image);
     CHECK_FALSE(w.verified());
+}
+
+TEST_CASE("launcher: the toolchain download needs the user's consent", "[launcher][wizard]") {
+    // A backend that offers the bundled toolchain, as on Windows.
+    class OfferingBackend final : public WizardBackend {
+      public:
+        VerifySummary verify(const std::filesystem::path&) override {
+            return {"SLUS_21207", "t", "s", 1, {}};
+        }
+        ToolchainReport check_toolchain() override {
+            ToolchainReport r;
+            r.problems.push_back({ErrorCode::toolchain_incomplete, "c++", "let the setup download it"});
+            return r;
+        }
+        unsigned default_jobs() override { return 2; }
+        dq8::core::setup::Result run_setup(const dq8::core::setup::Options& options) override {
+            consent = options.allow_toolchain_download;
+            return {false, ErrorCode::toolchain_incomplete, "allow the download", {}, {}, {}, {}};
+        }
+        dq8::core::toolchain::BundleOffer bundle_offer() override { return {true, "20261020", 190u << 20}; }
+        bool consent = true;
+    };
+    OfferingBackend backend;
+    Wizard w(backend, inline_executors(), "/opt/dq8/bin");
+    w.choose_image("/discs/dq8.iso");
+    w.pump();
+    w.pump();
+    CHECK(w.step() == WizardStep::toolchain);
+    REQUIRE(w.bundle_offer().available);
+    CHECK(w.bundle_offer().version == "20261020");
+    w.start_setup(); // without consent: the setup stops at the build tools
+    w.pump();
+    CHECK_FALSE(backend.consent);
+    CHECK(w.step() == WizardStep::failed);
+    REQUIRE(w.problem());
+    CHECK(w.problem()->code == ErrorCode::toolchain_incomplete);
+    w.set_allow_download(true); // the checkbox, then "Try again"
+    w.resume();
+    w.pump();
+    CHECK(backend.consent);
 }

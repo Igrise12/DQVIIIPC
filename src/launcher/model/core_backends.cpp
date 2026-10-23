@@ -62,6 +62,8 @@ class CoreWizardBackend final : public WizardBackend {
         return core::setup::run(options);
     }
 
+    core::toolchain::BundleOffer bundle_offer() override { return core::toolchain::bundle_offer(); }
+
   private:
     fs::path executable_dir_;
 };

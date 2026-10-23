@@ -58,6 +58,15 @@ if(NOT CMAKE_GENERATOR MATCHES "Visual Studio|Xcode")
          "-DCMAKE_C_COMPILER:FILEPATH=${CMAKE_C_COMPILER}"
          "-DCMAKE_CXX_COMPILER:FILEPATH=${CMAKE_CXX_COMPILER}")
 endif()
+# Cross builds (M5 session E, cmake/toolchains/llvm-mingw.cmake): the same toolchain file, so ps2_recomp targets
+# Windows as the host does.
+if(CMAKE_CROSSCOMPILING AND CMAKE_TOOLCHAIN_FILE)
+    get_filename_component(_dq8_toolchain_file "${CMAKE_TOOLCHAIN_FILE}" ABSOLUTE BASE_DIR "${PROJECT_SOURCE_DIR}")
+    list(APPEND _dq8_ps2recomp_cache_args "-DCMAKE_TOOLCHAIN_FILE:FILEPATH=${_dq8_toolchain_file}")
+    if(LLVM_MINGW_ROOT)
+        list(APPEND _dq8_ps2recomp_cache_args "-DLLVM_MINGW_ROOT:PATH=${LLVM_MINGW_ROOT}")
+    endif()
+endif()
 foreach(_lang C CXX)
     if(CMAKE_${_lang}_COMPILER_LAUNCHER)
         list(APPEND _dq8_ps2recomp_cache_args

@@ -46,3 +46,9 @@ if(NOT EXISTS "${PROJECT_SOURCE_DIR}/include/dq8/abi/ps2recomp/ps2_call_list.h")
 endif()
 dq8_set_warnings(dq8_core)
 dq8_enable_sanitizers(dq8_core)
+# M5 session E: the bundled Windows toolchain's download (src/core/toolchain/download.h; ADR-0018), over WinHTTP
+# on Windows.
+target_sources(dq8_core PRIVATE toolchain/download.cpp)
+if(WIN32)
+    target_link_libraries(dq8_core PRIVATE winhttp)
+endif()

@@ -416,4 +416,15 @@ unsigned default_jobs() {
     return recomp::default_build_jobs();
 }
 
+BundleOffer bundle_offer() {
+    BundleOffer offer;
+#if defined(_WIN32) && __has_include("toolchain/download.h")
+    const DownloadPin& pin = pinned_llvm_mingw();
+    offer.available = true;
+    offer.version = pin.version;
+    offer.download_bytes = pin.size;
+#endif
+    return offer;
+}
+
 } // namespace dq8::core::toolchain

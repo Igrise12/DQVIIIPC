@@ -48,6 +48,8 @@ class WizardBackend {
     virtual unsigned default_jobs() = 0;
     // setup::run(): setup failures come back in the Result, not as exceptions.
     virtual core::setup::Result run_setup(const core::setup::Options& options) = 0;
+    // The toolchain the setup may download with the user's consent (Windows); none by default.
+    virtual core::toolchain::BundleOffer bundle_offer() { return {}; }
 };
 
 enum class WizardStep {
@@ -94,6 +96,11 @@ class Wizard {
 
     void set_jobs(unsigned jobs) noexcept { jobs_ = jobs; } // 0: the backend's default
     void set_force(bool force) noexcept { force_ = force; }
+    // The user's consent to download the bundled toolchain (setup::Options::allow_toolchain_download).
+    void set_allow_download(bool allow) noexcept { allow_download_ = allow; }
+    bool allow_download() const noexcept { return allow_download_; }
+    // What the setup would download (backend's bundle_offer()); available only where one exists.
+    core::toolchain::BundleOffer bundle_offer() { return backend_.bundle_offer(); }
     unsigned jobs() const noexcept { return jobs_; }
     bool force() const noexcept { return force_; }
     unsigned default_jobs();
@@ -156,6 +163,7 @@ class Wizard {
     LogBuffer log_{6000};
     unsigned jobs_ = 0;
     bool force_ = false;
+    bool allow_download_ = false;
     std::optional<unsigned> default_jobs_;
 };
 
