@@ -19,6 +19,7 @@ M3 (`Docs/milestones/M3-boots.md`, session E):
 | movie timelines | `movie_timelines.*` | ADR-0013 (proposed): with `--movies skip`, a vblank listener on each `[[movie.timelines]]` row. When the row's overlay is resident (the id at `window + 4`), its stage variable holds `stage_value` and `0 < counter < skip_to`, it writes `skip_to` to the counter (the step the game itself jumps to on a press) and emits `movie_timeline_skip` {timeline, from, to}. It keeps no state of its own. SLUS-21207: TITLE's flyover, so the title follows the publisher logo at once. |
 | IOP | `iop_modules.*` | `[iop]` rows become `rt::IopModuleSpec` in load order, plus the reset image. |
 | mode | `mode_watcher.*` | A vblank listener on `overlay_window.mode_variable` that emits `mode` {mode, previous} on change. |
+| display | `display_watcher.*` | M5 session C: a vblank listener on the profile's `[display]` widescreen variable (the game's own Normal 4:3 / Wide Screen 16:9 option) that publishes whether it holds `widescreen_value`, for `dq8-game --aspect auto`. Reads only; emits no event. |
 | run conditions | `until.*` | `--until vblank:N|overlay:NAME|mode:N|title`. `title` waits for the profile's `[title]` marker from bring-up. `trigger_from_event` maps machine events to the input-script triggers. |
 
 `overrides/` and `patches/` stay reserved for declarative override and patch data (architecture §4.5, §10.2).

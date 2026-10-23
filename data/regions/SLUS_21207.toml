@@ -170,6 +170,15 @@ variable = 0x003D4008
 width = 1
 value = 1
 
+# The game's own screen-size option (spike S6b, Docs/formats/mvi.md): one byte, 1 for "Wide Screen 16:9" and 0 for
+# "Normal 4:3", copied from the saved system settings (setter 0x00168FF0) and read through the getter 0x00168FE0.
+# While it holds 1 the game draws anamorphic 16:9 frames on the same 512x448 buffer and plays the _W movies.
+# dq8-game --aspect auto presents the picture at 16:9 then (src/game/display_watcher.h; M5 session C).
+[display]
+widescreen_variable = 0x003D275C
+widescreen_width = 1
+widescreen_value = 1
+
 # One row per overlay. `id` is the header's overlay_id, `index` its position in name_table_order (the loader's
 # argument), `segment_index` the matching zero-filesize PT_LOAD of the boot ELF counting load segments from 0
 # (the main image). text_size, data_size, bss_size and table_entries are what the header must declare;

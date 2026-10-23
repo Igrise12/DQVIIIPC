@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <set>
 #include <string_view>
@@ -56,8 +57,9 @@ const std::set<std::string, std::less<>> value_options{"iso",
                                                        "config",
                                                        "set",
                                                        "status"};
-const std::set<std::string, std::less<>> repeatable{
-    "dump-frame", "stop-at-pc", "stop-at-rpc", "dump-ram-at", "dump-iop-ram-at", "dump-spu2-at", "set"};
+const std::set<std::string, std::less<>> repeatable{"dump-frame",  "stop-at-pc",      "stop-at-rpc",
+                                                    "dump-ram-at", "dump-iop-ram-at", "dump-spu2-at",
+                                                    "set",         "dump-window"}; // the last: M5 session C
 const std::set<std::string, std::less<>> flag_options{
     "stop-at-first-syscall", "trace-dispatch",  "trap-mmio",   "json", "help", "version", "headless",
     "strict-kernel",         "verify-overlays", "trace-events"};
@@ -188,6 +190,118 @@ std::optional<double> parse_speed(std::string_view v) {
     return speed;
 }
 
+// --- M5 session C: display, input and audio options. All take one value and need the machine.
+const std::set<std::string, std::less<>> display_options{
+    "window-mode",         "window-size",    "vsync",        "aspect", "integer-scaling", "filter",
+    "internal-resolution", "pipeline-cache", "audio-device", "volume", "input-profile",   "deadzone",
+    "rumble-strength",     "dump-window"};
+
+std::string choice(std::string_view option, const std::string& value,
+                   std::initializer_list<std::string_view> allowed) {
+    for (const std::string_view a : allowed) {
+        if (value == a) {
+            return value;
+        }
+    }
+    std::string list;
+    for (const std::string_view a : allowed) {
+        list += (list.empty() ? "" : ", ") + std::string(a);
+    }
+    throw UsageError("--" + std::string(option) + " '" + value + "': " + list);
+}
+
+bool on_off(std::string_view option, const std::string& value) {
+    return choice(option, value, {"on", "off"}) == "on";
+}
+
+std::uint32_t percent(std::string_view option, const std::string& value, std::uint32_t max) {
+    const std::uint32_t v = parse_u32(value, "--" + std::string(option));
+    if (v > max) {
+        throw UsageError("--" + std::string(option) + " " + value + ": 0 to " + std::to_string(max));
+    }
+    return v;
+}
+
+void parse_display_options(Options& o,
+                           const std::map<std::string, std::vector<std::string>, std::less<>>& values,
+                           bool display_window) {
+    const auto get = [&](std::string_view key) -> const std::string* {
+        const auto it = values.find(key);
+        return it != values.end() ? &it->second.front() : nullptr;
+    };
+    if (const auto* v = get("window-mode")) {
+        o.window_mode = choice("window-mode", *v, {"windowed", "borderless", "fullscreen"});
+    }
+    if (const auto* v = get("window-size")) {
+        const std::size_t x = v->find('x');
+        if (x == std::string::npos) {
+            throw UsageError("--window-size '" + *v + "': WIDTHxHEIGHT, e.g. 1280x960");
+        }
+        const std::uint32_t w = parse_u32(std::string_view(*v).substr(0, x), "--window-size WIDTH");
+        const std::uint32_t h = parse_u32(std::string_view(*v).substr(x + 1), "--window-size HEIGHT");
+        if (w < 320 || w > 7680 || h < 240 || h > 4320) {
+            throw UsageError("--window-size " + *v + ": 320x240 to 7680x4320");
+        }
+        o.window_width = static_cast<int>(w);
+        o.window_height = static_cast<int>(h);
+    }
+    if (const auto* v = get("vsync")) {
+        o.vsync = on_off("vsync", *v);
+    }
+    if (const auto* v = get("aspect")) {
+        o.aspect = choice("aspect", *v, {"auto", "4:3", "16:9", "stretch"});
+    }
+    if (const auto* v = get("integer-scaling")) {
+        o.integer_scaling = on_off("integer-scaling", *v);
+    }
+    if (const auto* v = get("filter")) {
+        o.filter = choice("filter", *v, {"linear", "nearest"});
+    }
+    if (const auto* v = get("internal-resolution")) {
+        o.internal_resolution =
+            static_cast<std::uint32_t>(choice("internal-resolution", *v, {"1x", "2x", "3x", "4x"})[0] - '0');
+        if (o.gs != GsKind::parallel) {
+            throw UsageError("--internal-resolution applies to --gs parallel");
+        }
+        if (values.count("ssaa") != 0) {
+            throw UsageError("give at most one of --ssaa and --internal-resolution (it sets the rate too)");
+        }
+    }
+    if (const auto* v = get("pipeline-cache")) {
+        if (v->empty()) {
+            throw UsageError("--pipeline-cache needs a file, or none");
+        }
+        o.pipeline_cache = *v;
+    }
+    if (const auto* v = get("audio-device")) {
+        o.audio_device = *v;
+    }
+    if (const auto* v = get("volume")) {
+        o.volume = percent("volume", *v, 100);
+    }
+    if (const auto* v = get("input-profile")) {
+        if (v->empty()) {
+            throw UsageError("--input-profile needs a profile name or a .toml file");
+        }
+        o.input_profile = *v;
+    }
+    if (const auto* v = get("deadzone")) {
+        o.deadzone = percent("deadzone", *v, 50);
+    }
+    if (const auto* v = get("rumble-strength")) {
+        o.rumble_strength = percent("rumble-strength", *v, 100);
+    }
+    if (const auto it = values.find("dump-window"); it != values.end()) {
+        for (const std::string& v : it->second) {
+            o.dump_window.push_back(parse_at_vblank(v, "--dump-window"));
+        }
+        if (!display_window) {
+            throw UsageError("--dump-window needs --window");
+        }
+    }
+}
+// --- end of M5 session C
+
 } // namespace
 
 std::uint64_t parse_number(std::string_view text, std::string_view what) {
@@ -276,6 +390,30 @@ int usage(std::FILE* out) {
         "  --set KEY=VALUE          one setting, over --config (repeatable); flags win over both\n"
         "  --status FILE|-          the launcher's status lines (not deterministic): started, first frame,\n"
         "                           frame rate, warnings, exit; with -, other output goes to stderr\n"
+        // M5 session C
+        "\n"
+        "display, input and audio (host side; the picture, sound and input the guest sees do not change):\n"
+        "  --window-mode MODE       windowed (default), borderless or fullscreen (exclusive); Alt+Enter\n"
+        "                           toggles between the window and full screen\n"
+        "  --window-size WxH        the window's size at start (default 1280x960)\n"
+        "  --vsync on|off           wait for the monitor's refresh (default on)\n"
+        "  --aspect MODE            4:3 (default, as M4), 16:9, stretch, or auto: the game's own 4:3 or "
+        "16:9\n"
+        "                           option\n"
+        "  --integer-scaling on|off whole-number scale factors only (default off)\n"
+        "  --filter linear|nearest  how the picture is scaled to the window (default linear)\n"
+        "  --internal-resolution N  with --gs parallel: 1x (default), or 2x, 3x, 4x: a picture at twice the\n"
+        "                           resolution with 4, 8 or 16 samples per pixel\n"
+        "  --pipeline-cache FILE|none  the GPU pipeline cache (default: the user data directory with\n"
+        "                           --window, none headless)\n"
+        "  --audio-device NAME      the playback device by name (default: the system default)\n"
+        "  --volume N               0 to 100 (default 100)\n"
+        "  --input-profile NAME     the bindings in <config>/input/NAME.toml, or a .toml file (default:\n"
+        "                           default; a missing file gives the built-in bindings)\n"
+        "  --deadzone N             stick dead zone in percent, 0 to 50 (default 0)\n"
+        "  --rumble-strength N      vibration strength in percent, 0 to 100 (default 100)\n"
+        "  --dump-window N:PATH     with --window: a PNG of what the window shows when it first presents\n"
+        "                           vblank N or later (repeatable; not deterministic)\n"
         "  --trace LIST             trace categories, printed on stderr: "
         "kernel,sif,rpc,dma,gs,iop,spu2,audio\n"
         "  --trace-events           also write the trace events into --events\n"
@@ -334,7 +472,7 @@ Options parse_options(int argc, const char* const* argv) {
                 value = argv[++i];
             }
         }
-        if (value_options.count(name) != 0) {
+        if (value_options.count(name) != 0 || display_options.count(name) != 0) {
             if (!value) {
                 if (i + 1 >= argc) {
                     throw UsageError("--" + name + " needs a value");
@@ -380,7 +518,8 @@ Options parse_options(int argc, const char* const* argv) {
         return it != values.end() ? it->second : std::vector<std::string>{};
     };
     for (const auto& [name, list] : values) {
-        o.uses_machine = o.uses_machine || machine_options.count(name) != 0;
+        o.uses_machine =
+            o.uses_machine || machine_options.count(name) != 0 || display_options.count(name) != 0;
     }
     for (const std::string& name : flags) {
         o.uses_machine = o.uses_machine || machine_options.count(name) != 0;
@@ -444,6 +583,7 @@ Options parse_options(int argc, const char* const* argv) {
             throw UsageError("--ssaa applies to --gs parallel");
         }
     }
+    parse_display_options(o, values, display_window); // M5 session C
     if (const auto* v = get("vblanks")) {
         o.vblanks = parse_number(*v, "--vblanks");
         if (*o.vblanks == 0) {

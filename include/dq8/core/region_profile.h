@@ -158,6 +158,16 @@ struct RegionProfile {
         std::uint32_t value = 0;
     } title_screen;
 
+    // The game's own screen-size option (M5 session C): while the variable holds `widescreen_value` the game
+    // draws anamorphic 16:9 frames and plays the 16:9 movies; any other value is 4:3. dq8-game's `--aspect
+    // auto` follows it (game/display_watcher.h). Optional: widescreen_variable 0 when the profile has no
+    // [display].
+    struct Display {
+        std::uint32_t widescreen_variable = 0;
+        std::uint32_t widescreen_width = 0; // bytes: 1, 2 or 4 (little-endian, unsigned)
+        std::uint32_t widescreen_value = 0;
+    } display;
+
     std::vector<ProfileOverlay> overlays; // in the file's order; every overlay has a unique id and index
     std::vector<ProfileFile> files;
     std::vector<std::string> not_extracted; // disc paths; a trailing '/' marks a directory

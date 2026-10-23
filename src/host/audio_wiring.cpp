@@ -3,7 +3,7 @@
 // M4 session B: the audio output. AudioOutput with its taps (--audio-dump), the SPU2 on the IOP bus, the SDL3
 // or null sink started and stopped around the machine thread, the `audio {frames, hash}` events (once per
 // vblank in which frames were mixed), --dump-spu2-at, and the `audio_hash` field of the end event. Nothing
-// the sink does reaches the machine.
+// the sink does reaches the machine. M5 session C: --audio-device and --volume configure the SDL sink.
 #include "dq8/core/error.h"
 #include "dq8/core/hash.h"
 #include "host/m4_wiring.h"
@@ -100,16 +100,20 @@ void wire_audio(M4Wiring& w) {
 #ifdef DQ8_HAVE_WINDOW
         rt::SdlAudioConfig config;
         config.latency_ms = o.audio_latency_ms;
+        config.device = o.audio_device; // M5 session C: after the hash, like everything the sink does
+        config.volume = o.volume;
         std::shared_ptr<rt::SdlAudioSink> sdl = rt::make_sdl_audio_sink(config);
         if (!o.json) {
             report_sink = [sdl] {
                 const rt::IAudioSink::Stats s = sdl->stats();
+                // M5 session C: and the device it played on.
                 std::fprintf(stderr,
-                             "audio: %llu frames played, %llu underruns, %llu skipped, %llu reopens\n",
+                             "audio: %llu frames played, %llu underruns, %llu skipped, %llu reopens (device "
+                             "\"%s\")\n",
                              static_cast<unsigned long long>(s.frames_played),
                              static_cast<unsigned long long>(s.underruns),
                              static_cast<unsigned long long>(sdl->skipped()),
-                             static_cast<unsigned long long>(sdl->reopens()));
+                             static_cast<unsigned long long>(sdl->reopens()), sdl->device_name().c_str());
             };
         }
         sink = std::move(sdl);

@@ -6,6 +6,7 @@
 #include "dq8/core/error.h"
 #include "dq8/core/hash.h"
 #include "dq8/core/iso9660.h"
+#include "game/display_watcher.h"
 #include "game/iop_modules.h"
 #include "game/mode_watcher.h"
 #include "game/movie_timelines.h"
@@ -14,6 +15,7 @@
 #include "game/title_watcher.h"
 #include "game/unit_specs.h"
 #include "game/until.h"
+#include "host/display_wiring.h"
 #include "host/event_log.h"
 #include "host/limiter.h"
 #include "host/m4_wiring.h"
@@ -41,6 +43,7 @@
 #endif
 #ifdef DQ8_HAVE_WINDOW
 #include "runtime/platform/platform.h"
+#include "runtime/platform/sdl/sdl_platform.h"
 #endif
 
 #include <algorithm>
@@ -105,6 +108,16 @@ std::unique_ptr<gs::IGsBackend> make_backend(const Options& o, const char* argv0
                         // next to the executable, ../lib for an installed tree, the build path)
             (void)argv0;
             config.super_sampling = o.ssaa;
+            // M5 session C: --internal-resolution (options.cpp refuses it together with --ssaa) and the
+            // pipeline cache.
+            if (o.internal_resolution > 1) {
+                const InternalResolution r = internal_resolution(o.internal_resolution);
+                config.super_sampling = r.super_sampling;
+                config.high_resolution_scanout = r.high_resolution;
+                config.super_sampled_textures = r.high_resolution;
+                config.backbuffer_promotion = r.high_resolution;
+            }
+            config.pipeline_cache = pipeline_cache_file(o);
             return gs::make_parallel_gs_backend(config);
 #else
             (void)argv0;
@@ -276,6 +289,16 @@ int run_machine(const Options& command_line, const char* argv0, StatusChannel& s
     // --movies play and nodecode run the sceMpeg HLE (movie_wiring.cpp), auto too when dq8-movie loads and
     // the sound modules can drain the movies' audio, else it skips.
     const auto movie_policy = game::resolve_movie_policy(o.movies, o.movie_decoder, profile);
+    // M5 session C: the window's configuration, with the input profile (a bad profile name is a usage error;
+    // a missing or broken profile file only a warning).
+#ifdef DQ8_HAVE_WINDOW
+    std::vector<std::string> display_warnings;
+    const rt::WindowConfig window_settings =
+        o.display == Display::window ? window_config(o, display_warnings) : rt::WindowConfig{};
+    for (const std::string& warning : display_warnings) {
+        std::fprintf(stderr, "dq8-game: %s\n", warning.c_str());
+    }
+#endif
     EventLog log(o.events, o.trace_events);
 
     // Disc.
@@ -309,7 +332,7 @@ int run_machine(const Options& command_line, const char* argv0, StatusChannel& s
     std::unique_ptr<rt::IPlatform> platform;
     if (o.display == Display::window) {
         try {
-            platform = rt::create_sdl_platform(rt::WindowConfig{});
+            platform = rt::create_sdl_platform(window_settings);
         } catch (const std::exception& e) {
             throw BackendError(std::string("the window failed to open: ") + e.what());
         }
@@ -350,7 +373,11 @@ int run_machine(const Options& command_line, const char* argv0, StatusChannel& s
     std::unique_ptr<game::ModeWatcher> mode_watcher;
     std::unique_ptr<game::TitleWatcher> title_watcher;
     std::unique_ptr<game::MovieTimelineSkip> timeline_skip;
+    std::unique_ptr<game::DisplayWatcher> display_watcher; // M5 session C: --aspect auto, with a window
     if (profile != nullptr) {
+        if (o.display == Display::window && profile->display.widescreen_variable != 0) {
+            display_watcher = std::make_unique<game::DisplayWatcher>(profile->display);
+        }
         residency = std::make_unique<game::OverlayResidency>(
             game::OverlayResidencyConfig{profile, &s.overlays, o.verify_overlays});
         if (profile->overlay_window.mode_variable != 0) {
@@ -404,6 +431,9 @@ int run_machine(const Options& command_line, const char* argv0, StatusChannel& s
     }
     if (timeline_skip) {
         machine.attach(*timeline_skip);
+    }
+    if (display_watcher) {
+        machine.attach(*display_watcher);
     }
     if (profile != nullptr) {
         for (rt::OverrideSpec& spec :
@@ -568,6 +598,7 @@ int run_machine(const Options& command_line, const char* argv0, StatusChannel& s
 #ifdef DQ8_HAVE_WINDOW
     if (platform) {
         std::uint64_t presented = ~std::uint64_t{0};
+        std::vector<AtVblank> window_dumps = o.dump_window;
         while (!done.load()) {
             if (!platform->pump_events()) {
                 quit.store(true);
@@ -579,9 +610,26 @@ int run_machine(const Options& command_line, const char* argv0, StatusChannel& s
             }
             gs::FrameImage frame;
             if (pipeline.latest_frame(frame) && frame.field != presented) {
-                platform->present(frame, 4.0 / 3.0);
+                // M5 session C: --dump-window keeps what the window shows at the first frame of vblank N or
+                // later.
+                const auto dump =
+                    std::find_if(window_dumps.begin(), window_dumps.end(),
+                                 [&frame](const AtVblank& d) { return frame.field >= d.vblank; });
+                if (dump != window_dumps.end()) {
+                    rt::sdl::request_window_capture(*platform);
+                }
+                platform->present(frame, present_aspect(o, display_watcher.get()));
                 presented = frame.field;
                 status.frame();
+                if (dump != window_dumps.end()) {
+                    gs::FrameImage shot;
+                    if (!rt::sdl::take_window_capture(*platform, shot) ||
+                        !gs::write_png(dump->path.string(), shot)) {
+                        std::fprintf(stderr, "dq8-game: cannot write the window copy %s\n",
+                                     dump->path.string().c_str());
+                    }
+                    window_dumps.erase(dump);
+                }
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
             }

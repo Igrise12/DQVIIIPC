@@ -26,7 +26,9 @@ std::optional<core::settings::Store> load_settings(const Options& o, const fs::p
 struct SettingOption {
     std::string_view key;  // "audio.output"
     std::string_view flag; // "audio": when it is on the command line, the flag wins
-    void (*apply)(Options& o, const core::settings::Store& store);
+    // Sets the Options fields; false when the setting does not apply to this run (e.g. the internal
+    // resolution without --gs parallel, or next to an explicit --ssaa).
+    bool (*apply)(Options& o, const core::settings::Store& store);
 };
 
 // Every setting dq8-game applies, in schema order.

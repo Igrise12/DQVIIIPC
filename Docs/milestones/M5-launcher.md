@@ -457,11 +457,110 @@ Gates: dev-clang 627/627, asan 627/627, ci-gcc (GCC 16, Release, `-Werror`) 626/
 (`first_frame` and `fps` from presents, rumble) were checked in code and on the synthetic machine, not with a window
 on the disc; the launcher drives none of this yet (B).
 
+### Session C: display, input, audio and widescreen (2026-10-22)
+
+**Coordinator decisions (2026-10-22).** Approved outside C's file list:
+1. `WindowConfig` in `src/runtime/platform/platform.h` gains the window mode, filter, integer scaling and an
+   `InputConfig` (bindings, dead zone, rumble strength), with defaults equal to M4's behaviour (windowed, linear,
+   no integer scaling, no dead zone, full rumble, the M3 bindings), so the null platform, the test fakes and every
+   golden stay unchanged.
+2. The shared input-profile code lives in core, `include/dq8/core/input_profile.h` and
+   `src/core/input/input_profile.cpp`, rather than in a copy in the launcher, since the launcher links only core.
+   Conditions: no SDL types or headers in core (sources stay strings, exactly SDL3's spellings); toml11 stays
+   private to the .cpp; the pad controls are our own fixed list in the header (`control_names`); unknown or
+   invalid entries come back as warnings, not exceptions, as settings files load; tests in
+   `m5_display_tests.cmake`; a row in `src/core/README.md`.
+3. One-line or one-row additions: `src/game/CMakeLists.txt`, `src/game/README.md`, `data/README.md`,
+   `src/host/README.md`, `src/host/CMakeLists.txt` (`display_wiring.cpp`, which keeps C's logic out of
+   `run_machine.cpp`). Session A also adds a line to `src/core/CMakeLists.txt` and two to
+   `src/host/CMakeLists.txt`; C resolves those one-line conflicts at its rebase onto A.
+
+**dq8-game flags for the C rows** (`src/host/options.*`, one marked block; defaults are M4's behaviour):
+
+| Key | Flag | Notes for the settings step |
+|---|---|---|
+| `display.window_mode` | `--window-mode windowed\|borderless\|fullscreen` | Alt+Enter toggles between the window and full screen (borderless when the mode is `windowed`); its Return never reaches the pad |
+| `display.width`, `display.height` | `--window-size WxH` | One flag for both keys |
+| `display.vsync` | `--vsync on\|off` | |
+| `display.internal_resolution` | `--internal-resolution 1x..4x` | Refused with `--ssaa` and without `--gs parallel`: the settings step should set it only when the run uses `--gs parallel` and no `--ssaa` was given |
+| `display.aspect` | `--aspect auto\|4:3\|16:9\|stretch` | |
+| `display.integer_scaling` | `--integer-scaling on\|off` | |
+| `display.filter` | `--filter linear\|nearest` | |
+| `audio.device` | `--audio-device NAME` | `""`: leave the flag out |
+| `audio.volume` | `--volume 0..100` | |
+| `input.profile` | `--input-profile NAME\|FILE` | |
+| `input.deadzone` | `--deadzone 0..50` | |
+| `input.rumble_strength` | `--rumble-strength 0..100` | |
+
+Also new: `--pipeline-cache FILE|none` (default `<user data>/cache/parallel-gs.pipelines` with `--window`, none
+headless) and `--dump-window N:PATH` (with `--window`: a PNG of what the window shows at the first frame of vblank N
+or later; how the checks below were made). The flag defaults are M4's behaviour, following the goldens rule
+(without `--config` or `--set` a run is M4's): `--aspect 4:3` and `--deadzone 0`; the schema's own defaults (`auto`,
+8 %) come through `--config`, so the settings step sets every C key from the store, defaults included. With no dead
+zone a pad stick passes through as it is; M3's rule that a stick byte between 0x70 and 0x90 does not replace a held
+stick key is kept (`sdl_bindings.h`), so a resting stick never cancels a key.
+
+**Widescreen.** The profile's new `[display]` table (`widescreen_variable = 0x003D275C`, `widescreen_width = 1`,
+`widescreen_value = 1`; spike S6b's selector byte) feeds `game::DisplayWatcher`, attached only with `--window`; it
+reads the byte at every vblank start and emits nothing. On the disc (release build, `--window`): with the first-run
+settings at Wide Screen 16:9 (`boot-to-title-settings-only.dq8in`) the game plays `L5_CI_W.PSS` and `TAKA_W.PSS` and
+the window shows the logo, the flyover and the title at 16:9 with correct proportions; with Normal 4:3 (Cross, Cross)
+the game plays `L5_CI_B.PSS` and `TAKA_N.PSS` (the 4:3 variants are `_B`/`_N` here, not unsuffixed names) and the
+window shows 4:3. M4's open "movie geometry" item (our logo 4/3 narrower than PCSX2's) is the 16:9-over-4:3 factor
+that `auto` now applies (*inferred*: not re-measured against PCSX2's frame).
+
+**Internal resolution** (`host/display_wiring.h`): paraLLEl-GS's high-resolution scan-out is at most twice the
+mode's size (`mode_width << 1` in its renderer) and needs a sampling grid of at least 2 on both axes, so `2x` is 4
+samples (2×2), `3x` 8 (2×4) and `4x` 16 (4×4), all with high-resolution scan-out, super-sampled textures and
+back-buffer promotion, and all scan out 1024×896 for the 512×448 mode; 3x and 4x only smooth it further. `1x` sets
+none of them (M4's picture). The pipeline cache was 24 MB after a title run at 2x. On the disc at `2x` (release,
+headless, M4's B2 route under `--movies blank`; frames in the scratchpad, measured as the share of 2×2 blocks with
+detail of their own, which is 0 for a pixel-doubled picture): the opening's 3D scene at vblank 2290 has 32.6 % (mean
+spread 6.1; edges step in single 2x pixels), so the picture is genuinely higher-resolution; a 2D menu (the
+memory-card screen) has 0.6 %, as S5b found for 2D scenes; the same 3D scene during its fade-in (vblank 2050) has
+only 1.4 %. *Inferred* from paraLLEl-GS's heuristic (`promote_render_pass_to_backbuffer` accepts a render pass of
+textured sprites from one texture only): a fade drawn over the blit disqualifies the promotion, so during fades 2x
+falls back to an upscale of the native picture. That answers part of S5b's open question on the heuristic over a
+session; a fix would be a paraLLEl-GS patch (`patches/parallel-gs/`), not in M5's scope.
+
+**Determinism.** A headless boot to the title (`boot-to-title-settings-only.dq8in`, `--movies skip`, `--until title`)
+gives byte-identical event streams (2,812 lines; title at vblank 1375; gs `ce0e39f3…`, RAM `c8776e04…`, audio
+`1efb4699…`) from main's dev-clang binary at `9b004b9`, from this branch, and from this branch with `--aspect stretch
+--volume 10 --deadzone 30 --input-profile nosuch --window-mode fullscreen`. 1x and 2x runs of the same script give
+the same gs and RAM hashes (5,100 vblanks of the B2 script under `--movies skip`).
+
+**Input.** Bindings come from input profiles (`Docs/formats/input-profile.md`); the parser and writer are SDL-free
+in `dq8::core::input` (`include/dq8/core/input_profile.h`) so that the launcher's Controllers page (session B) uses
+the same code. Source names are SDL3's own (scancode names; gamepad button and axis strings, `a` = south by
+position, `leftx-` for a half axis), so both sides convert with SDL. The built-in profile is M3's table; the switch
+tables in `sdl_mapping.cpp` are gone. Ports (`sdl/sdl_ports.h`): by GUID plus serial, a replugged pad gets its port
+back; tested with SDL virtual gamepads (unplug both, plug B first: B keeps port 2). A profile may pin a GUID to a port
+(`port = 1` or `2`, as players count).
+
+**Audio.** `--audio-device` matches `SDL_GetAudioDeviceName()` exactly; an unknown name falls back to the default
+device with one warning and is looked for again at every reopen. `--volume` is `SDL_SetAudioStreamGain` on the
+device stream, after `AudioOutput`'s hash and taps. On the disc (SDL's `disk` audio driver, which records what the
+device plays; headless boot to the title at `--speed 1`): at `--volume 30` the device got RMS 0.296 and peak 0.300 of
+the `--volume 100` run, while the `--audio-dump` WAV files were byte-identical and the audio hash the same.
+
+**Window, on this desktop** (Hyprland, Wayland, 1920×1080; `--dump-window`): `borderless` and `fullscreen` both give
+a 1920×1080 window; `--integer-scaling on --filter nearest --aspect 4:3` draws the 512×448 frame at exactly 1195×896
+(×2 vertically) centred at (362, 92), every source row doubled. A tiling compositor ignores `--window-size`
+(Hyprland tiled the window at 951×1034); floating window managers honour it. vsync is `SDL_SetRenderVSync`
+(checked on the renderer in the tests, not measured on the monitor).
+
+**Waits on session A:** the settings step for the C keys (the table above), wired by C at its rebase onto A; a
+missing or broken input profile is a warning on stderr today (`window_config()` returns it) and could also become a
+`warning` status line. **Not covered:** a real gamepad unplugged and plugged in again (none was connected during the
+session; the virtual-gamepad tests cover the logic, and dq8-game reports each pad's port on stderr), `--window-size`
+on a floating window manager, and vsync on the monitor.
+
 ## Bring-up log
 
 | Date | Step | Result |
 |---|---|---|
 | 2026-10-22 | Day 0 | Contracts, stubs and the placeholder launcher on `main`; dev-clang and asan unit tests pass (596); the launcher runs three frames on SDL's dummy driver |
+| 2026-10-22 | Session C | Window modes and Alt+Enter, aspect auto through the `[display]` watcher (16:9 frames and the `_W` movies at 16:9, 4:3 with Normal 4:3), integer scaling and filter, `--internal-resolution` (a real 2x picture in 3D scenes), pipeline cache, input profiles with dead zones, stable ports and rumble strength, audio device and volume; event streams byte-identical to `main` (see "Protocol notes"); unit tests pass on dev-clang and asan (614) and on GCC with `-Werror` (613); checker `--tree --deep`, pre-commit and `reuse lint` clean |
 
 ## Results
 

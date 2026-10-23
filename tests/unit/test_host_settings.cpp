@@ -8,6 +8,7 @@
 #include "host/status_channel.h"
 #include "support/iso_builder.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <filesystem>
@@ -71,9 +72,17 @@ TEST_CASE("dq8-game settings: none without --config or --set; flags win over --s
         auto store = dq8::host::load_settings(o, exe_dir);
         REQUIRE(store);
         const std::vector<std::string> applied = dq8::host::apply_settings(o, *store);
-        CHECK(applied == std::vector<std::string>{"audio.output=null", "audio.latency_ms=120",
-                                                  "input.rumble=false", "game.movies=skip",
-                                                  "game.save_dir=/saves", "game.memory_card2=formatted"});
+        // The A rows (session C's display and input rows apply too, with their defaults; tested below).
+        std::vector<std::string> a_rows;
+        for (const std::string& row : applied) {
+            if (row.rfind("audio.output=", 0) == 0 || row.rfind("audio.latency_ms=", 0) == 0 ||
+                row.rfind("input.rumble=", 0) == 0 || row.rfind("game.", 0) == 0) {
+                a_rows.push_back(row);
+            }
+        }
+        CHECK(a_rows == std::vector<std::string>{"audio.output=null", "audio.latency_ms=120",
+                                                 "input.rumble=false", "game.movies=skip",
+                                                 "game.save_dir=/saves", "game.memory_card2=formatted"});
         CHECK(o.audio == "null");
         CHECK(o.audio_latency_ms == 120);
         CHECK_FALSE(o.rumble);
@@ -129,6 +138,81 @@ TEST_CASE("dq8-game settings: none without --config or --set; flags win over --s
     CHECK_THAT(store->warnings()[0], ContainsSubstring("audio.latency_ms = 5 is outside 10 to 1000"));
 }
 
+TEST_CASE("dq8-game settings: session C's display, input and audio-device rows", "[m5][host]") {
+    const dq8::test::TempDir tmp;
+    const fs::path file = tmp.path() / "settings.toml";
+    std::ofstream(file)
+        << "schema_version = 1\n[display]\nwindow_mode = \"windowed\"\nwidth = 1920\n"
+           "height = 1080\nvsync = false\ninternal_resolution = \"3x\"\naspect = \"16:9\"\n"
+           "integer_scaling = true\nfilter = \"nearest\"\n[audio]\ndevice = \"USB DAC\"\n"
+           "volume = 40\n[input]\nprofile = \"arcade\"\ndeadzone = 15\nrumble_strength = 30\n";
+
+    // Every C row from the file, with the paraLLEl-GS backend (the internal resolution needs it).
+    {
+        dq8::host::Options o = parse(
+            {"--elf", "a.elf", "--module-dir", "m", "--gs", "parallel", "--config", file.string().c_str()});
+        auto store = dq8::host::load_settings(o, exe_dir);
+        REQUIRE(store);
+        const std::vector<std::string> applied = dq8::host::apply_settings(o, *store);
+        CHECK(o.window_mode == "windowed");
+        CHECK(o.window_width == 1920);
+        CHECK(o.window_height == 1080);
+        CHECK_FALSE(o.vsync);
+        CHECK(o.internal_resolution == 3);
+        CHECK(o.aspect == "16:9");
+        CHECK(o.integer_scaling);
+        CHECK(o.filter == "nearest");
+        CHECK(o.audio_device == "USB DAC");
+        CHECK(o.volume == 40);
+        CHECK(o.input_profile == "arcade");
+        CHECK(o.deadzone == 15);
+        CHECK(o.rumble_strength == 30);
+        CHECK(std::find(applied.begin(), applied.end(), "display.internal_resolution=3x") != applied.end());
+    }
+    // Flags win; the internal resolution stays out without --gs parallel and next to an explicit --ssaa; the
+    // window size applies only to a windowed window ("requires").
+    {
+        dq8::host::Options o =
+            parse({"--elf", "a.elf", "--module-dir", "m", "--config", file.string().c_str(), "--set",
+                   "display.window_mode=borderless", "--aspect", "4:3", "--volume", "90"});
+        auto store = dq8::host::load_settings(o, exe_dir);
+        REQUIRE(store);
+        const std::vector<std::string> applied = dq8::host::apply_settings(o, *store);
+        CHECK(o.aspect == "4:3");
+        CHECK(o.volume == 90);
+        CHECK(o.window_mode == "borderless");
+        CHECK(o.window_width == 1280); // M4's size: display.width requires display.window_mode=windowed
+        CHECK(o.internal_resolution == 1);
+        for (const std::string& a : applied) {
+            CHECK(a.rfind("display.internal_resolution=", 0) != 0);
+            CHECK(a.rfind("display.width=", 0) != 0);
+            CHECK(a.rfind("display.aspect=", 0) != 0);
+            CHECK(a.rfind("audio.volume=", 0) != 0);
+        }
+        dq8::host::Options with_ssaa = parse({"--elf", "a.elf", "--module-dir", "m", "--gs", "parallel",
+                                              "--ssaa", "4", "--config", file.string().c_str()});
+        auto store2 = dq8::host::load_settings(with_ssaa, exe_dir);
+        REQUIRE(store2);
+        (void)dq8::host::apply_settings(with_ssaa, *store2);
+        CHECK(with_ssaa.internal_resolution == 1);
+        CHECK(with_ssaa.ssaa == 4);
+    }
+    // The schema's defaults (a missing file) are what the launcher's default settings play with.
+    {
+        dq8::host::Options o = parse(
+            {"--elf", "a.elf", "--module-dir", "m", "--config", (tmp.path() / "none.toml").string().c_str()});
+        auto store = dq8::host::load_settings(o, exe_dir);
+        REQUIRE(store);
+        (void)dq8::host::apply_settings(o, *store);
+        CHECK(o.aspect == "auto");
+        CHECK(o.deadzone == 8);
+        CHECK(o.window_width == 1280);
+        CHECK(o.window_height == 960);
+        CHECK(o.vsync);
+        CHECK(o.volume == 100);
+        CHECK(o.input_profile == "default");
+    }
+}
 TEST_CASE("the status channel writes its five kinds of line", "[m5][host]") {
     const dq8::test::TempDir tmp;
     const fs::path file = tmp.path() / "status.jsonl";

@@ -1,17 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 //
-// IPlatform over SDL3 (ADR-0005): one resizable window with an SDL renderer, keyboard and gamepads mapped to
-// PadState by the fixed M3 table of sdl_mapping.h, and present() as a texture upload drawn with a 4:3 or 16:9
-// fit and bilinear filtering (the scaling PCSX2's presentation used in S5b). Main thread only. Key state is
-// tracked from events rather than SDL's keyboard snapshot, so injected events (tests, automation) behave like
-// real ones. Rumble (M4): set_rumble drives SDL_RumbleGamepad on the port's gamepad and renews it while the
-// game keeps a motor running.
+// IPlatform over SDL3 (ADR-0005): one window with an SDL renderer, keyboard and gamepads mapped to PadState,
+// and present() as a texture upload drawn with an aspect fit. Main thread only. Key state is tracked from
+// events rather than SDL's keyboard snapshot, so injected events (tests, automation) behave like real ones.
+// Rumble (M4): set_rumble drives SDL_RumbleGamepad on the port's gamepad and renews it while the game keeps a
+// motor running.
+//
+// M5 session C: the window opens windowed, borderless or in exclusive fullscreen (at the desktop's mode) and
+// Alt+Enter toggles between the window and full screen (the Return of Alt+Enter never reaches the pad); the
+// picture is scaled with a linear or nearest filter, optionally by whole numbers (sdl_mapping.h); bindings
+// come from the input profile (sdl_bindings.h), the sticks pass a radial dead zone, gamepads keep their pad
+// port across a replug (sdl_ports.h), and rumble is scaled by the configured strength.
 
 #include "runtime/platform/sdl/sdl_platform.h"
 
 #include "runtime/platform/platform.h"
+#include "runtime/platform/sdl/sdl_bindings.h"
 #include "runtime/platform/sdl/sdl_mapping.h"
+#include "runtime/platform/sdl/sdl_ports.h"
 
 #include <SDL3/SDL.h>
 #include <algorithm>
@@ -20,7 +27,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -34,11 +43,17 @@ namespace {
     throw std::runtime_error("SDL3: " + what + ": " + SDL_GetError());
 }
 
+std::string guid_string(SDL_GUID guid) {
+    std::array<char, 33> text{};
+    SDL_GUIDToString(guid, text.data(), static_cast<int>(text.size()));
+    return text.data();
+}
+
 class SdlPlatform final : public IPlatform {
   public:
-    explicit SdlPlatform(const WindowConfig& config) {
+    explicit SdlPlatform(const WindowConfig& config) : config_(config) {
         try {
-            open(config);
+            open();
         } catch (...) {
             release();
             throw;
@@ -59,6 +74,13 @@ class SdlPlatform final : public IPlatform {
                 open_ = false;
                 break;
             case SDL_EVENT_KEY_DOWN:
+                if (event.key.scancode == SDL_SCANCODE_RETURN && (event.key.mod & SDL_KMOD_ALT) != 0) {
+                    if (!event.key.repeat) {
+                        toggle_fullscreen();
+                    }
+                    break; // Alt+Enter is the window's, not Start
+                }
+                [[fallthrough]];
             case SDL_EVENT_KEY_UP:
                 if (event.key.scancode < SDL_SCANCODE_COUNT) {
                     keys_[static_cast<std::size_t>(event.key.scancode)] = event.key.down;
@@ -98,16 +120,22 @@ class SdlPlatform final : public IPlatform {
 
     PadState pad(unsigned port) const override {
         PadState state;
-        SDL_Gamepad* gamepad = port < gamepads_.size() ? gamepads_[port] : nullptr;
+        const Pad* gamepad = pad_at(port);
         if (port == 0) {
-            sdl::apply_keyboard(state,
-                                [this](SDL_Scancode code) { return keys_[static_cast<std::size_t>(code)]; });
+            sdl::apply_map(state, keyboard_, [this](const sdl::Source& s) {
+                return s.kind == sdl::Source::Kind::key && s.code >= 0 && s.code < SDL_SCANCODE_COUNT &&
+                               keys_[static_cast<std::size_t>(s.code)]
+                           ? 1.0f
+                           : 0.0f;
+            });
         } else if (gamepad == nullptr) {
             state.connected = false;
             return state;
         }
         if (gamepad != nullptr) {
-            apply_gamepad(state, gamepad);
+            const sdl::GamepadReading reading = read(gamepad->handle);
+            sdl::apply_map(state, gamepad->map,
+                           [&reading](const sdl::Source& s) { return reading.amount(s); });
         }
         sdl::fill_pressure(state);
         return state;
@@ -124,7 +152,9 @@ class SdlPlatform final : public IPlatform {
             int out_w = 0;
             int out_h = 0;
             SDL_GetCurrentRenderOutputSize(renderer_, &out_w, &out_h);
-            const sdl::FitRect fit = sdl::aspect_fit(out_w, out_h, aspect);
+            const sdl::FitRect fit =
+                sdl::present_rect(out_w, out_h, static_cast<std::uint32_t>(texture_w_),
+                                  static_cast<std::uint32_t>(texture_h_), aspect, config_.integer_scaling);
             const SDL_FRect dst{fit.x, fit.y, fit.w, fit.h};
             SDL_RenderTexture(renderer_, texture_, nullptr, &dst);
         }
@@ -150,8 +180,17 @@ class SdlPlatform final : public IPlatform {
         return true;
     }
 
+    SDL_Window* window() const noexcept { return window_; }
+    bool fullscreen() const noexcept { return fullscreen_; }
+    std::optional<unsigned> port_of(SDL_JoystickID id) const { return ports_.port_of(id); }
+
   private:
-    void open(const WindowConfig& config) {
+    struct Pad {
+        SDL_Gamepad* handle = nullptr;
+        sdl::DeviceMap map;
+    };
+
+    void open() {
         if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
             fail("cannot initialise video");
         }
@@ -163,8 +202,18 @@ class SdlPlatform final : public IPlatform {
             std::fprintf(stderr, "SDL3: gamepads unavailable: %s\n", SDL_GetError());
         }
 
-        window_ = SDL_CreateWindow(config.title.c_str(), std::max(config.width, 1),
-                                   std::max(config.height, 1), SDL_WINDOW_RESIZABLE);
+        std::vector<std::string> unknown;
+        keyboard_ = sdl::keyboard_map(config_.input.profile.keyboard, &unknown);
+        warn_unknown(unknown, "keyboard");
+        for (const core::input::DeviceProfile& d : config_.input.profile.devices) {
+            if (d.port) {
+                ports_.pin(d.guid, *d.port);
+            }
+        }
+
+        window_ =
+            SDL_CreateWindow(config_.title.c_str(), std::max(config_.width, 1), std::max(config_.height, 1),
+                             SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
         if (window_ == nullptr) {
             fail("cannot create the window");
         }
@@ -172,16 +221,19 @@ class SdlPlatform final : public IPlatform {
         if (renderer_ == nullptr) {
             fail("cannot create a renderer");
         }
-        if (config.vsync && !SDL_SetRenderVSync(renderer_, 1)) {
+        if (!SDL_SetRenderVSync(renderer_, config_.vsync ? 1 : 0) && config_.vsync) {
             std::fprintf(stderr, "SDL3: vsync unavailable: %s\n", SDL_GetError());
+        }
+        if (config_.mode != WindowMode::windowed) {
+            enter_fullscreen(config_.mode);
         }
     }
 
     void release() noexcept {
-        for (SDL_Gamepad* gamepad : gamepads_) {
-            SDL_CloseGamepad(gamepad);
+        for (auto& [id, pad] : pads_) {
+            SDL_CloseGamepad(pad.handle);
         }
-        gamepads_.clear();
+        pads_.clear();
         if (texture_ != nullptr) {
             SDL_DestroyTexture(texture_);
             texture_ = nullptr;
@@ -191,6 +243,9 @@ class SdlPlatform final : public IPlatform {
             renderer_ = nullptr;
         }
         if (window_ != nullptr) {
+            if (fullscreen_) {
+                SDL_ShowCursor();
+            }
             SDL_DestroyWindow(window_);
             window_ = nullptr;
         }
@@ -205,6 +260,49 @@ class SdlPlatform final : public IPlatform {
         // SDL's subsystems are reference-counted; tear SDL down once nothing else in the process uses it.
         if (SDL_WasInit(0) == 0) {
             SDL_Quit();
+        }
+    }
+
+    // Borderless covers the display at the desktop's mode; exclusive switches to the closest fullscreen mode
+    // to the desktop's (the same size on most systems, but the window owns the display).
+    void enter_fullscreen(WindowMode mode) {
+        const SDL_DisplayMode* use = nullptr;
+        SDL_DisplayMode closest{};
+        if (mode == WindowMode::fullscreen) {
+            const SDL_DisplayID display = SDL_GetDisplayForWindow(window_);
+            const SDL_DisplayMode* desktop = display != 0 ? SDL_GetDesktopDisplayMode(display) : nullptr;
+            if (desktop != nullptr &&
+                SDL_GetClosestFullscreenDisplayMode(display, desktop->w, desktop->h, desktop->refresh_rate,
+                                                    true, &closest)) {
+                use = &closest;
+            } else {
+                std::fprintf(stderr, "SDL3: no exclusive fullscreen mode (%s); using borderless fullscreen\n",
+                             SDL_GetError());
+            }
+        }
+        if (!SDL_SetWindowFullscreenMode(window_, use) || !SDL_SetWindowFullscreen(window_, true)) {
+            std::fprintf(stderr, "SDL3: cannot enter fullscreen: %s\n", SDL_GetError());
+            return;
+        }
+        fullscreen_ = true;
+        SDL_HideCursor();
+    }
+
+    void leave_fullscreen() {
+        if (!SDL_SetWindowFullscreen(window_, false)) {
+            std::fprintf(stderr, "SDL3: cannot leave fullscreen: %s\n", SDL_GetError());
+            return;
+        }
+        fullscreen_ = false;
+        SDL_ShowCursor();
+    }
+
+    // Alt+Enter: the window and the configured full screen (borderless when the window mode is windowed).
+    void toggle_fullscreen() {
+        if (fullscreen_) {
+            leave_fullscreen();
+        } else {
+            enter_fullscreen(config_.mode == WindowMode::windowed ? WindowMode::borderless : config_.mode);
         }
     }
 
@@ -247,7 +345,8 @@ class SdlPlatform final : public IPlatform {
             if (texture_ == nullptr) {
                 fail("cannot create a " + std::to_string(w) + "x" + std::to_string(h) + " texture");
             }
-            SDL_SetTextureScaleMode(texture_, SDL_SCALEMODE_LINEAR);
+            SDL_SetTextureScaleMode(texture_, config_.filter == ScaleFilter::nearest ? SDL_SCALEMODE_NEAREST
+                                                                                     : SDL_SCALEMODE_LINEAR);
             texture_w_ = w;
             texture_h_ = h;
         }
@@ -255,80 +354,120 @@ class SdlPlatform final : public IPlatform {
     }
 
     void add_gamepad(SDL_JoystickID id) {
-        if (!gamepad_) {
+        if (!gamepad_ || pads_.count(id) != 0) {
             return;
         }
-        SDL_Gamepad* gamepad = SDL_OpenGamepad(id);
-        if (gamepad == nullptr) {
+        SDL_Gamepad* handle = SDL_OpenGamepad(id);
+        if (handle == nullptr) {
             std::fprintf(stderr, "SDL3: cannot open gamepad %u: %s\n", static_cast<unsigned>(id),
                          SDL_GetError());
             return;
         }
-        gamepads_.push_back(gamepad);
-        send_rumble(static_cast<unsigned>(gamepads_.size() - 1)); // a pad plugged in while a motor runs
+        const std::string guid = guid_string(SDL_GetGamepadGUIDForID(id));
+        const char* serial = SDL_GetGamepadSerial(handle);
+        const char* name = SDL_GetGamepadName(handle);
+        Pad pad;
+        pad.handle = handle;
+        std::vector<std::string> unknown;
+        pad.map = sdl::gamepad_map(config_.input.profile.gamepad_for(guid), &unknown);
+        warn_unknown(unknown, "gamepad");
+        pads_.emplace(id, std::move(pad));
+        const auto port = ports_.connect(id, guid, serial != nullptr ? serial : "");
+        if (port) {
+            std::fprintf(stderr, "input: %s (%s) on pad port %u\n", name != nullptr ? name : "gamepad",
+                         guid.c_str(), *port + 1);
+            send_rumble(*port); // a pad plugged in while a motor runs
+        } else {
+            std::fprintf(stderr, "input: %s (%s) waits: both pad ports are taken\n",
+                         name != nullptr ? name : "gamepad", guid.c_str());
+        }
     }
 
-    // Drives the motors of the gamepad at `port`, if there is one, for twice the renewal period.
+    void remove_gamepad(SDL_JoystickID id) {
+        const auto it = pads_.find(id);
+        if (it == pads_.end()) {
+            return;
+        }
+        if (const auto port = ports_.disconnect(id)) {
+            std::fprintf(stderr, "input: the gamepad on pad port %u left; the port waits for it\n",
+                         *port + 1);
+        }
+        SDL_CloseGamepad(it->second.handle);
+        pads_.erase(it);
+    }
+
+    const Pad* pad_at(unsigned port) const {
+        const auto id = ports_.instance_at(port);
+        if (!id) {
+            return nullptr;
+        }
+        const auto it = pads_.find(*id);
+        return it != pads_.end() ? &it->second : nullptr;
+    }
+
+    // The gamepad's controls now, its sticks through the dead zone.
+    sdl::GamepadReading read(SDL_Gamepad* gamepad) const {
+        sdl::GamepadReading r;
+        for (int a = 0; a < SDL_GAMEPAD_AXIS_COUNT; ++a) {
+            r.axes[static_cast<std::size_t>(a)] =
+                sdl::axis_amount(SDL_GetGamepadAxis(gamepad, static_cast<SDL_GamepadAxis>(a)));
+        }
+        const float deadzone =
+            static_cast<float>(std::min<std::uint32_t>(config_.input.deadzone_percent, 99)) / 100.0f;
+        sdl::apply_deadzone(r.axes[SDL_GAMEPAD_AXIS_LEFTX], r.axes[SDL_GAMEPAD_AXIS_LEFTY], deadzone);
+        sdl::apply_deadzone(r.axes[SDL_GAMEPAD_AXIS_RIGHTX], r.axes[SDL_GAMEPAD_AXIS_RIGHTY], deadzone);
+        for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b) {
+            r.buttons[static_cast<std::size_t>(b)] =
+                SDL_GetGamepadButton(gamepad, static_cast<SDL_GamepadButton>(b));
+        }
+        return r;
+    }
+
+    // Drives the motors of the gamepad at `port`, if there is one, for twice the renewal period, scaled by
+    // the configured strength.
     void send_rumble(unsigned port) {
-        if (port >= rumble_.size() || port >= gamepads_.size()) {
+        const Pad* pad = pad_at(port);
+        if (port >= rumble_.size() || pad == nullptr) {
             return;
         }
         Rumble& r = rumble_[port];
+        const std::uint32_t strength = std::min<std::uint32_t>(config_.input.rumble_percent, 100);
+        const auto scaled = [strength](std::uint16_t v) {
+            return static_cast<std::uint16_t>(v * strength / 100);
+        };
         const bool on = r.low != 0 || r.high != 0;
-        if (!SDL_RumbleGamepad(gamepads_[port], r.low, r.high, on ? 2 * rumble_renew_ms : 0) && on &&
-            !rumble_warned_) {
+        if (!SDL_RumbleGamepad(pad->handle, scaled(r.low), scaled(r.high), on ? 2 * rumble_renew_ms : 0) &&
+            on && !rumble_warned_) {
             rumble_warned_ = true;
             std::fprintf(stderr, "SDL3: the gamepad does not rumble: %s\n", SDL_GetError());
         }
         r.sent = SDL_GetTicks();
     }
 
-    void remove_gamepad(SDL_JoystickID id) {
-        const auto it = std::find_if(gamepads_.begin(), gamepads_.end(),
-                                     [id](SDL_Gamepad* gamepad) { return SDL_GetGamepadID(gamepad) == id; });
-        if (it != gamepads_.end()) {
-            SDL_CloseGamepad(*it);
-            gamepads_.erase(it);
+    void warn_unknown(const std::vector<std::string>& names, const char* device) {
+        for (const std::string& name : names) {
+            if (warned_names_.insert(std::string(device) + ":" + name).second) {
+                std::fprintf(stderr, "input: the %s binding '%s' is not a name SDL knows; it is ignored\n",
+                             device, name.c_str());
+            }
         }
     }
 
-    static void apply_gamepad(PadState& state, SDL_Gamepad* gamepad) {
-        for (int b = 0; b < SDL_GAMEPAD_BUTTON_COUNT; ++b) {
-            const auto button = static_cast<SDL_GamepadButton>(b);
-            if (SDL_GetGamepadButton(gamepad, button)) {
-                state.buttons =
-                    static_cast<std::uint16_t>(state.buttons | sdl::button_for_gamepad_button(button));
-            }
-        }
-        if (sdl::trigger_pressed(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER))) {
-            state.buttons = static_cast<std::uint16_t>(state.buttons | pad_l2);
-        }
-        if (sdl::trigger_pressed(SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER))) {
-            state.buttons = static_cast<std::uint16_t>(state.buttons | pad_r2);
-        }
-        // A stick off centre overrides the keyboard's stick keys; a centred one leaves them alone.
-        const auto stick = [gamepad](SDL_GamepadAxis axis, std::uint8_t& value) {
-            const std::uint8_t v = sdl::stick_byte(SDL_GetGamepadAxis(gamepad, axis));
-            if (v < 0x70 || v > 0x90) {
-                value = v;
-            }
-        };
-        stick(SDL_GAMEPAD_AXIS_LEFTX, state.lx);
-        stick(SDL_GAMEPAD_AXIS_LEFTY, state.ly);
-        stick(SDL_GAMEPAD_AXIS_RIGHTX, state.rx);
-        stick(SDL_GAMEPAD_AXIS_RIGHTY, state.ry);
-    }
-
+    WindowConfig config_;
     bool video_ = false;
     bool gamepad_ = false;
     bool open_ = true;
+    bool fullscreen_ = false;
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     SDL_Texture* texture_ = nullptr;
     int texture_w_ = 0;
     int texture_h_ = 0;
     std::array<bool, SDL_SCANCODE_COUNT> keys_{};
-    std::vector<SDL_Gamepad*> gamepads_; // in the order they were attached: index = pad port
+    sdl::DeviceMap keyboard_;
+    std::map<SDL_JoystickID, Pad> pads_; // every open gamepad, with a port or waiting for one
+    sdl::PortAssigner ports_;
+    std::set<std::string> warned_names_;
     struct Rumble {
         std::uint16_t low = 0;
         std::uint16_t high = 0;
@@ -360,6 +499,21 @@ bool sdl::request_window_capture(IPlatform& platform) {
 bool sdl::take_window_capture(IPlatform& platform, gs::FrameImage& out) {
     auto* sdl_platform = dynamic_cast<SdlPlatform*>(&platform);
     return sdl_platform != nullptr && sdl_platform->take_capture(out);
+}
+
+SDL_Window* sdl::window_of(IPlatform& platform) {
+    auto* sdl_platform = dynamic_cast<SdlPlatform*>(&platform);
+    return sdl_platform != nullptr ? sdl_platform->window() : nullptr;
+}
+
+bool sdl::is_fullscreen(IPlatform& platform) {
+    auto* sdl_platform = dynamic_cast<SdlPlatform*>(&platform);
+    return sdl_platform != nullptr && sdl_platform->fullscreen();
+}
+
+std::optional<unsigned> sdl::gamepad_port(IPlatform& platform, std::uint32_t joystick_id) {
+    auto* sdl_platform = dynamic_cast<SdlPlatform*>(&platform);
+    return sdl_platform != nullptr ? sdl_platform->port_of(joystick_id) : std::nullopt;
 }
 
 } // namespace dq8::rt

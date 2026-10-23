@@ -3,90 +3,13 @@
 #include "runtime/platform/sdl/sdl_mapping.h"
 
 #include <array>
+#include <cmath>
 #include <cstddef>
 
 namespace dq8::rt::sdl {
 
-std::uint16_t button_for_scancode(SDL_Scancode code) noexcept {
-    switch (code) {
-    case SDL_SCANCODE_UP:
-        return pad_up;
-    case SDL_SCANCODE_DOWN:
-        return pad_down;
-    case SDL_SCANCODE_LEFT:
-        return pad_left;
-    case SDL_SCANCODE_RIGHT:
-        return pad_right;
-    case SDL_SCANCODE_K:
-        return pad_cross;
-    case SDL_SCANCODE_L:
-        return pad_circle;
-    case SDL_SCANCODE_J:
-        return pad_square;
-    case SDL_SCANCODE_I:
-        return pad_triangle;
-    case SDL_SCANCODE_RETURN:
-        return pad_start;
-    case SDL_SCANCODE_BACKSPACE:
-        return pad_select;
-    case SDL_SCANCODE_Q:
-        return pad_l1;
-    case SDL_SCANCODE_E:
-        return pad_r1;
-    case SDL_SCANCODE_1:
-        return pad_l2;
-    case SDL_SCANCODE_3:
-        return pad_r2;
-    case SDL_SCANCODE_2:
-        return pad_l3;
-    case SDL_SCANCODE_4:
-        return pad_r3;
-    default:
-        return 0;
-    }
-}
-
-std::uint16_t button_for_gamepad_button(SDL_GamepadButton button) noexcept {
-    switch (button) {
-    case SDL_GAMEPAD_BUTTON_SOUTH:
-        return pad_cross;
-    case SDL_GAMEPAD_BUTTON_EAST:
-        return pad_circle;
-    case SDL_GAMEPAD_BUTTON_WEST:
-        return pad_square;
-    case SDL_GAMEPAD_BUTTON_NORTH:
-        return pad_triangle;
-    case SDL_GAMEPAD_BUTTON_BACK:
-        return pad_select;
-    case SDL_GAMEPAD_BUTTON_START:
-        return pad_start;
-    case SDL_GAMEPAD_BUTTON_LEFT_STICK:
-        return pad_l3;
-    case SDL_GAMEPAD_BUTTON_RIGHT_STICK:
-        return pad_r3;
-    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER:
-        return pad_l1;
-    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER:
-        return pad_r1;
-    case SDL_GAMEPAD_BUTTON_DPAD_UP:
-        return pad_up;
-    case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
-        return pad_down;
-    case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
-        return pad_left;
-    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT:
-        return pad_right;
-    default:
-        return 0;
-    }
-}
-
 std::uint8_t stick_byte(std::int16_t axis) noexcept {
     return static_cast<std::uint8_t>((static_cast<int>(axis) + 32768) >> 8);
-}
-
-bool trigger_pressed(std::int16_t axis) noexcept {
-    return axis > 32767 / 4;
 }
 
 void fill_pressure(PadState& state) noexcept {
@@ -119,6 +42,41 @@ FitRect aspect_fit(int out_w, int out_h, double aspect) noexcept {
     r.h = static_cast<float>(fit_h);
     r.x = static_cast<float>((w - fit_w) / 2.0);
     r.y = static_cast<float>((h - fit_h) / 2.0);
+    return r;
+}
+
+FitRect present_rect(int out_w, int out_h, std::uint32_t frame_w, std::uint32_t frame_h, double aspect,
+                     bool integer_scaling) noexcept {
+    if (!integer_scaling || frame_w == 0 || frame_h == 0 || out_w <= 0 || out_h <= 0) {
+        return aspect_fit(out_w, out_h, aspect);
+    }
+    double w = 0;
+    double h = 0;
+    if (aspect > 0.0) {
+        for (std::uint32_t k = static_cast<std::uint32_t>(out_h) / frame_h; k >= 1; --k) {
+            h = static_cast<double>(k) * frame_h;
+            w = std::round(h * aspect);
+            if (w <= out_w) {
+                break;
+            }
+            h = 0;
+        }
+    } else {
+        const std::uint32_t kx = static_cast<std::uint32_t>(out_w) / frame_w;
+        const std::uint32_t ky = static_cast<std::uint32_t>(out_h) / frame_h;
+        if (kx >= 1 && ky >= 1) {
+            w = static_cast<double>(kx) * frame_w;
+            h = static_cast<double>(ky) * frame_h;
+        }
+    }
+    if (h <= 0) {
+        return aspect_fit(out_w, out_h, aspect);
+    }
+    FitRect r;
+    r.w = static_cast<float>(w);
+    r.h = static_cast<float>(h);
+    r.x = static_cast<float>(std::floor((out_w - w) / 2.0));
+    r.y = static_cast<float>(std::floor((out_h - h) / 2.0));
     return r;
 }
 
