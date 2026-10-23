@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #include "host/options.h"
 
+#include <algorithm>
 #include <charconv>
 #include <cmath>
 #include <cstddef>
@@ -9,6 +10,7 @@
 #include <map>
 #include <set>
 #include <string_view>
+#include <utility>
 
 namespace dq8::host {
 
@@ -211,6 +213,10 @@ std::uint32_t parse_u32(std::string_view text, std::string_view what) {
     return static_cast<std::uint32_t>(v);
 }
 
+bool Options::was_given(std::string_view name) const noexcept {
+    return std::find(given.begin(), given.end(), name) != given.end();
+}
+
 int usage(std::FILE* out) {
     std::fputs(
         "usage: dq8-game --iso <image> --module-dir <dir> [--regions DIR] [options]\n"
@@ -265,11 +271,11 @@ int usage(std::FILE* out) {
         "  --dump-frame N:PATH      write the scanout of vblank N as PNG (repeatable)\n"
         "  --dump-ram-at N:PATH     write the 32 MiB of RAM after N vblanks (repeatable)\n"
         "  --events FILE|-          JSON-lines events (deterministic fields only)\n"
-        "  --config FILE            a settings file (the keys of config/settings/schema.toml); command-line\n"
-        "                           flags win over it\n"
-        "  --set KEY=VALUE          one setting, applied after --config (repeatable)\n"
+        "  --config FILE            a settings file (the keys of config/settings/schema.toml, with its\n"
+        "                           [profile.<id>] tables); every setting whose flag is not given applies\n"
+        "  --set KEY=VALUE          one setting, over --config (repeatable); flags win over both\n"
         "  --status FILE|-          the launcher's status lines (not deterministic): started, first frame,\n"
-        "                           frame rate, warnings, exit\n"
+        "                           frame rate, warnings, exit; with -, other output goes to stderr\n"
         "  --trace LIST             trace categories, printed on stderr: "
         "kernel,sif,rpc,dma,gs,iop,spu2,audio\n"
         "  --trace-events           also write the trace events into --events\n"
@@ -296,6 +302,7 @@ int usage(std::FILE* out) {
 Options parse_options(int argc, const char* const* argv) {
     std::map<std::string, std::vector<std::string>, std::less<>> values;
     std::set<std::string, std::less<>> flags;
+    std::vector<std::string> given;
     bool display_window = false;
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -319,6 +326,7 @@ Options parse_options(int argc, const char* const* argv) {
                     throw UsageError("--window given twice");
                 }
                 display_window = true;
+                given.push_back(name);
                 continue;
             }
             name = "overlay-window";
@@ -338,16 +346,19 @@ Options parse_options(int argc, const char* const* argv) {
                 throw UsageError("--" + name + " given twice");
             }
             list.push_back(*value);
+            given.push_back(name);
         } else if (flag_options.count(name) != 0 && !value) {
             if (!flags.insert(name).second) {
                 throw UsageError("--" + name + " given twice");
             }
+            given.push_back(name);
         } else {
             throw UsageError("unknown option '" + arg + "'");
         }
     }
 
     Options o;
+    o.given = std::move(given);
     o.help = flags.count("help") != 0;
     o.version = flags.count("version") != 0;
     if (o.help || o.version) {
@@ -531,6 +542,9 @@ Options parse_options(int argc, const char* const* argv) {
     }
     if (const auto* v = get("status")) {
         o.status = *v;
+        if (*v == "-" && o.events && *o.events == "-") {
+            throw UsageError("--status - and --events - cannot share stdout; send one of them to a file");
+        }
     }
     if (const auto* v = get("trace")) {
         o.trace = parse_trace(*v);

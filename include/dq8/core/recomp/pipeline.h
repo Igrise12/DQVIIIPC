@@ -171,7 +171,9 @@ PrepareReport prepare_units(const UnitSource& source, const PipelineOptions& opt
 GenerateReport generate_units(const PrepareReport& prepared, const PipelineOptions& options);
 
 // Stage 6: builds every generated unit's module, copies it to modules/<profile>/ and updates
-// build-manifest.toml (input hashes, generator, job count, timings). Throws the module build's errors.
+// build-manifest.toml (input hashes, generator, job count, timings). A module that comes out the same from
+// the same inputs keeps its earlier row, so a re-run that changed nothing leaves the manifest byte for byte.
+// Throws the module build's errors.
 BuildReport build_units(const PrepareReport& prepared, const GenerateReport& generated,
                         const PipelineOptions& options);
 

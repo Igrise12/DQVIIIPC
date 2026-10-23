@@ -6,6 +6,8 @@
 
 #include <cstdlib>
 #include <string>
+#include <system_error>
+#include <vector>
 
 namespace dq8::core::platform {
 
@@ -65,6 +67,44 @@ fs::path user_config_dir_from(std::string_view (*get)(std::string_view name)) {
 
 fs::path user_config_dir() {
     return user_config_dir_from(&environment);
+}
+
+fs::path find_data_dir(const fs::path& executable_dir, std::initializer_list<fs::path> relatives,
+                       const fs::path& marker) {
+    std::vector<fs::path> bases{fs::path()};
+    fs::path dir = executable_dir;
+    for (int up = 0; up < 6 && !dir.empty(); ++up) {
+        bases.push_back(dir);
+        if (dir == dir.parent_path()) {
+            break;
+        }
+        dir = dir.parent_path();
+    }
+    std::error_code ec;
+    for (const fs::path& base : bases) {
+        for (const fs::path& relative : relatives) {
+            const fs::path candidate = base.empty() ? relative : base / relative;
+            if (fs::exists(candidate / marker, ec)) {
+                return candidate;
+            }
+        }
+    }
+    return {};
+}
+
+fs::path executable_dir_of(const char* argv0) {
+    std::error_code ec;
+#if defined(__linux__)
+    const fs::path self = fs::read_symlink("/proc/self/exe", ec);
+    if (!ec) {
+        return self.parent_path();
+    }
+#endif
+    if (argv0 == nullptr) {
+        return {};
+    }
+    const fs::path p = fs::canonical(argv0, ec);
+    return ec ? fs::path() : p.parent_path();
 }
 
 } // namespace dq8::core::platform

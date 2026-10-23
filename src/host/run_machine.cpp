@@ -19,6 +19,8 @@
 #include "host/m4_wiring.h"
 #include "host/run.h"
 #include "host/session.h"
+#include "host/settings_wiring.h"
+#include "host/status_channel.h"
 #include "runtime/ee/context.h"
 #include "runtime/ee/ee_runtime.h"
 #include "runtime/ee/game_module.h"
@@ -226,27 +228,33 @@ struct Outcome {
     std::exception_ptr error;
 };
 
-} // namespace
-
-// M5 options whose subsystem has not arrived on this build yet (Docs/milestones/M5-launcher.md): the session
-// that brings each one removes its line. Refused at start-up rather than silently ignored.
-std::optional<std::string> unwired_m5_option(const Options& o) {
-    if (o.config || !o.sets.empty()) {
-        return std::string("--config and --set arrive with the settings store (M5 session A)");
-    }
-    if (o.status) {
-        return std::string("--status arrives with the launcher's status channel (M5 session A)");
-    }
-    return std::nullopt;
+// The status channel's exit reason for how the run ended (the `end` event's "ended").
+std::string_view status_reason(std::string_view ended) noexcept {
+    return ended == "requested" ? std::string_view("stop") : ended;
 }
 
-int run_game(const Options& o, const char* argv0) {
-    if (const auto unwired = unwired_m5_option(o)) {
-        throw UsageError(*unwired);
-    }
+int run_machine(const Options& command_line, const char* argv0, StatusChannel& status) {
+    // M5 session A: the settings store (settings_wiring.h), read before the disc so that a damaged file
+    // stops the run at once; its values become Options once the profile is known.
+    std::optional<core::settings::Store> store = load_settings(command_line, executable_dir(argv0));
     Session s;
-    setup_session(o, argv0, s);
+    setup_session(command_line, argv0, s);
     const core::RegionProfile* profile = s.profile();
+    status.started(profile != nullptr ? std::string_view(profile->id) : std::string_view("dev"),
+                   command_line.display == Display::window);
+    Options effective = command_line;
+    std::vector<std::string> applied_settings;
+    if (store) {
+        if (profile != nullptr) {
+            store->use_profile(profile->id);
+        }
+        applied_settings = apply_settings(effective, *store);
+        for (const std::string& w : store->warnings()) {
+            std::fprintf(stderr, "settings: %s\n", w.c_str());
+            status.warning(core::to_string(core::ErrorCode::settings_invalid), w);
+        }
+    }
+    const Options& o = effective;
 
     // Everything that can fail on bad options or files, before any thread starts.
     std::optional<game::UntilTracker> until;
@@ -491,8 +499,12 @@ int run_game(const Options& o, const char* argv0) {
                 limits.max_dispatches = o.max_dispatches;
                 const rt::SliceResult r = machine.run(limits);
                 outcome.last = r;
+                status.guest_time(seconds_of(r.cycles));
                 if (r.vblank != vblank) {
                     vblank = r.vblank;
+                    if (o.display != Display::window) {
+                        status.frame(); // headless, a vblank stands for a frame
+                    }
                     outcome.gs_hash = pipeline.stream_hash();
                     log.write(rt::MachineEvent{"gs", {}}
                                   .add("hash", outcome.gs_hash)
@@ -569,6 +581,7 @@ int run_game(const Options& o, const char* argv0) {
             if (pipeline.latest_frame(frame) && frame.field != presented) {
                 platform->present(frame, 4.0 / 3.0);
                 presented = frame.field;
+                status.frame();
             } else {
                 std::this_thread::sleep_for(std::chrono::milliseconds(2));
             }
@@ -691,6 +704,14 @@ int run_game(const Options& o, const char* argv0) {
         j.member("dispatches", outcome.last.dispatches);
         json_context(j, ctx);
         json_mmio(j, s.memory);
+        if (store) {
+            j.key("settings");
+            j.begin_array();
+            for (const std::string& applied : applied_settings) {
+                j.value(applied);
+            }
+            j.end_array();
+        }
         j.member("exit_code", code);
         j.end_object();
         std::printf("%s\n", j.str().c_str());
@@ -707,7 +728,21 @@ int run_game(const Options& o, const char* argv0) {
             std::printf("--until %s was not met\n", until->condition().text.c_str());
         }
     }
+    std::fflush(stdout);
+    status.exit(code, status_reason(ended));
     return code;
+}
+
+} // namespace
+
+int run_game(const Options& o, const char* argv0) {
+    StatusChannel status(o.status);
+    try {
+        return run_machine(o, argv0, status);
+    } catch (...) {
+        status.exit_on(std::current_exception());
+        throw;
+    }
 }
 
 } // namespace dq8::host

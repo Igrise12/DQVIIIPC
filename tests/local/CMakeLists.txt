@@ -20,18 +20,21 @@ catch_discover_tests(dq8_local_tests PROPERTIES LABELS local)
 #                             on black as in M3 (the title at vblank 1200).
 #   local.boot_to_title_skip  --movies skip, no press after the settings: the flyover timeline is skipped, so the
 #                             title comes within 1,600 vblanks (2,640 with the flyover on black).
-foreach(run IN ITEMS "boot_to_title;boot-to-title;blank;6000" "boot_to_title_skip;boot-to-title-settings-only;skip;1600")
+# The skip run's input is the setup's smoke-test script, kept once in data/smoke/.
+foreach(run IN ITEMS "boot_to_title;tests/local/input/boot-to-title;blank;6000"
+                     "boot_to_title_skip;data/smoke/dq8-us-boot-to-title;skip;1600")
     list(GET run 0 name)
     list(GET run 1 script)
     list(GET run 2 movies)
     list(GET run 3 vblanks)
+    get_filename_component(script_name "${script}" NAME)
     add_test(NAME local.${name}
         COMMAND "${CMAKE_COMMAND}"
             "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
-            "-DSCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/input/${script}.dq8in"
+            "-DSCRIPT=${PROJECT_SOURCE_DIR}/${script}.dq8in"
             "-DMODULE_DIR=${PROJECT_SOURCE_DIR}/work/recomp/modules/SLUS_21207"
             "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/work"
-            "-DNAME=${script}"
+            "-DNAME=${script_name}"
             "-DMOVIES=${movies}"
             "-DVBLANKS=${vblanks}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/run_boot_to_title.cmake")

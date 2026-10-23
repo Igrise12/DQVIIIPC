@@ -136,20 +136,27 @@ struct Args {
     std::map<std::string, std::string> values;             // --name VALUE
     std::set<std::string> flags;                           // --name
     std::map<std::string, std::vector<std::string>> lists; // --name VALUE, repeatable
+    std::vector<std::string> passthrough;                  // everything after a lone "--" (dq8ctl run)
 };
 
 inline const std::set<std::string> value_options{
-    "regions",    "out",   "maps", "work",      "units",           "jobs",
-    "ps2-recomp", "cmake", "boot", "generator", "module-template", "abi-include-dir",
-    "profile-id"};
+    "regions",    "out",    "maps",   "work",      "units",           "jobs",
+    "ps2-recomp", "cmake",  "boot",   "generator", "module-template", "abi-include-dir",
+    "profile-id", "events", "config", "profile",   "registry",        "game",
+    "smoke-input"};
 inline const std::set<std::string> list_options{"unit-elf"}; // may repeat; values collect in order
-inline const std::set<std::string> flag_options{"json",    "force",  "emit-profile", "no-verify-hashes",
-                                                "verbose", "no-pch", "debug-info"};
+inline const std::set<std::string> flag_options{"json",          "force",  "emit-profile", "no-verify-hashes",
+                                                "verbose",       "no-pch", "debug-info",   "no-smoke",
+                                                "allow-download"};
 
 inline bool parse_args(int argc, char** argv, Args& args, std::string& error) {
     args.command = argv[1];
     for (int i = 2; i < argc; ++i) {
         const std::string arg = argv[i];
+        if (arg == "--") {
+            args.passthrough.assign(argv + i + 1, argv + argc);
+            break;
+        }
         if (arg.size() > 2 && arg.compare(0, 2, "--") == 0) {
             std::string name = arg.substr(2);
             std::string value;
@@ -237,5 +244,21 @@ int usage(std::FILE* out);
 // `dq8ctl recomp prepare|generate|build|all ...` and `dq8ctl make-unit-elf ...` (recomp_commands.cpp).
 int run_recomp(const Args& args, const char* argv0);
 int run_make_unit_elf(const Args& args, const char* argv0);
+
+// M5: `dq8ctl setup`, `run` and `diagnose` (setup_commands.cpp), `dq8ctl settings` (settings_commands.cpp).
+int run_setup(const Args& args, const char* argv0);
+int run_game(const Args& args, const char* argv0);
+int run_diagnose(const Args& args, const char* argv0);
+int run_settings(const Args& args, const char* argv0);
+
+// The {"ok": false, "error": {...}} object (--json) or the "dq8ctl <command>: ..." line; returns the exit
+// status.
+int report_error(const Args& args, const Error& e);
+
+// UTF-8 text of a path.
+inline std::string path_text(const fs::path& p) {
+    const std::u8string s = p.u8string();
+    return std::string(s.begin(), s.end());
+}
 
 } // namespace dq8::cli

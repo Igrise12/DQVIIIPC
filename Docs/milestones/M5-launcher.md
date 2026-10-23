@@ -306,6 +306,157 @@ coordinator.
 
 (Sessions append their findings here.)
 
+### Session A: core APIs, settings and the CLI (2026-10-22)
+
+Branch `claude/m5-a-core-d84cfa`. Everything below is in `libdq8core`, `dq8-game` and `dq8ctl`; the launcher (B)
+calls the same APIs.
+
+**Contract additions (additive; no day-0 signature changed).**
+- `settings.h`: `Store::load` never throws for values: an unknown key is kept and an invalid value dropped (the
+  default applies), both as `"<file>:<line>: ..."` lines in `warnings()`, so "never fatal" holds; a file that is not
+  TOML is `settings-parse`, and `set()`/`set_from_text()` throw `settings-invalid` (an explicit request). New:
+  `use_profile()`/`profile()`, `to_toml()`, `clear()`, `holds()`, `applies()` (the `requires` conditions against the
+  effective values), `Schema::categories()`, `StringTable::parse()`/`contains()`, the free functions `to_text()`,
+  `parse_value()`, `check_value()`, `describe_allowed()`, `to_string(Type)`, `to_string(Layer)`, and
+  `Setting::file_table()`/`file_name()`.
+- Where the per-profile layer lives: the user file's `[profile.<id>.<category>]` tables. `Layer::profile` is the
+  tables of the profile chosen with `use_profile()` (dq8-game chooses the verified disc's id); saving `Layer::user`
+  writes every profile's tables back. A settings file's tables are named by the key's prefix (`display.width` lives
+  in `[display]`), which equals `category` for every M5 row. `to_toml(Layer::defaults)` lists every setting
+  (`dq8ctl settings defaults`).
+- `setup.h`: `Options` gained `ps2_recomp`, `game_executable`, `module_template_dir`, `abi_include_dir`,
+  `smoke_input`, `toolchain_root` (passed to `DetectOptions::bundled_root`: session E's hook), `registry_file`,
+  `required_free_bytes`, `smoke_timeout`; each empty one is found from `executable_dir` (beside it, then the source
+  tree above a build tree, then `PATH` for programs). `Result` gained `work_dir` and `log_file`. Also
+  `setup::stages` and `default_work_dir()`. A build tree has `dq8-game` and `ps2_recomp` elsewhere than beside the
+  front end, so `dq8ctl` passes the ones its build made (`DQ8_DEFAULT_GAME`, `DQ8_DEFAULT_PS2_RECOMP`); the launcher
+  should do the same in its own CMake list.
+- `toolchain.h`: `Distribution`, `parse_os_release()`, `this_distribution()`, `install_advice()`,
+  `parse_version()`, `compare_versions()`, `cmake_arguments()` (`CMAKE_CXX_COMPILER`, `CMAKE_MAKE_PROGRAM`, so the
+  module build uses exactly the detected tools), `DetectOptions::use_environment` (CC/CXX). Minimums: cmake 3.25
+  (cmake/module's own `cmake_minimum_required`, not the 3.24 the day-0 comment said), GCC 11, Clang 14 when the
+  version is known. The C compiler is reported but not required: cmake/module is `LANGUAGES CXX`.
+- New `include/dq8/core/diagnostics.h` (`report()`, `write_report()`; plain C++ types): the report `dq8ctl
+  diagnose` prints and the launcher's Diagnostics page exports. The header states the rule: paths, hashes,
+  versions, settings and our own logs only; never the contents of a disc file or anything derived from one, no
+  RAM, frames, audio or saves, no tool output.
+- `paths.h`: `find_data_dir()` and `executable_dir_of()`.
+- Shared files touched, approved by the coordinator (2026-10-22): `src/core/CMakeLists.txt`
+  (`setup/diagnostics.cpp`), `src/host/CMakeLists.txt` (`settings_wiring.cpp`, `status_channel.cpp` in
+  `dq8_host`), new `data/smoke/`, `tests/local/CMakeLists.txt` (the skip run's input path); also approved: the
+  `setup::Options` additions and `Store::load`'s warning-and-default while `set()`/`set_from_text()` throw.
+- `setup::Options::allow_toolchain_download` (session E's request, approved by the coordinator): the user's
+  consent to fetch the bundled toolchain; `dq8ctl setup --allow-download`, the launcher's consent dialog.
+
+**Settings files.** Read as toml11 ordered values and written back from the loaded document: order, comments and
+unknown keys (top-level, inside a category table, inside a profile table) survive a save; known keys are replaced
+in place, reset keys removed, new ones appended in schema order, emptied tables dropped. A file with a newer
+`schema_version` loads with a warning and keeps its unknown keys. Text forms: booleans also take on/off, yes/no,
+1/0; a real always prints with a decimal point (`2.0`).
+
+**dq8-game.** `--config`/`--set` go through `settings_wiring.cpp`: the store is loaded before the disc is verified
+(a damaged file stops the run at once, exit 2 `settings-parse`), the profile is chosen after it, and a table of
+rows (`setting_options()`: key, the flag that wins, the apply function) turns it into `Options`. "Flags win" needs
+to know which flags were typed, so `Options::given`/`was_given()` record the command line. A row also skips when
+its `requires` conditions do not hold. Session C adds its rows to that table (the marked line) and its fields to
+`Options`. Choices made for A's rows: `game.save_dir = ""` leaves `--save-dir` unset, so M4's defaults hold (the
+user data directory with `--window`, in-memory cards headless: scripted runs never touch user files);
+`audio.output` applies headless too, so a default file asks for the SDL sink there, which sits after the audio hash
+(the tests set `SDL_AUDIO_DRIVER=dummy`). With `--json` and a store, the report lists the rows that applied
+(`"settings": ["audio.output=null", ...]`); without `--config`/`--set` the report and every event are M4's.
+
+**The status channel.** `started` (sent once the disc is verified, before any settings warning), `first_frame` (the
+window's first present; headless, the first vblank), `fps` once a wall-clock second (frames: presents with
+`--window`, vblanks headless; `speed`: guest seconds over wall seconds; the first second starts at the first slice,
+so start-up is not counted), `warning` (each settings warning, code `settings-invalid`), `exit` (the `end` event's
+`ended`, with `requested` reported as `stop`). An exception leaving `run_game` sends `exit` with reason `error` and
+the code and status `main()` gives it (`usage`, `module-validation`, `backend`, or the `core::Error` name). A usage
+error from option parsing happens before the channel exists: exit 2 and stderr only. `--status -` duplicates stdout
+for the channel and points stdout at stderr, so stdout carries status lines only (with `--json` the report moves to
+stderr); `--status -` with `--events -` is a usage error. Session C: the present path calls `status.frame()` right
+after `platform->present()`; keep it when the window code moves.
+
+**The setup.** `setup::run()` drives the existing pieces: `verify_image` (with the free-space check: 2 GiB less what
+the work directory already holds, at least 256 MiB, on the nearest existing ancestor), `extract` into
+`<work>/baserom/`, `toolchain::detect`/`check` plus the program's own parts (`ps2_recomp`, `dq8-game`,
+cmake/module, the ABI headers: `tool-missing` when one is gone), the maps (contributor `<unit>.csv` in `--maps`,
+else published `data/maps/<profile>/<unit>.toml`; `maps-missing` names the units without one), then
+`prepare_units`/`generate_units`/`build_units` with `cmake_arguments()`, the smoke test and the registry.
+- Progress: bytes for verify and extract, units for prepare and generate (`done` counts the units before the
+  current one), ninja's `[n/N]` per unit for build (parsed from the tool output), thinned to whole percents per
+  unit; `logs/setup.log` thins further to 5 % and writes an error's continuation lines as `  | `.
+- Skipped: extract when every file is up to date; prepare when no ELF or config was rewritten; generate when every
+  unit's recorded key matched; build when no module changed (cmake/module relinks every unit on each build, so
+  ninja never says "no work to do"; configure and the relink cost about a second a unit); smoke when `stamps/smoke.toml` holds the same manifest and
+  `dq8-game` SHA-1s; register when the entry is identical. Verify, toolchain and maps always run (seconds).
+- Cancel: the flag is polled between stages and passed to the pipeline and the process runner, which stops the
+  whole tool tree; the running stage ends with `setup-cancelled` (`process-cancelled` from the pipeline is mapped).
+- The smoke input. The coordinator approved `data/smoke/SLUS_21207.dq8in`, but a serial-named file is refused
+  outside `data/regions/` (the checker's forbidden-name rule and `.gitignore`'s `SLUS_*`), so
+  `data/smoke/smoke.toml` maps the profile id to `dq8-us-boot-to-title.dq8in`. That script is the one copy: the
+  settings-only input moved there from `tests/local/input/boot-to-title-settings-only.dq8in`, and
+  `local.boot_to_title_skip` and `test_input_script.cpp` read it from `data/smoke/` (the M3 and M4 bring-up logs
+  keep the old name as it was on their dates). Its header says what it does (dismiss the first-run settings
+  screen, then no press) and where the smoke uses it. The run is `--headless --movies skip --input-script ...
+  --until title --vblanks 3000 --json`, 900 s at most, output in `logs/smoke.log`. A profile without a row runs
+  `--until overlay:<its [title] overlay> --vblanks 3000`, one without a `[title]` table 600 vblanks that must end
+  without a stop.
+- The maps (session D's request through the coordinator). An empty `Options::maps_dir` means the published maps;
+  until D merges the stage looks for `data/maps/<profile>/<unit>.toml` itself and passes that directory as
+  `PipelineOptions::maps_dir`. D replaces both with `recomp::find_maps_dir(executable_dir)` and
+  `PipelineOptions::published_maps_dir` in `stage_maps` and `pipeline_options()` (setup.cpp). Every
+  `maps-missing` message names `--maps`.
+
+**dq8ctl.** `setup`, `settings list|get|set|reset|defaults`, `run`, `diagnose` (`src/cli/README.md`). `run` starts
+`dq8-game --iso --module-dir --config <user file> --window` for the registered build; options after `--` pass
+through (`--headless` replaces `--window`); the game leads its own process group, so Ctrl-C reaches only dq8ctl,
+which stops the game through the runner. `diagnose` holds no tool output: compiler messages can quote generated
+code, so the setup log's `  | ` lines are left out and the tool logs are listed by name and size only.
+
+**Windows (session E's request through the coordinator).** Wired against E's `src/core/toolchain/download.h` as it
+stands in E's worktree, behind `__has_include("toolchain/download.h")` so this branch builds without it (both
+paths were syntax-checked against E's header, not built or run):
+- `detect()` takes the bundle from `installed_toolchain(bundled_root)` (`<bundled_root>/<version>/`), looks
+  there first (`bin/clang++`, `bin/x86_64-w64-mingw32-clang++`), then CC/CXX, then PATH; `Toolchain::bundle_dir`
+  is the bundle when the compiler came from it.
+- On `_WIN32`, a toolchain stage without the bundle calls `download_toolchain()` with the consent, the bundled
+  root, the cmake beside the program (it unpacks with `cmake -E tar`), the cancel flag and a progress callback:
+  `toolchain` progress events with `done`/`total` and the phase (`download`, `verify`, `unpack`) as the message,
+  thinned to whole percents. Without consent the stage ends with `toolchain-incomplete`, naming the archive's
+  size and `--allow-download`. Then it detects again.
+- With the bundle the module build gets `-DCMAKE_TOOLCHAIN_FILE=<cmake/toolchains/llvm-mingw.cmake, found like
+  the other data>`, `-DLLVM_MINGW_ROOT=<bundle>` and `-DCMAKE_MAKE_PROGRAM=<ninja>` instead of
+  `CMAKE_CXX_COMPILER`; a missing toolchain file is `tool-missing` in the toolchain stage.
+- `executable_dir_of()` reads `/proc/self/exe` on Linux only (elsewhere `argv0`); E may add `GetModuleFileNameW`.
+  `detect()` appends `.exe` to explicit candidate paths; `--status -` uses `_dup`/`_dup2`.
+
+**The build manifest (a fix outside A's list, told to the coordinator).** On the disc a no-op re-run still ran the
+smoke test and rewrote the registry: cmake/module relinks every unit on each build, and `build_units` rewrote
+`build-manifest.toml` with fresh timings every run, so its SHA-1 (which the smoke stamp and `installs.toml` record)
+changed and the real build times were lost. `build_units` now keeps a unit's earlier row when the module comes out
+the same from the same inputs (`module`, the module, source, ELF, config, map and generated-tree SHA-1s, the
+generator) and writes the manifest only when it changes.
+
+**Results on the dev box (2026-10-22, release preset, the contributor maps).** Measured while other sessions built
+in parallel (load average 40 to 50 on 12 threads), so the build time is an upper bound.
+
+| Run | What happened |
+|---|---|
+| `dq8ctl setup` into a clean user data directory (`XDG_DATA_HOME`, `XDG_CONFIG_HOME` under `work/`) | verify, extract (25 files, 4,110,289 bytes), toolchain (GCC 16.2.1, cmake 4.4.4, ninja 1.13.2), maps, prepare and generate (7 units, 2 s) done; Ctrl-C at build step 316 of 10,505 (main): `build error [setup-cancelled]`, exit 2, no compiler left running |
+| The same command again (resume) | extract, prepare, generate `skipped`; the build went on at ninja's step 320 (10,186 steps left) and took 29.7 min with 12 jobs; smoke `done` (the title at the first try, 6 s); register `done` |
+| Again, after the manifest fix | 15 s: verify, toolchain, maps `done`; extract, prepare, generate, build, smoke, register `skipped`; the manifest SHA-1 unchanged |
+| `dq8-game --headless`, the smoke input, 1,200 vblanks, without and with a file from `dq8ctl settings defaults` | Byte-identical event streams (2,461 events, GS `5db0ec3f…`, RAM `b6a39661…`): default settings reproduce M4 |
+| The same with A's rows changed (`audio.output = null`, `latency_ms = 200`, `rumble = false`, `movies = skip`, `save_dir`, `memory_card2 = formatted`) | `movie_skip` ×4 and `movie_timeline_skip` instead of a played movie; `card2_sha1` in the `end` event; with `save_dir` at a copy of M4's B5 folder card the game lists, opens and reads the save on port 0 (`card_sha1 290f8c61…`, B5's); with `audio.output = sdl` the SDL sink runs (its "frames played" line), with `null` it does not. `latency_ms` and `rumble` act only on the SDL sink and the window's pads; their effect on `Options` is covered by `test_host_settings.cpp` and the `--json` list |
+| `dq8ctl run -- --headless --input-script <smoke> --until title --speed 1 --status -` with `game.movies = skip` in the user file and `[profile.SLUS_21207.audio] output = "null"` | The title at vblank 1,375; stdout carried only status lines: `started` (profile SLUS_21207), `first_frame` 50 ms, 22 `fps` lines at 59.7 to 60.5 fps and speed 1.00, `exit` status 0 reason `until` |
+| `dq8ctl diagnose` on that data directory | System, toolchain, settings with sources, the build and its manifest (as registered), 59 setup-log event lines, the tool logs by name and size; no `  | ` lines, no tool output |
+
+Gates: dev-clang 627/627, asan 627/627, ci-gcc (GCC 16, Release, `-Werror`) 626/626, `check_no_game_data.py --tree
+--deep` clean, pre-commit (clang-format) clean, `reuse lint` compliant.
+
+**Left for later.** The published maps (D) were not there yet, so the setup ran with `--maps`; the window paths
+(`first_frame` and `fps` from presents, rumble) were checked in code and on the synthetic machine, not with a window
+on the disc; the launcher drives none of this yet (B).
+
 ## Bring-up log
 
 | Date | Step | Result |

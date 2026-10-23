@@ -10,6 +10,8 @@ The game executable (dq8-game). It wires the platform, the runtime, the locally 
 | `run_machine.cpp` | The M3 run: machine, devices, IOP, game layer, threads, limiter, events, report. The window and the paraLLEl-GS backend are used when the build has them (`DQ8_HAVE_WINDOW` when `dq8_platform_sdl` is linked; `runtime/gs/gs_parallel_backend.h`, which loads `dq8-gs-parallel` from beside the executable). |
 | `event_log.*` | The JSON-lines event stream, and the `--trace` echo. |
 | `limiter.*` | Wall-clock pacing between slices. |
+| `settings_wiring.*` | M5: the settings store of a run (`--config`, `--set`) and the settings-to-options table. |
+| `status_channel.*` | M5: the launcher's `--status` lines. |
 | `json_writer.h` | The JSON writer. |
 
 ## Threads (ADR-0005, ADR-0007)
@@ -41,6 +43,8 @@ dq8-game --elf <file> --module-dir <dir> [--overlay-window BASE:END [--resident 
 | `--dump-frame N:PATH` | PNG of the scanout of vblank N. Repeatable. |
 | `--dump-ram-at N:PATH` | The 32 MiB of RAM after N vblanks. Repeatable. |
 | `--events FILE\|-` | JSON-lines events (below). |
+| `--config FILE`, `--set KEY=VALUE` | M5 settings (`settings_wiring.*`, ADR-0006): the store is the schema's defaults, the file (with its `[profile.<id>]` tables for the verified disc) and the `--set` values; each row of `setting_options()` sets its options unless its flag is on the command line (flags win over `--set`, which wins over `--config`). Without either option no setting applies. A bad `--set` is exit 2 (`settings-invalid`), a damaged file exit 2 (`settings-parse`); a bad value in the file is a warning on stderr and on `--status`. With `--json` the report lists what applied (`settings`). |
+| `--status FILE\|-` | The launcher's status lines (`status_channel.*`): `started`, `first_frame`, `fps` once a second, `warning`, `exit` (Docs/milestones/M5-launcher.md, "The status channel"). Wall-clock based, never in `--events`. With `-`, stdout carries only these lines and everything else goes to stderr. |
 | `--trace kernel,sif,rpc,dma,gs,iop,spu2,audio` | Turn these trace categories on (`MachineConfig::trace_mask`). Devices emit `trace` events {cat, msg}, which the host prints on stderr. `--trace-events` also writes them into `--events`. |
 | `--strict-kernel` | Noop kernel services stop. |
 | `--verify-overlays` | Hash each loaded overlay against the profile, and its text at every vblank. |

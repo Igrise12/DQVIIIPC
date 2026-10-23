@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 dq8in 1
-# SLUS-21207: boot to the title screen with --movies skip (the default) and no press after the first-run
-# settings. Our own input, authored for DQ8-Native (no game data).
+# SLUS-21207: boot to the title screen with --movies skip by dismissing the first-run settings screen, then no
+# press. Our own input, authored for DQ8-Native (no game data). The one copy of this script: the setup's smoke
+# test runs it (data/smoke/smoke.toml; dq8-game --headless --movies skip --until title --vblanks 3000), and so
+# does local.boot_to_title_skip (tests/local/CMakeLists.txt).
 #   1. the memory-card check, which passes without input on an unformatted card;
-#   2. the first-run settings: Down (Wide Screen 16:9), Cross, Cross (sound settings as they are);
+#   2. the first-run settings screen: Down (Wide Screen 16:9), Cross, Cross (sound settings as they are);
 #   3. the publisher logo, which runs its full length; the two movies, which --movies skip ends at once;
 #   4. the flyover timeline, which --movies skip moves to its end (movie_timeline_skip), so the title fades in
-#      at once instead of after 21 s of black. dq8-game --until title meets there.
+#      at once instead of after 21 s of black. dq8-game --until title meets there, within 1,600 vblanks.
 # Under --movies blank the flyover runs its 648 frames on black and the title comes about 1,300 vblanks later
 # (Docs/milestones/M3-boots.md, "Bring-up log").
 

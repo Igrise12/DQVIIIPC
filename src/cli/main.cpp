@@ -55,6 +55,22 @@ int usage(std::FILE* out) {
         "disc\n"
         "  make-unit-elf <overlay .BIN> --out FILE [--boot ELF] [--regions DIR] [--json]\n"
         "      write the unit ELF the recompiler reads for one overlay (e_flags from --boot, else 0)\n"
+        "  setup <iso> [--events FILE|-] [--jobs N] [--force] [--maps DIR] [--work DIR] [--registry FILE]\n"
+        "        [--no-smoke] [--smoke-input FILE] [--allow-download] [--ps2-recomp PATH] [--game PATH]\n"
+        "        [--regions DIR] [--json]\n"
+        "      the first-run setup: verify, extract, toolchain, maps, prepare, generate, build, smoke test,\n"
+        "      register (default work directory: the user data directory's build/); --events prints the\n"
+        "      stage events as JSON lines; a later run resumes and skips what is up to date; Ctrl-C "
+        "cancels;\n"
+        "      --allow-download lets it fetch its own toolchain on Windows\n"
+        "  settings list|get KEY|set KEY=VALUE...|reset [KEY...]|defaults [--config FILE] [--profile ID]\n"
+        "           [--json]\n"
+        "      the user settings file (default: settings.toml in the user configuration directory); with\n"
+        "      --profile the [profile.ID] overrides; defaults writes every setting at its default\n"
+        "  run [--profile ID] [--config FILE] [--registry FILE] [--game PATH] [-- dq8-game options]\n"
+        "      start dq8-game in a window with a registered build and the user settings\n"
+        "  diagnose [--out FILE] [--config FILE] [--registry FILE] [--work DIR]\n"
+        "      a report for bug reports: system, toolchain, settings, builds, setup log; no game data\n"
         "  --version | --help\n"
         "\n"
         "--regions defaults to data/regions next to the current directory or the executable's tree.\n"
@@ -672,6 +688,10 @@ int run_info(const Args& args, const char* argv0) {
     return info_iso(path, json);
 }
 
+} // namespace
+
+namespace dq8::cli {
+
 int report_error(const Args& args, const Error& e) {
     const int status = dq8::core::is_mismatch(e.code()) ? exit_mismatch : exit_error;
     if (args.flags.count("json") != 0) {
@@ -692,7 +712,7 @@ int report_error(const Args& args, const Error& e) {
     return status;
 }
 
-} // namespace
+} // namespace dq8::cli
 
 int main(int argc, char** argv) {
     if (argc < 2) {
@@ -728,6 +748,18 @@ int main(int argc, char** argv) {
         }
         if (args.command == "make-unit-elf") {
             return run_make_unit_elf(args, argv[0]);
+        }
+        if (args.command == "setup") {
+            return run_setup(args, argv[0]);
+        }
+        if (args.command == "settings") {
+            return run_settings(args, argv[0]);
+        }
+        if (args.command == "run") {
+            return run_game(args, argv[0]);
+        }
+        if (args.command == "diagnose") {
+            return run_diagnose(args, argv[0]);
         }
     } catch (const Error& e) {
         return report_error(args, e);
