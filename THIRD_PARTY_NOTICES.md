@@ -61,6 +61,22 @@ installed in the package under `share/doc/dq8-native/licenses/`.
 | [AppImage type2-runtime](https://github.com/AppImage/type2-runtime) | 20251108 (`runtime-x86_64`, `2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d`) | MIT (the release's `LICENSE`); statically links [libfuse](https://github.com/libfuse/libfuse) 3.15.0 (LGPL-2.1), squashfuse 0.5.2 (BSD-2-Clause), zstd (BSD-3-Clause), zlib (Zlib), mimalloc (MIT) and musl (MIT) | The executable head of the AppImage that mounts its contents; built and published by the AppImage project, whose repository at that tag has the sources and build scripts |
 | [appimagetool](https://github.com/AppImage/appimagetool) | 1.9.1 (`appimagetool-x86_64.AppImage`, `ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0`) | MIT | Packs the AppImage (build machine only, not shipped) |
 
+The Windows zip (`packaging/windows/`, ADR-0018) gets its tools from `packaging/windows/fetch_tools.cmake` at the pins
+in `cmake/toolchains/llvm-mingw-pin.cmake`, SHA-256 checked; the zip carries their licence texts.
+
+| Component | Release (pinned file, SHA-256) | License | Used for |
+|---|---|---|---|
+| [CMake](https://cmake.org) for Windows | v4.4.4 (`cmake-4.4.4-windows-x86_64.zip`, `bace36e94b31c68ab6fa295f26dfa11219e0701cf7c94b0284a7d1cb13dac536`) | BSD-3-Clause | Configures the game-module build on the user's machine (the zip's `tools/cmake/`); its own images and templates are allowlisted for the release scan |
+| [Ninja](https://github.com/ninja-build/ninja) for Windows | v1.13.2 (`ninja-win.zip`, `07fc8261b42b20e71d1720b39068c2e14ffcee6396b76fb7a795fb460b78dc65`) | Apache-2.0 | Runs the game-module build (the zip's `tools/ninja/`) |
+| [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) runtime (`libc++.dll`, `libunwind.dll`) | 20261020, LLVM 23.1.4 (from the toolchain below) | Apache-2.0 WITH LLVM-exception | The C++ runtime of the Windows programs (`LICENSES/llvm-mingw-runtime.txt` in the zip) |
+
+Downloaded by the setup on Windows only after the user agrees (the launcher's checkbox, `dq8ctl setup
+--allow-download`), checked against the pinned SHA-256 and unpacked into the user data directory; not shipped:
+
+| Component | Release (pinned file, SHA-256) | License | Used for |
+|---|---|---|---|
+| [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) for Windows | 20261020, LLVM 23.1.4 (`llvm-mingw-20261020-ucrt-x86_64.zip`, 190,612,575 bytes, `fd5462b7f5d93b2ff981fcd3f9c7e427e47f3203c64ea91c27bcc444eebd74cd`) | LLVM: Apache-2.0 WITH LLVM-exception; mingw-w64 headers and runtime: their own permissive licences (ZPL-2.1, MIT and public domain parts) | Compiles the user's game modules with the same toolchain as the host (`src/core/toolchain/download.*`) |
+
 ## Tools used during development, not bundled or redistributed
 
 | Tool | License | Role |
@@ -69,6 +85,8 @@ installed in the package under `share/doc/dq8-native/licenses/`.
 | [ghidra-emotionengine-reloaded](https://github.com/chaoticgd/ghidra-emotionengine-reloaded) 2.1.38 | Apache-2.0 | Emotion Engine (R5900) support for Ghidra |
 | [REA](https://github.com/morluto/rea) 6.7.0 | MIT | Agent-facing MCP server and CLI over Ghidra |
 | [PCSX2](https://github.com/PCSX2/pcsx2) 2.7.524 | GPL-3.0 | Reference emulator: behaviour ground truth, GS dumps, save states |
+| [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) 20261020 for Linux (`llvm-mingw-20261020-ucrt-ubuntu-22.04-x86_64.tar.xz`, `55064b60b991a1e1e8090b8c2f84e82b22cfe5903d12c159d65064cf5e8ae335`) | Apache-2.0 WITH LLVM-exception and mingw-w64's licences | Cross-compiles the Windows host in CI and for contributors (ADR-0018) |
+| [Wine](https://www.winehq.org) | LGPL-2.1-or-later | Runs the Windows unit tests and smoke runs on Linux |
 
 The game itself, its executable, data, movies, and the PS2 BIOS are the property of their rights holders and are
 never part of this project. See project-brief.md §9.
