@@ -1,0 +1,21 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 DQ8-Native contributors
+#
+# AppRun of the DQ8-Native AppImage. Without arguments (or with the launcher's own options) it starts
+# dq8-launcher; `DQ8-Native.AppImage <tool> ARGS...` runs one of the bundled programs instead:
+#   dq8-launcher, dq8-game, dq8ctl, ps2_recomp, cmake, ninja
+# The bundled CMake and Ninja come first on PATH so that the setup's module build uses them; the C++ compiler
+# is the system's (c++, g++ or clang++ on PATH).
+HERE="$(dirname "$(readlink -f "$0")")"
+PATH="$HERE/usr/bin:$PATH"
+export PATH
+
+case "$1" in
+dq8-launcher | dq8-game | dq8ctl | ps2_recomp | cmake | ninja)
+    tool="$1"
+    shift
+    exec "$HERE/usr/bin/$tool" "$@"
+    ;;
+esac
+exec "$HERE/usr/bin/dq8-launcher" "$@"

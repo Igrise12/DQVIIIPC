@@ -2,6 +2,10 @@
 
 Shape-only tables and region profiles (addresses, sizes, expected hashes). Never game bytes. Enforced by the no-game-data check described in Docs/architecture.md §14.
 
+## Published function maps: `maps/<profile>/<unit>.toml`
+
+One per code unit (ADR-0017): function starts and sizes, link-return entries, jump-table shapes and the kernel and SDK names of the runtime's call list, nothing else. The setup reads them by default and fills the jump tables from the user's disc. Format and rules: [Docs/formats/function-map.md](../Docs/formats/function-map.md); written by `tools/ghidra/publish_maps.py`; the checker enforces the format.
+
 ## Region profiles: `regions/<serial>.toml`
 
 One per supported disc, loaded by `dq8::core::load_region_profiles()` and validated with `file:line` errors. `schema_version = 1`:

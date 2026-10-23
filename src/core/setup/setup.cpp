@@ -595,39 +595,40 @@ class Runner {
     void stage_maps() {
         start(Stage::maps, "looking for the function maps");
         units_ = recomp::code_units(*verified_);
-        const bool contributor = !o_.maps_dir.empty();
-        maps_ = o_.maps_dir;
-        if (!contributor) {
-            const fs::path root = platform::find_data_dir(
-                o_.executable_dir, {fs::path("data") / "maps", fs::path("share") / "dq8" / "maps"},
-                profile_id_);
-            maps_ = root.empty() ? fs::path() : root / profile_id_;
+        if (o_.maps_dir.empty()) {
+            // The published maps (ADR-0017): data/maps beside the program or share/dq8/maps in an install,
+            // each unit's map checked against the unit file's SHA-1 in the region profile. find_maps_dir and
+            // require_published_maps throw maps-missing, naming --maps for contributors.
+            published_maps_ = recomp::find_maps_dir(o_.executable_dir);
+            const std::vector<recomp::PublishedMap> maps =
+                recomp::require_published_maps(published_maps_, *verified_);
+            maps_.clear();
+            finish(State::done,
+                   std::to_string(maps.size()) + " published maps in " + utf8(published_maps_ / profile_id_));
+            return;
         }
-        const char* extension = contributor ? ".csv" : ".toml";
+        // Contributor maps (--maps DIR, tools/ghidra/export_maps.sh): <unit>.csv for every unit.
+        maps_ = o_.maps_dir;
+        published_maps_.clear();
         std::string missing;
         for (const recomp::CodeUnit& u : units_) {
             std::error_code ec;
-            if (maps_.empty() || !fs::is_regular_file(maps_ / (u.name + extension), ec)) {
+            if (!fs::is_regular_file(maps_ / (u.name + ".csv"), ec)) {
                 missing += (missing.empty() ? "" : ", ") + u.name;
             }
         }
         if (!missing.empty()) {
             throw StageError(ErrorCode::maps_missing,
-                             contributor ? "the maps given with --maps (" + utf8(maps_) + ") lack " + missing
-                             : maps_.empty()
-                                 ? "no published function maps for " + profile_id_ + " (data/maps/" +
-                                       profile_id_ + "); a contributor can pass --maps DIR"
-                                 : "the published maps in '" + utf8(maps_) + "' lack " + missing +
-                                       "; a contributor can pass --maps DIR");
+                             "the maps given with --maps (" + utf8(maps_) + ") lack " + missing);
         }
-        finish(State::done, std::to_string(units_.size()) + (contributor ? " contributor" : " published") +
-                                " maps in " + utf8(maps_));
+        finish(State::done, std::to_string(units_.size()) + " contributor maps in " + utf8(maps_));
     }
 
     recomp::PipelineOptions pipeline_options() {
         recomp::PipelineOptions po;
         po.work_dir = work_;
-        po.maps_dir = maps_;
+        po.maps_dir = maps_;                     // contributor maps, when given
+        po.published_maps_dir = published_maps_; // else the published maps' root
         po.ps2_recomp = ps2_recomp_;
         po.cmake = toolchain_.cmake.path;
         po.cmake_generator = "Ninja";
@@ -883,7 +884,8 @@ class Runner {
     fs::path module_template_;
     fs::path abi_include_;
     fs::path game_;
-    fs::path maps_;
+    fs::path maps_;           // --maps DIR (contributor maps), or empty
+    fs::path published_maps_; // the published maps' root (find_maps_dir), or empty
     std::vector<recomp::CodeUnit> units_;
     unsigned jobs_ = 0;
     recomp::UnitSource source_;

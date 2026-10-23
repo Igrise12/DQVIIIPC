@@ -12,6 +12,7 @@
 *.mvi
 SLUS_*
 !/data/regions/*.toml
+!/data/maps/SLUS_*/
 SYSTEM.CNF
 DATA.DAT
 DATA2.DAT

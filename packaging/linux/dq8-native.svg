@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 DQ8-Native contributors -->
+<!-- The DQ8-Native application icon: two linked rings (an eight) over a play mark. Drawn for this project. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#27476e"/>
+      <stop offset="1" stop-color="#14243a"/>
+    </linearGradient>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="48" fill="url(#bg)"/>
+  <circle cx="128" cy="86" r="40" fill="none" stroke="#e9c46a" stroke-width="18"/>
+  <circle cx="128" cy="170" r="46" fill="none" stroke="#e9c46a" stroke-width="18"/>
+  <path d="M114 148 L150 170 L114 192 Z" fill="#f4f1de"/>
+</svg>

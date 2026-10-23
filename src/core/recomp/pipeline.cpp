@@ -245,6 +245,16 @@ bool copy_if_changed(const fs::path& from, const fs::path& to) {
     return true;
 }
 
+// A published map describes the unit's code range as code_units() computes it from the disc.
+void check_published_map_range(const PublishedMap& map, const CodeUnit& unit) {
+    if (map.code_start != unit.code_start || map.code_end != unit.code_end) {
+        throw Error(ErrorCode::map_invalid, path_utf8(map.path) + ": the map's code range [" +
+                                                hex8(map.code_start) + ", " + hex8(map.code_end) +
+                                                ") is not unit '" + unit.name + "''s [" +
+                                                hex8(unit.code_start) + ", " + hex8(unit.code_end) + ")");
+    }
+}
+
 std::vector<std::string> names_of(const std::vector<PreparedUnit>& units) {
     std::vector<std::string> out;
     for (const PreparedUnit& p : units) {
@@ -355,9 +365,35 @@ UnitSource elf_units(const std::vector<std::pair<std::string, fs::path>>& elfs, 
     return source;
 }
 
+std::vector<PublishedMap> require_published_maps(const fs::path& maps_root, const VerifiedImage& v,
+                                                 const std::vector<std::string>& units) {
+    std::vector<PublishedMap> maps;
+    for (const CodeUnit& unit : select_units(code_units(v), units)) {
+        std::string sha1 = v.boot.sha1;
+        if (unit.kind == UnitKind::overlay) {
+            const auto row =
+                std::find_if(v.profile.overlays.begin(), v.profile.overlays.end(),
+                             [&](const ProfileOverlay& o) { return o.path == unit.source_path; });
+            sha1 = row != v.profile.overlays.end() ? row->sha1 : std::string();
+            if (sha1.empty()) {
+                throw Error(ErrorCode::maps_missing, "region profile " + v.profile.id +
+                                                         " records no SHA-1 for " + unit.source_path +
+                                                         ", so no published map can be matched to it "
+                                                         "(contributors: --maps DIR for Ghidra maps)");
+            }
+        }
+        PublishedMap map = load_published_map(maps_root, v.profile.id, unit.name);
+        check_published_map_source(map, sha1);
+        check_published_map_range(map, unit);
+        maps.push_back(std::move(map));
+    }
+    return maps;
+}
+
 PrepareReport prepare_units(const UnitSource& source, const PipelineOptions& o) {
-    if (o.maps_dir.empty()) {
-        throw Error(ErrorCode::invalid_argument, "prepare needs the function-map directory (--maps DIR)");
+    if (o.maps_dir.empty() && o.published_maps_dir.empty()) {
+        throw Error(ErrorCode::invalid_argument,
+                    "prepare needs function maps: the published maps (data/maps) or --maps DIR");
     }
     const WorkLayout layout(o.work_dir);
     const std::vector<CodeUnit> selected = select_units(source.units, o.units);
@@ -381,9 +417,24 @@ PrepareReport prepare_units(const UnitSource& source, const PipelineOptions& o) 
         p.elf = fs::absolute(layout.unit_elf(unit.name));
         p.elf_written = platform::write_file_if_changed(p.elf, image.elf);
 
-        FunctionMap map = load_function_map(o.maps_dir, unit.name);
+        FunctionMap map;
+        if (!o.maps_dir.empty()) {
+            map = load_function_map(o.maps_dir, unit.name);
+            p.map_csv = fs::absolute(map.csv_path);
+        } else {
+            const PublishedMap published =
+                load_published_map(o.published_maps_dir, source.profile_id, unit.name);
+            check_published_map_source(published, image.source_sha1);
+            check_published_map_range(published, unit);
+            map = make_function_map(published, image.elf);
+            p.published_map = fs::absolute(published.path);
+            p.map_csv = fs::absolute(layout.unit_map(unit.name));
+            platform::write_file_if_changed(p.map_csv, function_csv_text(map));
+            map.csv_path = p.map_csv;
+            map.jump_tables_path = p.published_map;
+            map.stats_path = p.published_map;
+        }
         p.warnings = validate_function_map(map, unit.code_start, unit.code_end);
-        p.map_csv = fs::absolute(map.csv_path);
         p.functions = map.functions.size();
         p.jump_tables = map.jump_tables.size();
 
@@ -416,6 +467,9 @@ PrepareReport prepare_units(const UnitSource& source, const PipelineOptions& o) 
         t["elf"] = path_utf8(p.elf);
         t["config"] = path_utf8(p.config);
         t["map"] = path_utf8(p.map_csv);
+        if (!p.published_map.empty()) {
+            t["published_map"] = path_utf8(p.published_map);
+        }
         t["functions"] = static_cast<std::int64_t>(p.functions);
         t["stubs"] = static_cast<std::int64_t>(p.stubs);
         t["entry_points"] = static_cast<std::int64_t>(p.entry_points);

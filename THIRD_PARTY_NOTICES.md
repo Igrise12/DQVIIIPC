@@ -25,6 +25,7 @@ repositories are never fetched.
 | [Granite](https://github.com/Themaister/Granite) (nested in paraLLEl-GS) | 16e7395 | `16e7395f6a4858c1783dbf6f521f90b9d5f82ac5` | MIT | Vulkan device layer of paraLLEl-GS; only the vulkan, util and math parts are built |
 | [volk](https://github.com/zeux/volk) (nested in Granite) | 1.4.350-4 | `47cddf7ed97b94118a08aacb548a411188e016cc` | MIT | Vulkan loader for `dq8-gs-parallel` |
 | [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) (nested in Granite) | v1.4.358 | `11d6898377797e07dbd543aaaa367e4465074597` | Apache-2.0 or MIT | Vulkan API headers for `dq8-gs-parallel` |
+| [FFmpeg](https://github.com/FFmpeg/FFmpeg) libavcodec and libavutil | n8.1.3 | `1041abdc962f4cc4f394aa8de9dc5236c0c3b9e7` | LGPL-2.1-or-later | `DQ8_FFMPEG=bundled` (`cmake/Ffmpeg.cmake`): a minimal shared build with the `mpeg2video` decoder only, no GPL or non-free parts and no autodetected libraries, installed next to `dq8-movie` in the AppImage (and the Windows zip); its licence text and configure line go to `share/doc/dq8-native/ffmpeg/`. The submodule is `update = none`: only `git submodule update --init --checkout --depth 1 third_party/ffmpeg` fetches it |
 
 ## Adapted into first-party source files (not submodules)
 
@@ -40,7 +41,19 @@ PS2Recomp's `MPEG.cpp` (GPL-3.0-only, attributed in each file).
 
 | Component | Version | License | Used for |
 |---|---|---|---|
-| [FFmpeg](https://ffmpeg.org) libavcodec and libavutil | the system's (Ubuntu 24.04: 6.1, libavcodec 60; also built with 8.0, libavcodec 63) | LGPL-2.1-or-later (GPL-2.0-or-later when the system's build enables GPL parts) | The `mpeg2video` decoder inside the separate shared library `dq8-movie` (ADR-0015), which `dq8-game` loads at run time and a user can replace; `DQ8_FFMPEG=auto\|system\|off` (`cmake/Movie.cmake`). Dynamically linked, never copied into this repository; a bundled LGPL build comes with packaging (M5) |
+| [FFmpeg](https://ffmpeg.org) libavcodec and libavutil | the system's (Ubuntu 24.04: 6.1, libavcodec 60; also built with 8.0, libavcodec 63) | LGPL-2.1-or-later (GPL-2.0-or-later when the system's build enables GPL parts) | The `mpeg2video` decoder inside the separate shared library `dq8-movie` (ADR-0015), which `dq8-game` loads at run time and a user can replace; `DQ8_FFMPEG=auto\|system\|bundled\|off` (`cmake/Movie.cmake`). Dynamically linked, never copied into this repository; release packages bundle the LGPL build above instead |
+
+## Shipped in release packages, not in the repository
+
+Downloaded by `packaging/linux/build-appimage.sh` at pinned versions with SHA-256 checks; their licence texts are
+installed in the package under `share/doc/dq8-native/licenses/`.
+
+| Component | Release (pinned file, SHA-256) | License | Used for |
+|---|---|---|---|
+| [CMake](https://cmake.org) (`bin/cmake` and its modules) | v4.4.4 (`cmake-4.4.4-linux-x86_64.tar.gz`, `e5bb807f7728cb60cd8b27ebc97a2edb469b68655f21e844a600c3575b76f5bb`) | BSD-3-Clause (its statically linked libraries' notices are installed with it) | Configures the game-module build on the user's machine (the AppImage's `usr/bin/cmake`); its 13 binary Visual Studio, WinRT and macOS templates are left out |
+| [Ninja](https://github.com/ninja-build/ninja) | v1.13.2 (`ninja-linux.zip`, `5749cbc4e668273514150a80e387a957f933c6ed3f5f11e03fb30955e2bbead6`) | Apache-2.0 | Runs the game-module build (the AppImage's `usr/bin/ninja`) |
+| [AppImage type2-runtime](https://github.com/AppImage/type2-runtime) | 20251108 (`runtime-x86_64`, `2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d`) | MIT (the release's `LICENSE`); statically links [libfuse](https://github.com/libfuse/libfuse) 3.15.0 (LGPL-2.1), squashfuse 0.5.2 (BSD-2-Clause), zstd (BSD-3-Clause), zlib (Zlib), mimalloc (MIT) and musl (MIT) | The executable head of the AppImage that mounts its contents; built and published by the AppImage project, whose repository at that tag has the sources and build scripts |
+| [appimagetool](https://github.com/AppImage/appimagetool) | 1.9.1 (`appimagetool-x86_64.AppImage`, `ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0`) | MIT | Packs the AppImage (build machine only, not shipped) |
 
 ## Tools used during development, not bundled or redistributed
 

@@ -2,11 +2,17 @@
 // SPDX-FileCopyrightText: 2026 DQ8-Native contributors
 #include "dq8/core/recomp/function_map.h"
 
+#include "dq8/core/elf_headers.h"
 #include "dq8/core/error.h"
+#include "dq8/core/recomp/recomp_config.h"
 #include "platform/files.h"
 #include "recomp/common.h"
 
 #include <algorithm>
+#include <cstdio>
+#include <initializer_list>
+#include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <toml.hpp>
@@ -86,6 +92,85 @@ std::uint32_t u32_of(const toml::ordered_value& v, const std::string& source, co
 
 std::string range_text(std::uint32_t start, std::uint32_t end) {
     return "[" + hex8(start) + ", " + hex8(end) + ")";
+}
+
+// --- published maps ----------------------------------------------------------------------------------------
+
+bool all_of_chars(std::string_view s, bool (*ok)(char)) {
+    return !s.empty() && std::all_of(s.begin(), s.end(), ok);
+}
+
+bool is_lower_hex(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+}
+
+bool is_profile_char(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+bool is_unit_char(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+}
+
+bool is_identifier(std::string_view s) {
+    if (s.empty() || (s.front() >= '0' && s.front() <= '9')) {
+        return false;
+    }
+    return std::all_of(s.begin(), s.end(), [](char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
+    });
+}
+
+// A published integer: a TOML integer in [0, 2^32). Strings are refused (the format has no numeric strings).
+std::uint32_t published_u32(const toml::ordered_value& v, const std::string& source,
+                            const std::string& what) {
+    if (!v.is_integer()) {
+        fail(ErrorCode::map_parse, source, line_of(v), what + " must be an integer");
+    }
+    const std::int64_t n = v.as_integer();
+    if (n < 0 || n > 0xFFFFFFFFLL) {
+        fail(ErrorCode::map_parse, source, line_of(v), what + " is out of range");
+    }
+    return static_cast<std::uint32_t>(n);
+}
+
+const std::string& published_string(const toml::ordered_value& root, const char* key,
+                                    const std::string& source) {
+    if (!root.contains(key)) {
+        fail(ErrorCode::map_parse, source, 0, std::string("the map has no '") + key + "'");
+    }
+    const toml::ordered_value& v = root.at(key);
+    if (!v.is_string()) {
+        fail(ErrorCode::map_parse, source, line_of(v), std::string(key) + " must be a string");
+    }
+    return v.as_string();
+}
+
+// `what` is a C string so that GCC's -Wdangling-reference sees no temporary in the calls.
+const toml::ordered_array& published_array(const toml::ordered_value& v, const std::string& source,
+                                           const char* what) {
+    if (!v.is_array()) {
+        fail(ErrorCode::map_parse, source, line_of(v), std::string(what) + " must be an array");
+    }
+    return v.as_array();
+}
+
+// Each table of an array of tables, with exactly the keys `keys`.
+void published_row(const toml::ordered_value& v, const std::string& source, const std::string& what,
+                   std::initializer_list<const char*> keys) {
+    if (!v.is_table()) {
+        fail(ErrorCode::map_parse, source, line_of(v), "each " + what + " must be a table");
+    }
+    for (const auto& [key, value] : v.as_table()) {
+        if (std::none_of(keys.begin(), keys.end(), [&](const char* k) { return key == k; })) {
+            fail(ErrorCode::map_parse, source, line_of(value), what + " has an unknown key '" + key + "'");
+        }
+    }
+    for (const char* k : keys) {
+        if (!v.contains(k)) {
+            fail(ErrorCode::map_parse, source, line_of(v), what + " needs '" + k + "'");
+        }
+    }
 }
 
 } // namespace
@@ -346,6 +431,303 @@ std::vector<std::string> validate_function_map(FunctionMap& map, std::uint32_t c
         }
     }
     return warnings;
+}
+
+PublishedMap parse_published_map(std::string_view text, const std::string& source) {
+    const toml::ordered_value root = parse_toml(text, source);
+    static constexpr const char* keys[] = {
+        "format", "profile",   "unit", "source_sha1", "code", "functions", "link_return_entries",
+        "named",  "jump_table"};
+    for (const auto& [key, value] : root.as_table()) {
+        if (std::none_of(std::begin(keys), std::end(keys), [&](const char* k) { return key == k; })) {
+            fail(ErrorCode::map_parse, source, line_of(value),
+                 "unknown key '" + key + "' (Docs/formats/function-map.md lists the published keys)");
+        }
+    }
+    if (!root.contains("format") || !root.at("format").is_integer()) {
+        fail(ErrorCode::map_parse, source, 0, "the map needs an integer 'format'");
+    }
+    if (root.at("format").as_integer() != published_map_format) {
+        fail(ErrorCode::map_parse, source, line_of(root.at("format")),
+             "format " + std::to_string(root.at("format").as_integer()) +
+                 " is not known (this program reads " + std::to_string(published_map_format) + ")");
+    }
+
+    PublishedMap map;
+    map.profile = published_string(root, "profile", source);
+    map.unit = published_string(root, "unit", source);
+    map.source_sha1 = published_string(root, "source_sha1", source);
+    if (!all_of_chars(map.profile, is_profile_char)) {
+        fail(ErrorCode::map_parse, source, line_of(root.at("profile")), "profile must be [A-Z0-9_]+");
+    }
+    if (!all_of_chars(map.unit, is_unit_char)) {
+        fail(ErrorCode::map_parse, source, line_of(root.at("unit")), "unit must be [a-z0-9_]+");
+    }
+    if (map.source_sha1.size() != 40 || !all_of_chars(map.source_sha1, is_lower_hex)) {
+        fail(ErrorCode::map_parse, source, line_of(root.at("source_sha1")),
+             "source_sha1 must be 40 lower-case hex digits");
+    }
+
+    if (!root.contains("code")) {
+        fail(ErrorCode::map_parse, source, 0, "the map has no 'code'");
+    }
+    const toml::ordered_array& code = published_array(root.at("code"), source, "code");
+    if (code.size() != 2) {
+        fail(ErrorCode::map_parse, source, line_of(root.at("code")), "code must be [start, end]");
+    }
+    map.code_start = published_u32(code[0], source, "code's start");
+    map.code_end = published_u32(code[1], source, "code's end");
+    const std::size_t code_line = line_of(root.at("code"));
+    if (map.code_start >= map.code_end || map.code_start % 4 != 0 || map.code_end % 4 != 0) {
+        fail(ErrorCode::map_invalid, source, code_line,
+             "code " + range_text(map.code_start, map.code_end) + " must be a non-empty 4-aligned range");
+    }
+    const std::string unit_range = "the code range " + range_text(map.code_start, map.code_end);
+    auto inside = [&](std::uint32_t a) { return a >= map.code_start && a < map.code_end; };
+
+    if (!root.contains("functions")) {
+        fail(ErrorCode::map_parse, source, 0, "the map has no 'functions'");
+    }
+    for (const toml::ordered_value& v : published_array(root.at("functions"), source, "functions")) {
+        if (!v.is_array() || v.as_array().size() != 2) {
+            fail(ErrorCode::map_parse, source, line_of(v), "each function must be [start, size]");
+        }
+        PublishedFunction f;
+        f.start = published_u32(v.as_array()[0], source, "a function's start");
+        f.size = published_u32(v.as_array()[1], source, "a function's size");
+        const std::uint64_t end = std::uint64_t{f.start} + f.size;
+        const std::string label = "the function at " + hex8(f.start);
+        if (f.size == 0 || f.start % 4 != 0 || f.size % 4 != 0) {
+            fail(ErrorCode::map_invalid, source, line_of(v), label + " is empty or misaligned");
+        }
+        if (!inside(f.start) || end > map.code_end) {
+            fail(ErrorCode::map_invalid, source, line_of(v), label + " lies outside " + unit_range);
+        }
+        if (!map.functions.empty()) {
+            const PublishedFunction& prev = map.functions.back();
+            if (prev.start >= f.start) {
+                fail(ErrorCode::map_invalid, source, line_of(v), label + " is out of order or repeated");
+            }
+            if (std::uint64_t{prev.start} + prev.size > f.start) {
+                fail(ErrorCode::map_invalid, source, line_of(v),
+                     label + " overlaps the function at " + hex8(prev.start));
+            }
+        }
+        map.functions.push_back(f);
+    }
+
+    if (root.contains("link_return_entries")) {
+        for (const toml::ordered_value& v :
+             published_array(root.at("link_return_entries"), source, "link_return_entries")) {
+            const std::uint32_t a = published_u32(v, source, "a link-return entry");
+            if (!inside(a) || a % 4 != 0) {
+                fail(ErrorCode::map_invalid, source, line_of(v),
+                     "link-return entry " + hex8(a) + " is misaligned or outside " + unit_range);
+            }
+            if (!map.link_return_entries.empty() && map.link_return_entries.back() >= a) {
+                fail(ErrorCode::map_invalid, source, line_of(v),
+                     "link-return entry " + hex8(a) + " is out of order or repeated");
+            }
+            map.link_return_entries.push_back(a);
+        }
+    }
+
+    if (root.contains("named")) {
+        for (const toml::ordered_value& v : published_array(root.at("named"), source, "named")) {
+            published_row(v, source, "[[named]]", {"start", "name"});
+            PublishedName n;
+            n.line = line_of(v);
+            n.start = published_u32(v.at("start"), source, "[[named]] start");
+            if (!v.at("name").is_string()) {
+                fail(ErrorCode::map_parse, source, n.line, "[[named]] name must be a string");
+            }
+            n.name = v.at("name").as_string();
+            const auto f = std::lower_bound(
+                map.functions.begin(), map.functions.end(), n.start,
+                [](const PublishedFunction& fn, std::uint32_t start) { return fn.start < start; });
+            if (f == map.functions.end() || f->start != n.start) {
+                fail(ErrorCode::map_invalid, source, n.line, hex8(n.start) + " is no function's start");
+            }
+            if (!is_identifier(n.name) || resolve_runtime_call(n.name).kind == RuntimeCallKind::none) {
+                fail(ErrorCode::map_invalid, source, n.line,
+                     "'" + n.name + "' is not a kernel or SDK name of the runtime's call list");
+            }
+            if (!map.named.empty() && map.named.back().start >= n.start) {
+                fail(ErrorCode::map_invalid, source, n.line,
+                     "[[named]] at " + hex8(n.start) + " is out of order or repeated");
+            }
+            map.named.push_back(std::move(n));
+        }
+    }
+
+    if (root.contains("jump_table")) {
+        for (const toml::ordered_value& v : published_array(root.at("jump_table"), source, "jump_table")) {
+            published_row(v, source, "[[jump_table]]", {"address", "base_register", "count"});
+            PublishedJumpTable t;
+            t.line = line_of(v);
+            t.address = published_u32(v.at("address"), source, "[[jump_table]] address");
+            t.base_register = published_u32(v.at("base_register"), source, "[[jump_table]] base_register");
+            t.count = published_u32(v.at("count"), source, "[[jump_table]] count");
+            const std::string label = "the jump table at " + hex8(t.address);
+            if (t.address == 0 || t.address % 4 != 0) {
+                fail(ErrorCode::map_invalid, source, t.line, label + " has a zero or misaligned address");
+            }
+            if (t.base_register > 31) {
+                fail(ErrorCode::map_invalid, source, t.line,
+                     label + " names base_register " + std::to_string(t.base_register) + " (0..31)");
+            }
+            if (t.count == 0 || std::uint64_t{t.address} + 4ull * t.count > 0x100000000ull) {
+                fail(ErrorCode::map_invalid, source, t.line,
+                     label + " has count " + std::to_string(t.count) + " (at least 1, inside 4 GiB)");
+            }
+            if (!map.jump_tables.empty() && map.jump_tables.back().address >= t.address) {
+                fail(ErrorCode::map_invalid, source, t.line, label + " is out of order or repeated");
+            }
+            map.jump_tables.push_back(t);
+        }
+    }
+    return map;
+}
+
+fs::path published_map_file(const fs::path& root, std::string_view profile, std::string_view unit) {
+    return root / std::string(profile) / (std::string(unit) + ".toml");
+}
+
+PublishedMap load_published_map(const fs::path& root, std::string_view profile, std::string_view unit) {
+    const fs::path file = published_map_file(root, profile, unit);
+    std::error_code ec;
+    if (!fs::is_regular_file(file, ec)) {
+        throw Error(ErrorCode::maps_missing,
+                    "no published function map for unit '" + std::string(unit) + "' of " +
+                        std::string(profile) + ": '" + detail::path_utf8(file) +
+                        "' does not exist (contributors: --maps DIR for Ghidra maps)");
+    }
+    const std::string source = detail::path_utf8(file);
+    PublishedMap map = parse_published_map(platform::read_text_file(file), source);
+    if (map.profile != profile || map.unit != unit) {
+        fail(ErrorCode::map_invalid, source, 0,
+             "the map is for " + map.profile + "/" + map.unit + ", not " + std::string(profile) + "/" +
+                 std::string(unit));
+    }
+    map.path = file;
+    return map;
+}
+
+void check_published_map_source(const PublishedMap& map, std::string_view source_sha1) {
+    std::string actual(source_sha1);
+    std::transform(actual.begin(), actual.end(), actual.begin(),
+                   [](char c) { return static_cast<char>(c >= 'A' && c <= 'F' ? c - 'A' + 'a' : c); });
+    if (actual != map.source_sha1) {
+        throw Error(ErrorCode::maps_missing,
+                    "the published function map of unit '" + map.unit + "' (" +
+                        (map.path.empty() ? map.profile + "/" + map.unit : detail::path_utf8(map.path)) +
+                        ") describes the file with SHA-1 " + map.source_sha1 + ", not this disc's " + actual +
+                        " (contributors: --maps DIR for Ghidra maps of this disc)");
+    }
+}
+
+std::string generated_function_name(std::uint32_t start) {
+    char buf[16];
+    std::snprintf(buf, sizeof buf, "FUN_%08x", static_cast<unsigned>(start));
+    return buf;
+}
+
+FunctionMap make_function_map(const PublishedMap& map, std::span<const std::uint8_t> unit_elf) {
+    const std::string source =
+        map.path.empty() ? map.profile + "/" + map.unit + ".toml" : detail::path_utf8(map.path);
+    FunctionMap out;
+    out.unit = map.unit;
+    std::map<std::uint32_t, const std::string*> names;
+    for (const PublishedName& n : map.named) {
+        names[n.start] = &n.name;
+    }
+    out.functions.reserve(map.functions.size());
+    for (const PublishedFunction& f : map.functions) {
+        MapFunction m;
+        const auto it = names.find(f.start);
+        m.name = it != names.end() ? *it->second : generated_function_name(f.start);
+        m.start = f.start;
+        m.end = f.start + f.size;
+        out.functions.push_back(std::move(m));
+    }
+    out.link_return_entries = map.link_return_entries;
+
+    const ElfHeaders headers = parse_elf_headers(unit_elf);
+    const std::vector<const ElfSegment*> segments = headers.load_segments();
+    // The little-endian word at `address`, from the load segment whose file data holds all four bytes.
+    auto word_at = [&](std::uint32_t address) -> std::optional<std::uint32_t> {
+        for (const ElfSegment* s : segments) {
+            if (address >= s->vaddr && std::uint64_t{address} + 4 <= std::uint64_t{s->vaddr} + s->filesz) {
+                const std::uint64_t offset = std::uint64_t{s->offset} + (address - s->vaddr);
+                if (offset + 4 > unit_elf.size()) {
+                    return std::nullopt;
+                }
+                const std::uint8_t* p = unit_elf.data() + offset;
+                return static_cast<std::uint32_t>(p[0]) | (static_cast<std::uint32_t>(p[1]) << 8) |
+                       (static_cast<std::uint32_t>(p[2]) << 16) | (static_cast<std::uint32_t>(p[3]) << 24);
+            }
+        }
+        return std::nullopt;
+    };
+    for (const PublishedJumpTable& t : map.jump_tables) {
+        JumpTable table;
+        table.address = t.address;
+        table.base_register = t.base_register;
+        table.line = t.line;
+        // A damaged count fails at its first word outside the image, not in this reservation.
+        table.entries.reserve(std::min<std::uint32_t>(t.count, 4096));
+        for (std::uint32_t i = 0; i < t.count; ++i) {
+            const std::uint32_t address = t.address + 4 * i;
+            const std::optional<std::uint32_t> target = word_at(address);
+            if (!target) {
+                fail(ErrorCode::map_invalid, source, t.line,
+                     "the jump table at " + hex8(t.address) + ": entry " + std::to_string(i) + " at " +
+                         hex8(address) + " lies outside the unit image's loaded data");
+            }
+            table.entries.push_back(JumpTableEntry{i, *target});
+        }
+        out.jump_tables.push_back(std::move(table));
+    }
+    return out;
+}
+
+std::string function_csv_text(const FunctionMap& map) {
+    std::vector<const MapFunction*> functions;
+    functions.reserve(map.functions.size());
+    for (const MapFunction& f : map.functions) {
+        functions.push_back(&f);
+    }
+    std::stable_sort(functions.begin(), functions.end(),
+                     [](const MapFunction* a, const MapFunction* b) { return a->start < b->start; });
+    std::string out = "Name,Start,End,Size\n";
+    out.reserve(out.size() + functions.size() * 48);
+    for (const MapFunction* f : functions) {
+        out += f->name + "," + hex8(f->start) + "," + hex8(f->end) + "," + std::to_string(f->end - f->start) +
+               "\n";
+    }
+    return out;
+}
+
+fs::path find_maps_dir(const fs::path& executable_dir) {
+    std::vector<fs::path> candidates{fs::path("data") / "maps"};
+    fs::path dir = executable_dir;
+    for (int up = 0; up < 6 && !dir.empty(); ++up) {
+        candidates.push_back(dir / "data" / "maps");
+        candidates.push_back(dir / "share" / "dq8" / "maps");
+        if (dir == dir.parent_path()) {
+            break;
+        }
+        dir = dir.parent_path();
+    }
+    std::error_code ec;
+    for (const fs::path& c : candidates) {
+        if (fs::is_directory(c, ec)) {
+            return c;
+        }
+    }
+    throw Error(ErrorCode::maps_missing,
+                "no published function maps found (data/maps in the source tree, "
+                "share/dq8/maps in an install); pass --maps DIR for contributor maps");
 }
 
 } // namespace dq8::core::recomp

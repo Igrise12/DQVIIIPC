@@ -3,6 +3,7 @@
 #pragma once
 
 #include "dq8/core/process.h"
+#include "dq8/core/recomp/function_map.h"
 #include "dq8/core/recomp/module_build.h"
 #include "dq8/core/recomp/recomp_driver.h"
 #include "dq8/core/recomp/units.h"
@@ -32,6 +33,8 @@ namespace dq8::core::recomp {
 //   units/units.toml            what prepare wrote: source, per unit kind, ranges, hashes and map counts
 //   units/<unit>.elf            the unit ELF (main: the boot ELF unchanged; overlays: make_overlay_unit_elf)
 //   units/<unit>.toml           the recompiler config
+//   units/<unit>.csv            the recompiler's function list, made from a published map (contributor maps
+//                               are read where they are)
 //   generated/<unit>/           the recompiler's output
 //   build/<unit>/               the module build tree
 //   modules/<profile>/          the modules and build-manifest.toml
@@ -47,6 +50,9 @@ class WorkLayout {
     }
     std::filesystem::path unit_config(std::string_view unit) const {
         return root_ / "units" / (std::string(unit) + ".toml");
+    }
+    std::filesystem::path unit_map(std::string_view unit) const {
+        return root_ / "units" / (std::string(unit) + ".csv");
     }
     std::filesystem::path generated_dir(std::string_view unit) const { return root_ / "generated" / unit; }
     std::filesystem::path build_dir(std::string_view unit) const { return root_ / "build" / unit; }
@@ -92,13 +98,14 @@ UnitSource elf_units(const std::vector<std::pair<std::string, std::filesystem::p
 
 struct PipelineOptions {
     std::filesystem::path work_dir;
-    std::filesystem::path maps_dir;          // prepare: <unit>.csv, .jump_tables.toml, .stats.toml
-    std::vector<std::string> units;          // unit names; empty: every unit
-    std::filesystem::path ps2_recomp;        // generate: the recompiler (a path or a name in PATH)
-    std::filesystem::path cmake = "cmake";   // build
-    std::string cmake_generator = "Ninja";   // build
-    std::filesystem::path module_source_dir; // build: the module template (cmake/module)
-    std::filesystem::path abi_include_dir;   // build: the directory holding dq8/abi/
+    std::filesystem::path maps_dir;           // prepare: contributor maps (<unit>.csv, ...); empty: published
+    std::filesystem::path published_maps_dir; // prepare: the <profile>/<unit>.toml root (find_maps_dir())
+    std::vector<std::string> units;           // unit names; empty: every unit
+    std::filesystem::path ps2_recomp;         // generate: the recompiler (a path or a name in PATH)
+    std::filesystem::path cmake = "cmake";    // build
+    std::string cmake_generator = "Ninja";    // build
+    std::filesystem::path module_source_dir;  // build: the module template (cmake/module)
+    std::filesystem::path abi_include_dir;    // build: the directory holding dq8/abi/
     std::vector<std::string> extra_cmake_args;
     unsigned jobs = 0;       // build: 0 picks default_build_jobs()
     bool force = false;      // generate: ignore the recorded key and rerun
@@ -114,7 +121,8 @@ struct PreparedUnit {
     std::string source_sha1;
     std::filesystem::path elf;
     std::filesystem::path config;
-    std::filesystem::path map_csv;
+    std::filesystem::path map_csv;       // the function list the recompiler reads
+    std::filesystem::path published_map; // the published map it came from; empty for contributor maps
     std::size_t functions = 0;
     std::size_t stubs = 0;
     std::size_t entry_points = 0;
@@ -161,9 +169,20 @@ struct BuildReport {
     std::vector<BuiltUnit> units;
 };
 
+// The setup's `maps` stage: the published map of every unit of the verified disc (all of them when `units` is
+// empty), each checked against the SHA-1 the region profile records for the unit's file (the boot file's for
+// main) and against the unit's code range. Throws Error(maps_missing) for a unit without a map or with a map
+// of another file, and the published maps' map_parse and map_invalid errors.
+std::vector<PublishedMap> require_published_maps(const std::filesystem::path& maps_root,
+                                                 const VerifiedImage& verified,
+                                                 const std::vector<std::string>& units = {});
+
 // Stages 3-4: writes every selected unit's ELF and recompiler config from the source and the maps, then
-// units/units.toml. Throws the map, container and I/O errors of the pieces, invalid_argument for an unknown
-// unit or a missing --maps, image_mismatch when a file read back differs from what verify hashed.
+// units/units.toml. With maps_dir set, the contributor maps there; else the published map of each unit under
+// published_maps_dir, checked against the unit file's SHA-1 (maps_missing), with its jump tables' entries
+// read from the unit ELF and its function list written to units/<unit>.csv. Throws the map, container and I/O
+// errors of the pieces, invalid_argument for an unknown unit or when neither map directory is set,
+// image_mismatch when a file read back differs from what verify hashed.
 PrepareReport prepare_units(const UnitSource& source, const PipelineOptions& options);
 
 // Stage 5: runs the recompiler on every prepared unit whose inputs changed. Throws tool_missing when the
