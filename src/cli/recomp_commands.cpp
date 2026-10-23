@@ -76,7 +76,7 @@ std::string utf8(const fs::path& p) {
 fs::path find_data_dir(const char* argv0, const fs::path& relative, const fs::path& marker) {
     std::vector<fs::path> candidates{relative};
     fs::path dir = executable_dir(argv0);
-    for (int up = 0; up < 6 && !dir.empty(); ++up) {
+    for (int up = 0; up < 8 && !dir.empty(); ++up) { // 8: a multi-config build adds Release/ or Debug/
         candidates.push_back(dir / relative);
         candidates.push_back(dir / "share" / "dq8" / relative);
         if (dir == dir.parent_path()) {

@@ -7,6 +7,7 @@
 #include "dq8/core/error.h"
 #include "dq8/core/error_text.h"
 #include "dq8/core/registry.h"
+#include "dq8/core/settings.h"
 #include "dq8/core/setup.h"
 #include "dq8/core/toolchain.h"
 #include "host/options.h"
@@ -259,4 +260,16 @@ TEST_CASE("m5 contracts: dq8-game parses --config, --set and --status", "[m5][ho
     CHECK_THROWS_AS(parse({"--elf", "a.elf", "--module-dir", "m", "--set", "display.vsync"}),
                     dq8::host::UsageError);
     CHECK_THROWS_AS(parse({"--elf", "a.elf", "--module-dir", "m", "--set", "=1"}), dq8::host::UsageError);
+}
+
+TEST_CASE("m5 contracts: shipped data is found from a multi-config build's output directory", "[m5][paths]") {
+    // Visual Studio and Ninja Multi-Config put programs one directory deeper (<target dir>/Release); the
+    // searches still reach the source tree (seen on the MSVC CI job).
+    const fs::path deeper = fs::path(DQ8_CONTRACT_MODULE_DIR) / "Release";
+    const fs::path settings = dq8::core::settings::find_settings_dir(deeper);
+    REQUIRE_FALSE(settings.empty());
+    CHECK(fs::equivalent(settings, fs::path(DQ8_SOURCE_DIR) / "config" / "settings"));
+    CHECK(fs::equivalent(
+        dq8::core::platform::find_data_dir(deeper, {fs::path("data") / "regions"}, "SLUS_21207.toml"),
+        fs::path(DQ8_SOURCE_DIR) / "data" / "regions"));
 }

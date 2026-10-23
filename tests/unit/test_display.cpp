@@ -12,6 +12,7 @@
 #include "support/fake_machine.h"
 #include "support/iso_builder.h"
 
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cstdint>
@@ -32,11 +33,14 @@ namespace input = core::input;
 const std::filesystem::path shipped_profile =
     std::filesystem::path(DQ8_SOURCE_DIR) / "data" / "regions" / "SLUS_21207.toml";
 
+// With LF line endings whatever the checkout made of them (git on Windows writes CRLF by default).
 std::string read_text(const std::filesystem::path& file) {
     std::ifstream in(file, std::ios::binary);
     std::ostringstream s;
     s << in.rdbuf();
-    return s.str();
+    std::string text = s.str();
+    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+    return text;
 }
 
 std::filesystem::path write(const std::filesystem::path& dir, const std::string& name,

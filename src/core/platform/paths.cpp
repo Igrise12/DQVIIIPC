@@ -73,7 +73,7 @@ fs::path find_data_dir(const fs::path& executable_dir, std::initializer_list<fs:
                        const fs::path& marker) {
     std::vector<fs::path> bases{fs::path()};
     fs::path dir = executable_dir;
-    for (int up = 0; up < 6 && !dir.empty(); ++up) {
+    for (int up = 0; up < 8 && !dir.empty(); ++up) { // 8: a multi-config build adds Release/ or Debug/
         bases.push_back(dir);
         if (dir == dir.parent_path()) {
             break;

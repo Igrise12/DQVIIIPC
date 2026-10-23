@@ -711,7 +711,7 @@ std::string function_csv_text(const FunctionMap& map) {
 fs::path find_maps_dir(const fs::path& executable_dir) {
     std::vector<fs::path> candidates{fs::path("data") / "maps"};
     fs::path dir = executable_dir;
-    for (int up = 0; up < 6 && !dir.empty(); ++up) {
+    for (int up = 0; up < 8 && !dir.empty(); ++up) { // 8: a multi-config build adds Release/ or Debug/
         candidates.push_back(dir / "data" / "maps");
         candidates.push_back(dir / "share" / "dq8" / "maps");
         if (dir == dir.parent_path()) {

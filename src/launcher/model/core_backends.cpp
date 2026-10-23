@@ -121,7 +121,7 @@ std::optional<fs::path> find_regions_dir(const fs::path& executable_dir) {
     std::vector<fs::path> candidates;
     fs::path dir = !executable_dir.empty() && !executable_dir.has_filename() ? executable_dir.parent_path()
                                                                              : executable_dir;
-    for (int up = 0; up < 6 && !dir.empty(); ++up) {
+    for (int up = 0; up < 8 && !dir.empty(); ++up) { // 8: a multi-config build adds Release/ or Debug/
         candidates.push_back(dir / "data" / "regions");
         candidates.push_back(dir / "share" / "dq8" / "regions");
         const fs::path parent = dir.parent_path();

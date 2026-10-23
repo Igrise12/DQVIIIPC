@@ -58,7 +58,7 @@ fs::path regions_dir(const Options& o, const char* argv0) {
     }
     std::vector<fs::path> candidates{fs::path("data") / "regions"};
     fs::path dir = executable_dir(argv0);
-    for (int up = 0; up < 6 && !dir.empty(); ++up) {
+    for (int up = 0; up < 8 && !dir.empty(); ++up) { // 8: a multi-config build adds Release/ or Debug/
         candidates.push_back(dir / "data" / "regions");
         candidates.push_back(dir / "share" / "dq8" / "regions");
         dir = dir.parent_path();

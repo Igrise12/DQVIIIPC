@@ -58,7 +58,7 @@ std::optional<fs::path> find_shared_file(const fs::path& executable_dir, const f
                                          const fs::path& installed) {
     std::vector<fs::path> candidates;
     fs::path dir = directory(executable_dir);
-    for (int up = 0; up < 6 && !dir.empty(); ++up) {
+    for (int up = 0; up < 8 && !dir.empty(); ++up) { // 8: a multi-config build adds Release/ or Debug/
         candidates.push_back(dir / in_tree);
         candidates.push_back(dir / installed);
         const fs::path parent = dir.parent_path();
