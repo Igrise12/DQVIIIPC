@@ -31,7 +31,7 @@ function(dq8_add_audio_wiring_test)
     endif()
     add_test(NAME host.dq8_game_audio_wiring
         COMMAND "${CMAKE_COMMAND}"
-            "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+            "-DDQ8_GAME=${DQ8_TEST_GAME}"
             "-DELF=${CMAKE_CURRENT_BINARY_DIR}/machine.elf"
             "-DMODULE_DIR=$<TARGET_FILE_DIR:dq8_unit_machine>"
             "-DISO=${CMAKE_CURRENT_BINARY_DIR}/machine.iso"

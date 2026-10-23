@@ -30,12 +30,12 @@ jobs:
       - name: Submodules (pinned subset, scripts/init_submodules.sh)
         shell: bash
         run: bash scripts/init_submodules.sh
-      # wine-binfmt lets the CMake scripts of some tests start .exe files directly; xvfb gives Wine a display.
+      # xvfb gives Wine a display. No binfmt_misc registration is needed (the runner's did not work): the tests' CMake
+      # scripts start Windows programs through a Wine wrapper (dq8_test_program, tests/unit/CMakeLists.txt).
       - name: Install Ninja, Wine and Xvfb
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build wine wine64 wine-binfmt xvfb
-          sudo update-binfmts --import wine || true
+          sudo apt-get install -y ninja-build wine wine64 xvfb
           wine --version
       - name: Pinned toolchain, CMake and Ninja (cache)
         uses: actions/cache@v4

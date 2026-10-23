@@ -20,7 +20,7 @@ endif()
 # dq8-game: --movies play without the library is a start-up failure, exit 3 (BackendError).
 add_test(NAME host.dq8_game_movies_play_without_library
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DDQ8_GAME=${DQ8_TEST_GAME}"
         "-DARGS=--elf@@${CMAKE_CURRENT_BINARY_DIR}/contract.elf@@--module-dir@@$<TARGET_FILE_DIR:dq8_unit_contract>@@--movies@@play@@--movie-decoder@@${CMAKE_CURRENT_BINARY_DIR}/no-such-libdq8-movie.so@@--stop-at-first-syscall"
         -DEXPECT_EXIT=3
         "-DEXPECT=--movies play: cannot load the movie decoder library"

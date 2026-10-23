@@ -3,6 +3,33 @@
 # Unit tests: no game data, run in CI (label "unit"). Tests that need the user's disc carry the label "local"
 # and live under tests/local/.
 
+# Programs the test scripts (run_*.cmake, test_*.cmake) start themselves: their path, or in a cross build a wrapper
+# that runs them through CMAKE_CROSSCOMPILING_EMULATOR (Wine), as ctest does for test targets. A script cannot start a
+# Windows .exe directly unless the machine has Wine's binfmt_misc registration, which CI runners do not (M5).
+function(dq8_test_program target out_var)
+    if(NOT CMAKE_CROSSCOMPILING_EMULATOR)
+        set(${out_var} "$<TARGET_FILE:${target}>" PARENT_SCOPE)
+        return()
+    endif()
+    set(_command "exec")
+    foreach(_part IN LISTS CMAKE_CROSSCOMPILING_EMULATOR)
+        if(_part MATCHES "'")
+            message(FATAL_ERROR "dq8_test_program: a quote in CMAKE_CROSSCOMPILING_EMULATOR: ${_part}")
+        endif()
+        string(APPEND _command " '${_part}'")
+    endforeach()
+    set(_wrapper "${PROJECT_BINARY_DIR}/tests/run/${target}")
+    get_property(_generated GLOBAL PROPERTY DQ8_TEST_PROGRAM_${target})
+    if(NOT _generated) # once per program, whichever test directory asks first
+        file(GENERATE OUTPUT "${_wrapper}" CONTENT "#!/bin/sh\n${_command} '$<TARGET_FILE:${target}>' \"$@\"\n"
+             FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+        set_property(GLOBAL PROPERTY DQ8_TEST_PROGRAM_${target} TRUE)
+    endif()
+    set(${out_var} "${_wrapper}" PARENT_SCOPE)
+endfunction()
+dq8_test_program(dq8-game DQ8_TEST_GAME)
+dq8_test_program(dq8ctl DQ8_TEST_CTL)
+
 # The hand-written contract unit (support/contract_unit.cpp) as a real game module, the way cmake/module builds
 # one: a shared library with hidden visibility whose only export is dq8_game_module_describe. The unit tests
 # load it with dlopen/LoadLibrary, and dq8-game --elf runs it below.
@@ -123,7 +150,7 @@ set_tests_properties(host.contract_elf PROPERTIES FIXTURES_SETUP dq8_contract_el
 
 add_test(NAME host.dq8_game_elf_contract
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DDQ8_GAME=${DQ8_TEST_GAME}"
         "-DARGS=--elf@@${_contract_elf}@@--module-dir@@$<TARGET_FILE_DIR:dq8_unit_contract>@@--stop-at-first-syscall@@--json"
         -DEXPECT_EXIT=0
         "-DEXPECT=\"reason\":\"syscall\"@@\"number\":\"0x3C\"@@\"name\":\"SetupThread\"@@\"a0\":\"0x12345678\"@@\"v0\":\"0x0000000012345679\""
@@ -134,7 +161,7 @@ set_tests_properties(host.dq8_game_elf_contract PROPERTIES FIXTURES_REQUIRED dq8
 # dispatch budget ends the run: "any other guest stop", exit 1.
 add_test(NAME host.dq8_game_elf_contract_exit1
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DDQ8_GAME=${DQ8_TEST_GAME}"
         "-DARGS=--elf@@${_contract_elf}@@--module-dir@@$<TARGET_FILE_DIR:dq8_unit_contract>@@--max-dispatches@@10"
         -DEXPECT_EXIT=1
         "-DEXPECT=stopped after 10 dispatches: max-dispatches: dispatch budget of 10"
@@ -144,7 +171,7 @@ set_tests_properties(host.dq8_game_elf_contract_exit1 PROPERTIES FIXTURES_REQUIR
 # A module directory with no modules is a validation error: exit 2 with the problem listed.
 add_test(NAME host.dq8_game_elf_no_modules
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DDQ8_GAME=${DQ8_TEST_GAME}"
         "-DARGS=--elf@@${_contract_elf}@@--module-dir@@${CMAKE_CURRENT_SOURCE_DIR}/support@@--json"
         -DEXPECT_EXIT=2
         "-DEXPECT=\"code\":\"module-validation\"@@no unit modules"
@@ -184,7 +211,7 @@ set(DQ8_MACHINE_SYNTHETIC_GS_HASH "3028b8f27428c40b26a20ffa96f1351b8d04fd57")
 set(DQ8_MACHINE_SYNTHETIC_RAM_SHA1 "aac99550b063892347bf589d89af2742da8e2c72")
 add_test(NAME host.dq8_game_machine_synthetic
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DDQ8_GAME=${DQ8_TEST_GAME}"
         "-DELF=${_machine_elf}"
         "-DMODULE_DIR=$<TARGET_FILE_DIR:dq8_unit_machine>"
         "-DISO=${_machine_iso}"

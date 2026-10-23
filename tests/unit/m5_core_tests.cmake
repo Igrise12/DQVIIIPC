@@ -20,7 +20,7 @@ file(WRITE "${_m5a}/damaged.toml" "[audio\n")
 set(_contract_run "--elf@@${CMAKE_CURRENT_BINARY_DIR}/contract.elf@@--module-dir@@$<TARGET_FILE_DIR:dq8_unit_contract>")
 add_test(NAME host.dq8_game_settings_applied
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DDQ8_GAME=${DQ8_TEST_GAME}"
         "-DARGS=${_contract_run}@@--config@@${_m5a}/settings-a.toml@@--set@@game.memory_card2=formatted@@--stop-at-first-syscall@@--json"
         -DEXPECT_EXIT=0
         "-DEXPECT=\"settings\":\\[\"display.window_mode=windowed\",\"display.width=1280\",\"display.height=960\",\"display.vsync=true\",\"display.aspect=auto\",\"display.integer_scaling=false\",\"display.filter=linear\",\"audio.output=null\",\"audio.device=\",\"audio.volume=100\",\"audio.latency_ms=200\",\"input.profile=default\",\"input.deadzone=8\",\"input.rumble=false\",\"game.movies=skip\",\"game.save_dir=[^\"]+/saves\",\"game.memory_card2=formatted\"\\]"
@@ -29,21 +29,21 @@ add_test(NAME host.dq8_game_settings_applied
 # needs the optional dq8-movie library, which a build without FFmpeg lacks, e.g. the Windows cross build.)
 add_test(NAME host.dq8_game_settings_flag_wins
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DDQ8_GAME=${DQ8_TEST_GAME}"
         "-DARGS=${_contract_run}@@--config@@${_m5a}/settings-a.toml@@--movies@@blank@@--stop-at-first-syscall@@--json"
         -DEXPECT_EXIT=0
         "-DEXPECT=\"input.rumble=false\",\"game.save_dir="
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
 add_test(NAME host.dq8_game_settings_bad_set
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DDQ8_GAME=${DQ8_TEST_GAME}"
         "-DARGS=${_contract_run}@@--set@@display.width=1@@--json"
         -DEXPECT_EXIT=2
         "-DEXPECT=\"code\":\"settings-invalid\"@@display.width = '1' is outside 640 to 7680"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
 add_test(NAME host.dq8_game_settings_damaged
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DDQ8_GAME=${DQ8_TEST_GAME}"
         "-DARGS=${_contract_run}@@--config@@${_m5a}/damaged.toml@@--json"
         -DEXPECT_EXIT=2
         "-DEXPECT=\"code\":\"settings-parse\"@@damaged.toml:1:"
@@ -56,8 +56,8 @@ foreach(mode IN ITEMS default_config status status_stdout settings_cli)
     add_test(NAME m5_core.${mode}
         COMMAND "${CMAKE_COMMAND}"
             -DMODE=${mode}
-            "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
-            "-DDQ8CTL=$<TARGET_FILE:dq8ctl>"
+            "-DDQ8_GAME=${DQ8_TEST_GAME}"
+            "-DDQ8CTL=${DQ8_TEST_CTL}"
             "-DELF=${CMAKE_CURRENT_BINARY_DIR}/machine.elf"
             "-DMODULE_DIR=$<TARGET_FILE_DIR:dq8_unit_machine>"
             "-DISO=${CMAKE_CURRENT_BINARY_DIR}/machine.iso"
@@ -72,21 +72,21 @@ endforeach()
 # with nothing registered.
 add_test(NAME cli.dq8ctl_setup_events
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8ctl>"
+        "-DDQ8_GAME=${DQ8_TEST_CTL}"
         "-DARGS=setup@@${_m5a}/missing.iso@@--events@@-@@--work@@${_m5a}/setup-work@@--registry@@${_m5a}/installs.toml"
         -DEXPECT_EXIT=2
         "-DEXPECT=^{\"ev\":\"stage\",\"stage\":\"verify\",\"state\":\"start\"@@{\"ev\":\"stage\",\"stage\":\"verify\",\"state\":\"error\",[^\n]*\"code\":\"io-open\"}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
 add_test(NAME cli.dq8ctl_diagnose
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8ctl>"
+        "-DDQ8_GAME=${DQ8_TEST_CTL}"
         "-DARGS=diagnose@@--registry@@${_m5a}/no-installs.toml@@--work@@${_m5a}/no-work@@--config@@${_m5a}/settings-a.toml"
         -DEXPECT_EXIT=0
         "-DEXPECT=\\[system\\]@@\\[toolchain\\]@@game.movies = skip \\(user\\)@@no game is set up yet@@no setup log"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/run_and_match.cmake")
 add_test(NAME cli.dq8ctl_run_nothing_registered
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8ctl>"
+        "-DDQ8_GAME=${DQ8_TEST_CTL}"
         "-DARGS=run@@--registry@@${_m5a}/no-installs.toml@@--json"
         -DEXPECT_EXIT=2
         "-DEXPECT=no game is set up"

@@ -13,6 +13,18 @@
           "message": 6
         }
       ]
+    },
+    {
+      "owner": "dq8-msvc-link",
+      "pattern": [
+        {
+          "regexp": "^\\s*(.+?)\\s*:\\s+(?:fatal\\s+)?(error|warning)\\s+((?:LNK|CVT|RC)\\d+)\\s*:\\s*(.*?)(?:\\s+\\[.*\\])?$",
+          "file": 1,
+          "severity": 2,
+          "code": 3,
+          "message": 4
+        }
+      ]
     }
   ]
 }

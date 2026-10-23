@@ -14,7 +14,7 @@ target_sources(dq8_unit_tests PRIVATE
 # and reported as an event with its SHA-1.
 add_test(NAME host.dq8_game_dump_iop_ram
     COMMAND "${CMAKE_COMMAND}"
-        "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+        "-DDQ8_GAME=${DQ8_TEST_GAME}"
         "-DARGS=--elf@@${CMAKE_CURRENT_BINARY_DIR}/machine.elf@@--module-dir@@$<TARGET_FILE_DIR:dq8_unit_machine>@@--disc@@${CMAKE_CURRENT_BINARY_DIR}/machine.iso@@--headless@@--gs@@null@@--vblanks@@3@@--dump-iop-ram-at@@2:${CMAKE_CURRENT_BINARY_DIR}/machine.iopram@@--events@@-"
         -DEXPECT_EXIT=0
         "-DEXPECT=\"ev\":\"iop_ram_dump\",\"vblank\":2,\"cycles\":[0-9]+,\"sha1\":\"[0-9a-f]+\""

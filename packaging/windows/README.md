@@ -29,9 +29,10 @@ cmake -DBUILD=build/windows -DTOOLS=work/tools -DOUT=build/windows/package -P pa
 ```
 
 - **Wine.** The toolchain file makes Wine the `CMAKE_CROSSCOMPILING_EMULATOR` (through `wine-run.sh`, which hands
-  absolute paths to the program as `Z:` paths: Catch2 on Windows reads a leading `/` as an option). Tests that a CMake
-  script starts (`run_and_match.cmake`) run the `.exe` directly, which needs Wine's binfmt_misc registration
-  (`wine-binfmt` on Debian and Ubuntu) and `WINEPATH` naming the toolchain's DLL directory. A fresh `WINEPREFIX`
+  absolute paths to the program as `Z:` paths: Catch2 on Windows reads a leading `/` as an option). Programs that a test's
+  CMake script starts (`run_and_match.cmake` and the like) go through generated wrappers in `build/.../tests/run/`
+  that call the same emulator (`dq8_test_program` in `tests/unit/CMakeLists.txt`), so no binfmt_misc registration
+  is needed; `WINEPATH` names the toolchain's DLL directory. A fresh `WINEPREFIX`
   asks to install Mono unless `WINEDLLOVERRIDES=mscoree,mshtml=` is set. Wine maps file names through the Unix
   locale, so the non-ASCII path tests need a UTF-8 one (`LANG=C.UTF-8`).
 - **What Wine cannot show.** Wine's `vulkan-1.dll` passes the host's GPU through and ignores the Vulkan loader's

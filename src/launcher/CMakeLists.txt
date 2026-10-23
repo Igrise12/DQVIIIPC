@@ -64,6 +64,10 @@ if(WIN32)
     # A GUI-subsystem program on Windows: no console window (M5 session E). Output redirected to a pipe or a file
     # still arrives (the tests read --version that way).
     set_target_properties(dq8-launcher PROPERTIES WIN32_EXECUTABLE ON)
+    if(MSVC)
+        # MSVC's GUI subsystem expects WinMain; start at the C runtime's main() instead, as mingw does by itself.
+        target_link_options(dq8-launcher PRIVATE /ENTRY:mainCRTStartup)
+    endif()
 endif()
 
 include(GNUInstallDirs)

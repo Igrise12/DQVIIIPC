@@ -21,6 +21,7 @@ catch_discover_tests(dq8_local_tests PROPERTIES LABELS local)
 #   local.boot_to_title_skip  --movies skip, no press after the settings: the flyover timeline is skipped, so the
 #                             title comes within 1,600 vblanks (2,640 with the flyover on black).
 # The skip run's input is the setup's smoke-test script, kept once in data/smoke/.
+dq8_test_program(dq8-game DQ8_TEST_GAME) # tests/unit/CMakeLists.txt: a wrapper when cross compiling
 foreach(run IN ITEMS "boot_to_title;tests/local/input/boot-to-title;blank;6000"
                      "boot_to_title_skip;data/smoke/dq8-us-boot-to-title;skip;1600")
     list(GET run 0 name)
@@ -30,7 +31,7 @@ foreach(run IN ITEMS "boot_to_title;tests/local/input/boot-to-title;blank;6000"
     get_filename_component(script_name "${script}" NAME)
     add_test(NAME local.${name}
         COMMAND "${CMAKE_COMMAND}"
-            "-DDQ8_GAME=$<TARGET_FILE:dq8-game>"
+            "-DDQ8_GAME=${DQ8_TEST_GAME}"
             "-DSCRIPT=${PROJECT_SOURCE_DIR}/${script}.dq8in"
             "-DMODULE_DIR=${PROJECT_SOURCE_DIR}/work/recomp/modules/SLUS_21207"
             "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/work"
