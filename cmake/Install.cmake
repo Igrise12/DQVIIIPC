@@ -5,7 +5,8 @@
 #
 #   bin/        dq8-game, dq8-launcher, dq8ctl, ps2_recomp
 #   lib/        dq8-gs-parallel, dq8-movie and, with DQ8_FFMPEG=bundled, libavcodec and libavutil
-#   share/dq8/  regions/ (region profiles), maps/ (published function maps), settings/ (schema and strings),
+#   share/dq8/  regions/ (region profiles), maps/ (published function maps), smoke/ (the setup's smoke inputs),
+#               settings/ (schema and strings),
 #               cmake/module/ (the game-module template), cmake/toolchains/ (llvm-mingw, for Windows modules),
 #               include/dq8/abi/ (the headers modules compile against), fonts/ (when the launcher bundles one)
 #   share/doc/dq8-native/  LICENSE, README.md, THIRD_PARTY_NOTICES.md, licenses/, the libraries' notices
@@ -27,6 +28,9 @@ install(DIRECTORY "${PROJECT_SOURCE_DIR}/data/maps/" DESTINATION "${DQ8_INSTALL_
         COMPONENT recompiler FILES_MATCHING PATTERN "*.toml")
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/config/settings/" DESTINATION "${DQ8_INSTALL_DATADIR}/settings"
         COMPONENT game FILES_MATCHING PATTERN "*.toml")
+# The setup's smoke-test inputs (session A: smoke.toml and the scripts it names).
+install(DIRECTORY "${PROJECT_SOURCE_DIR}/data/smoke/" DESTINATION "${DQ8_INSTALL_DATADIR}/smoke"
+        COMPONENT recompiler FILES_MATCHING PATTERN "*.toml" PATTERN "*.dq8in")
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/cmake/module/" DESTINATION "${DQ8_INSTALL_DATADIR}/cmake/module"
         COMPONENT recompiler)
 install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/dq8/abi/" DESTINATION "${DQ8_INSTALL_DATADIR}/include/dq8/abi"
