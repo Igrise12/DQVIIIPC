@@ -116,8 +116,15 @@ std::vector<std::string> outline(const std::vector<setup::Event>& events) {
     return out;
 }
 
+// Whether the setup gets past its toolchain stage on this machine: the detected tools are complete and, where
+// the setup builds with the bundled llvm-mingw (Windows, ADR-0018), they are that bundle; without it
+// installed the setup stops there for the user's consent to download it (the test gives none).
 bool toolchain_complete() {
-    return dq8::core::toolchain::check(dq8::core::toolchain::detect({})).empty();
+    const dq8::core::toolchain::Toolchain t = dq8::core::toolchain::detect({});
+    if (dq8::core::toolchain::bundle_offer().available && !t.bundled) {
+        return false;
+    }
+    return dq8::core::toolchain::check(t).empty();
 }
 
 } // namespace
@@ -140,6 +147,8 @@ TEST_CASE("setup: stages report in order, a missing map stops the run, a second 
     CHECK(events.back().code == r.code);
     if (complete) {
         CHECK_THAT(r.message, ContainsSubstring("lack main, a"));
+    } else if (dq8::core::toolchain::bundle_offer().available) {
+        CHECK_THAT(r.message, ContainsSubstring("--allow-download")); // asks for the consent it was not given
     }
     // Byte progress for the extract stage, against the profile's sizes.
     bool extract_progress = false;
