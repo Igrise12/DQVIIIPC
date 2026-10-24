@@ -8,29 +8,38 @@ DQ8-Native: an open-source native PC port of *Dragon Quest VIII* (PS2, NTSC-U, b
 static recompilation of the game's EE code to C++, run on a purpose-built runtime. Not an emulator. GPL-3.0-or-later.
 
 **Current state: M1 (disc intake), M2 (first recompile) and M3 (boots, done 2026-10-21) complete: the disc boots to
-the title menu headless or in an SDL3 window, with paraLLEl-GS frames at PCSX2 parity. M4 (playable core) is in
-progress: sessions A–D are merged (2026-10-22); the field draws in 3D, the menu opens, saves are written to and
-reloaded from a host-folder card, the movies play, and the game's own sound modules run on an IOP interpreter
-with a register-level SPU2. Town, shop and battle await the owner's playtest. M5 (launcher MVP) is planned
-(2026-10-22) and its day 0 is on `main`: the settings, setup, toolchain and registry contracts and a placeholder
-`dq8-launcher` (Dear ImGui over SDL3).**
+the title menu headless or in an SDL3 window, with paraLLEl-GS frames at PCSX2 parity. M4 (playable core) is brought up
+except town, shop and battle (the owner's playtest): the field draws in 3D, the menu opens, saves are written to and
+reloaded from a host-folder card, the movies play, and the game's own sound modules run on an IOP interpreter with a
+register-level SPU2. M5 (launcher MVP): sessions A–E are merged (2026-10-23) and CI is green on all nine jobs at
+`5744d0b` (CI's six, the AppImage, the Windows cross build under Wine); integration I1–I4 is next.**
 - `src/core` (`libdq8core`): ISO 9660 reader, SHA-1/CRC-32, ELF32 reader and writer, `MWo3` parser, region profiles
   (`data/regions/SLUS_21207.toml`: hashes, sizes, addresses and the S3 loader facts, never bytes), `verify_image()` /
-  `extract()`, a portable process runner, and the recompile pipeline (`core/recomp/`: function maps, per-unit
-  recompiler configs, `ps2_recomp` driver, per-unit module builds). `dq8ctl verify|extract|info|recomp|make-unit-elf`.
+  `extract()`, a portable process runner, the recompile pipeline (`core/recomp/`: published and contributor function
+  maps, per-unit recompiler configs, `ps2_recomp` driver, per-unit module builds), and M5's settings store
+  (`config/settings/` schema, layered files), setup (`setup::run()`: stages, events, cancel and resume), toolchain
+  detection and the consented llvm-mingw download, build registry, diagnostics report and input profiles.
+  `dq8ctl verify|extract|info|recomp|make-unit-elf|setup|settings|run|diagnose`.
 - `include/dq8/abi/`: the game-module ABI (`game_module.h`) and the include root generated code compiles against
   (`ps2recomp/`: `R5900Context`, the `PS2Runtime` adapter, the macros, the stub/syscall forwarders).
   `cmake/module/` builds one shared library per code unit (`dq8_unit_<name>`, one export).
 - `src/runtime`: the machine (virtual clock, events, MMIO bus, interrupts), guest threads on fibers and the HLE
-  kernel, DMAC/VIF/GIF/VU1, the GS pipeline with null, trace and paraLLEl-GS backends, SIF and the native IOP servers,
-  guest memory, ELF loader, dispatch tables, overrides and the overlay manager. `src/game`: the profile-driven game
-  layer (residency hook, movie skip, title watcher, `--until`). `src/host`: `dq8-game`, headless or SDL3 window.
-  `src/launcher`: `dq8-launcher` (M5 placeholder). `config/settings/`: the settings schema and its string table.
+  kernel, DMAC/VIF/GIF/VU1, the GS pipeline with null, trace and paraLLEl-GS backends, SIF, the native IOP servers and
+  the IOP interpreter, the SPU2, guest memory, ELF loader, dispatch tables, overrides and the overlay manager.
+  `src/game`: the profile-driven game layer (residency hook, movie skip, title and 16:9 watchers, `--until`).
+  `src/host`: `dq8-game`, headless or SDL3 window (window modes, aspect auto/4:3/16:9, internal resolution 1x–4x,
+  bindings), `--config/--set` settings and the `--status` channel. `src/launcher`: `dq8-launcher` (Dear ImGui over
+  SDL3: setup wizard, Play, Settings, Controllers, Diagnostics, About).
+- Published function maps in `data/maps/SLUS_21207/` (addresses, sizes, table shapes; ADR-0017): a user's setup needs
+  no Ghidra. `cmake --install` gives a relocatable `bin/ lib/ share/dq8/` tree; `packaging/linux/` builds the
+  AppImage, `packaging/windows/` the zip (cross-built with llvm-mingw, ADR-0018).
 - `dq8-game --until title` boots the disc to the title menu in 1,200 vblanks, deterministically (the M3 input under
   `--movies blank`; the default `--movies skip` also skips the title's flyover timeline); `--window` plays it live
-  (see `Docs/milestones/M3-boots.md` §Results).
-- Tests: 596 unit tests (CI on GCC, Clang, MSVC, ASan), local disc tests, a synthetic machine run pinned to golden
-  hashes, and a synthetic recompile end-to-end suite (label `e2e`, CI job on GCC 13).
+  (see `Docs/milestones/M3-boots.md` §Results). README.md has the build, install and launcher steps.
+- Tests: 726 unit tests (CI on GCC, Clang, MSVC, ASan; the Windows cross build runs 718 of them under Wine), local
+  disc tests, a synthetic machine run pinned to golden hashes, and a synthetic recompile end-to-end suite (label
+  `e2e`, CI job on GCC 13). A failed CI test step turns each failed test into an annotation
+  (`scripts/ci_test_annotations.py`), readable without signing in to GitHub.
 
 The plan of record is the three documents in `Docs/`; read them before
 proposing or changing design:
@@ -162,23 +171,28 @@ bring-up on the real disc; the headless boot reaches the title menu deterministi
 software renderer (settings 0.9998, title logo 0.9989 SSIM), and `--window` runs at real time with keyboard and
 gamepad (`tools/bringup/window_smoke.py`). CI is green on all six jobs at `38fdf4d`.
 
-**M4 (playable core) is in progress**, planned with the project owner on 2026-10-21 (`Docs/milestones/M4-playable.md`;
-ADRs 0014–0016):
-- day 0 (contracts, the VU0 bridge) and sessions A (IOP interpreter), B (SPU2, audio output), C (movies) and D
-  (memory card, pad, VU0 registers, robustness) are on `main`, with the VU1 interpreter speed-up (2026-10-22);
-- bring-up (`Docs/milestones/M4-playable.md`, "Bring-up status"): B1 field 3D (VF0, VU JR/JALR), B2 menu (function
-  maps: main's callback tables, mis-flagged no-return calls), B5/B6 save and reload, B7 movies, B8 sound modules
-  interpreted are done; B3/B4 (town, shop, battle) are left to the owner's playtest;
-- open: the movie scan-out geometry (4/3 horizontally against PCSX2), the menu's separator dots, two bright glows,
-  WAV and frame parity tooling, VU1 speed (about 13 vblanks/s in the field, release preset).
+**M4 (playable core)**, planned with the project owner on 2026-10-21 (`Docs/milestones/M4-playable.md`; ADRs
+0014–0016): day 0, sessions A–D and the VU1 interpreter speed-up are merged; bring-up B1 (field 3D), B2 (menu), B5/B6
+(save and reload), B7 (movies) and B8 (sound) are done; B3/B4 (town, shop, battle) are the owner's playtest. Open: the
+menu's separator dots, two bright glows, WAV and frame parity tooling, and speed (about 13 vblanks/s in the field with
+the release preset; M6). The movie geometry item is resolved by M5's `--aspect auto` following the game's 16:9 option.
 
-**M5 (launcher MVP) is planned** with the project owner on 2026-10-22 (`Docs/milestones/M5-launcher.md`; ADRs 0006,
+**M5 (launcher MVP)**, planned with the project owner on 2026-10-22 (`Docs/milestones/M5-launcher.md`; ADRs 0006,
 0010, 0017, 0018): Linux and Windows; a new user goes from the ISO to playing without a terminal.
-- day 0 is on `main`: error codes with texts, the settings schema (`config/settings/`) and `dq8/core/settings.h`,
-  the setup, toolchain and registry APIs (stubs), `dq8-game --config/--set/--status` (parsed, refused until wired),
-  the published map format (`Docs/formats/function-map.md`), Dear ImGui and nlohmann/json, a placeholder launcher;
-- next: sessions A (core APIs, settings, CLI), B (launcher), C (display, input, audio, widescreen), D (published
-  maps, Linux packaging) and E (Windows, llvm-mingw) in parallel, merged A → C → D → B → E, then integration I1–I4.
+- merged 2026-10-23, in order A → C → D → B → E, each rebased in its worktree with its integration fixes as branch
+  commits: A (settings, setup, toolchain, registry, dq8ctl), C (display, input, audio, 16:9), D (published maps,
+  install layout, bundled LGPL FFmpeg, AppImage, the checker's `--release` scan), B (launcher), E (Windows cross build,
+  toolchain download, zip). Fixes found on the way: module builds reconfigure with `cmake --fresh` when the template
+  moved (AppImage mounts), test scripts start Windows programs through a Wine wrapper (`dq8_test_program`; GitHub's
+  runner has no working binfmt_misc), data lookups search 8 directories up (MSVC's `Release/`), MSVC entry and test
+  fixes. On the disc: a fresh `dq8ctl setup` from the published maps passes every stage in about 10 minutes and its
+  modules boot to the M4 golden title; 2x internal resolution and 16:9 auto checked in the window.
+- next: integration I1 (settings round trip through the launcher), I2 (the launcher's wizard and Play on the disc
+  from a clean profile; not yet tried), I3 (Windows: Wine smoke here, then the owner on real Windows), I4 (legal scan
+  of the AppImage and zip, notices for every bundled binary).
+- waiting on the owner: `claude/serene-meitner-fc10fd` (SDL submodule from an unreleased 3.5 snapshot to
+  release-3.4.18, as ADR-0005 decided) and `claude/gallant-chatterjee-39e89a` (`tools/bringup/window_smoke.py` timed
+  from the run's events); neither is merged.
 
-M2's and M3's records are `Docs/milestones/M2-first-recompile.md` and `M3-boots.md`.
+M2's, M3's and M4's records are `Docs/milestones/M2-first-recompile.md`, `M3-boots.md` and `M4-playable.md`.
 Do not start implementation work the user has not asked for.
