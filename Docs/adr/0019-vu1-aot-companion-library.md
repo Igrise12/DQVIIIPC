@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | **Proposed** 2026-10-24, for the project owner. Not implemented; Docs/milestones/M6-vu1-aot.md is the plan, and phase P0's measurements come before acceptance |
+| **Status** | **Proposed** 2026-10-24. The owner reviewed the plan (Docs/milestones/M6-vu1-aot.md, "Owner decisions") the same day; acceptance waits for phase P0's measurements and the checkpoint after them. Not implemented |
 | **Related** | architecture.md §2.1, §5.4, §12, §13.3, §14, §15; ADR-0002, ADR-0007, ADR-0008, ADR-0017, ADR-0018; Docs/milestones/M4-playable.md (bring-up log, "Where the field's time goes") |
 
 ## Context
@@ -57,9 +57,9 @@ Facts that shape the answer (M6-vu1-aot.md, "What exploration established"):
 ## Consequences
 
 - Each new program costs the first play: a scene with programs not yet compiled runs on the interpreter until the
-  user optimizes. Two later remedies stay open: a published, address-only program list read from the user's disc at
-  setup (a separate decision, like ADR-0017), and hot-loading a new library at a program boundary, which the contract
-  makes safe because outputs do not change.
+  user optimizes. The owner chose (2026-10-24) to add a published, address-only program list, read from the user's
+  disc at setup, if P0 shows the programs sit at fixed places on the disc. It gets its own ADR, as ADR-0017 did for
+  maps. Hot-loading a new library at a program boundary, which the contract would make safe, is not planned.
 - Changing the interpreter's timing or arithmetic changes the ISA digest and makes existing libraries stale. That is
   an event, like a game-module ABI bump: the launcher offers Optimize, and the interpreter runs meanwhile.
 - `dq8-vu1c` ships with the host, as `ps2_recomp` does. The launcher and `dq8ctl` run it through `libdq8core` and

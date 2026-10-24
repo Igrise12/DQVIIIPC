@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| **Status** | Proposed 2026-10-24, for review with the project owner. Nothing is implemented; work starts with phase P0 once the owner approves |
+| **Status** | Planned 2026-10-24 with the project owner. Nothing is implemented; phase P0 (measure) comes next, then the owner's checkpoint before day 0 |
 | **Scope** | Stage 2 of architecture.md §5.4, the "full speed" half of M6 (brief §11). The playthrough half of M6 gets its own brief |
 | **Exit** | On the dev box (Ryzen 5 5600, release preset) the field and the opening scene of the New Game probe run at full speed or better, and the compiled VU1 programs leave every deterministic output byte-identical with the interpreter |
-| **Owner choices** | *(filled in at review)* |
+| **Owner choices (2026-10-24)** | Exact cycle counts as well as values, memory and packets · the census and Optimize, plus a published address-only program list if P0 finds the programs at fixed places on the disc (its own ADR) · Optimize as a button with a one-time prompt · of the smaller wins only the SHA-NI SHA-1, merged first (no `--gs-hash off`, no tree-wide `-ffp-contract=off`, no `perf` install: P0 samples with gdb) |
 | **Proposed, for the owner** | ADR-0019 (VU1 programs compiled ahead of time into a locally built companion library, matched by content, with the interpreter as reference and fallback) |
 
 Sessions read this file. Contract changes go through the coordinator. Every rule in CLAUDE.md applies. The most
@@ -75,10 +75,10 @@ MPG payload. Its identity is the content of that code, wherever the bytes came f
 
 **Volume** (M4 speed-up row, the probe at vblank 2300 before the sound modules ran interpreted): 185,685 VU1
 programs, 383,227,873 cycles and 879,802 XGKICKs. That is about 2,060 cycles and 4.7 kicks per program. With the sound
-modules interpreted (B8) the count at vblank 2300 is 159,743. VU1 work starts in the field. At about 27 s for the
+modules interpreted (B8) the count at vblank 2300 is 159,743. VU1's work starts in the field. At about 27 s for the
 field stretch, the interpreter manages roughly 15 M VU cycles per host second (*inferred*). At about 4.4 GHz that is
-about 300 host cycles per VU cycle. If VU1's work runs from about vblank 1950, as the boot's 4.6 s to that point
-suggests, the game asks for about 66 M VU cycles per guest second (383 M over 350 vblanks; *inferred*), and more in
+about 300 host cycles per VU cycle. If most of VU1's work runs from about vblank 1950, as the boot's 4.6 s to that
+point suggests, the game asks for about 66 M VU cycles per guest second (383 M over 350 vblanks; *inferred*), and more in
 the heavy stretch.
 
 **Tooling on hand.**
@@ -90,11 +90,12 @@ the heavy stretch.
 - `core::Sha1` (`src/core/hash/hash.cpp`) is a portable implementation.
 
 **Prior art.**
-- PCSX2's microVU (GPL-3.0-or-later) is a recompiler. It keys compiled blocks by the pipeline state at block entry
-  and checks a program's identity by the micro-memory ranges it covers. It computes flags only where something reads
-  them. We read it as a reference only, as M4 read PCSX2's SPU2, and adapt no code.
-- ico-recomp and god-of-war-recomp also compile VU1 programs ahead of time (brief §15). Neither claims bit-identity
-  with an interpreter.
+- PCSX2's microVU (GPL-3.0-or-later) is a recompiler. As we understand it (to be confirmed when read), it keys
+  compiled blocks by the pipeline state at block entry, checks a program's identity by the micro-memory ranges it
+  covers, and computes flags only where something reads them. We would read it as a reference only, as M4 read
+  PCSX2's SPU2, and adapt no code.
+- ico-recomp and god-of-war-recomp also compile VU1 programs ahead of time (brief §15). How exact their timing is has
+  not been checked.
 
 ## Design
 
@@ -137,7 +138,7 @@ compiler. It is local and never committed.
   Contributors pass `--vu1-census work/vu1/census`. The I/O thread writes it when new programs appear (debounced) and
   at exit, by atomic replace. It never touches guest state, events or the `--json` report. Headless runs record
   nothing unless `--vu1-census DIR` is given, so tests and goldens are unaffected. Window runs record into the user
-  data directory by default, through the new setting `advanced.vu1_census`.
+  data directory by default, through a new schema row `game.vu1_census` (default on, advanced).
 - **Samples for local tests** (contributors only, `--vu1-census-samples N`). These are up to N entry states per program
   (`VuState` plus the 16 KiB data memory), for the census replay test below. They hold game data, so they are local
   only.
@@ -207,7 +208,7 @@ The same census always gives byte-identical C++. The generator string carries th
 
   Nothing in the compiled code throws.
 - **Build flags.** `-O2 -ffp-contract=off`, never fast-math. The ISA is baseline x86-64 unless the owner opts into a
-  CPU-specific build (see the questions). The library records its flags.
+  CPU-specific build after V2 (see "Owner decisions"). The library records its flags.
 - **Matching at run time** (`VuUnits`, unit 1). For each generation the runtime caches an entry table: 2,048 slots,
   one per pair address, filled lazily. On the first MSCAL or MSCNT at a pc after a generation change, it compares the
   candidates' closure bytes for that pc with micro memory (memcmp, a few KiB at most). A match runs the compiled
@@ -247,21 +248,21 @@ library that fails it is not registered.
   --vu1-selftest`, a process: the launcher and core never link the runtime) and `register` (the registry gets the
   library path and the census digest it was built from). `dq8ctl vu1 status|optimize|clear` drives it.
 - **Setup.** A new stage `vu1` runs after `build` and before `smoke`. It compiles what is known: the published list,
-  if the owner chooses it (see below), plus any census. With nothing known it is `skipped`.
+  if P0 allows it (the owner's choice, below), plus any census. With nothing known it is `skipped`.
 - **Launcher.**
   - The Play page shows "Graphics programs: N compiled, M new since the last optimize" with an Optimize button.
   - After a session that recorded new programs, the page asks once whether to optimize now, with the estimated time.
   - Diagnostics includes the census counts, never its bytes.
 - **The first-play problem.** With the census alone, a new user's first visit to the field runs at about 0.2 speed
-  until they quit and optimize. Two remedies, for the owner:
+  until they quit and optimize. The owner chose remedy (a), on condition of P0; (b) is not planned:
   - (a) **A published program list** (`data/vu1/<profile>/programs.toml`, address-only, like ADR-0017's maps). For
     each program it gives the source of its bytes on the user's disc (file and offset, or a guest address in a unit
     image), size, SHA-1, entry pcs and indirect targets. Setup then compiles the known programs before the first play.
     This works only if P0 finds that the programs come from the ELF, an overlay or a fixed place in the archives. It
-    would need its own ADR and checker rules, as maps did.
+    gets its own ADR and checker rules, as maps did, and session C's setup stage `vu1` reads it.
   - (b) **Hot-loading.** Because compiled and interpreted runs are identical by contract, a library can be switched in
     at any program boundary without changing any output. The launcher could optimize in the background and
-    `dq8-game` pick the new library up between VIF commands. This is a later step.
+    `dq8-game` pick the new library up between VIF commands. Not planned (owner, 2026-10-24).
 
 ### 6. The speed target and how it is measured
 
@@ -287,8 +288,8 @@ The run is repeated with `--gs parallel`, and live with `--window --speed 1` (th
 
 **Machine-thread breakdown.** `--status` gains a `profile` line once a second, enabled with `--profile`. It is host
 time only: wall-clock shares of VU1, the GS hash, VIF/DMA/GIF, IOP/SPU2, EE code and other. It uses two
-`steady_clock` reads per VU1 program, about 7 ms over the probe (*estimate*). It never reaches the guest. `perf`, if
-the owner installs it, confirms the breakdown.
+`steady_clock` reads per VU1 program, about 7 ms over the probe (*estimate*). It never reaches the guest. gdb
+sampling confirms the breakdown; `perf` stays uninstalled (owner, 2026-10-24).
 
 | Measure | Today (2026-10-24) | Target |
 |---|---|---|
@@ -296,7 +297,7 @@ the owner installs it, confirms the breakdown.
 | Heavy stretch, headless null | 0.16 | **≥ 1.0** |
 | Window, parallel GS, `--speed 1` | about 0.2 | holds 1.00 (no field line below 0.98) |
 | VU1 throughput (VU cycles per host second, compiled programs) | about 15 M (*inferred*) | **≥ 150 M** (10x) |
-| Non-VU1 machine time per guest second in the field | about 0.3–0.7 s (*inferred*) | ≤ 0.25 s (needs the GS hash item) |
+| Non-VU1 machine time per guest second in the field | about 0.3–0.7 s (*inferred*) | ≤ 0.25 s (with session D's SHA-NI hash) |
 | Programs run compiled in the probe after one optimize | 0 | ≥ 99 % of VU1 cycles, bail-outs < 0.1 % of programs |
 
 Debug numbers and the other two configurations are recorded, not gated. Slower CPUs are not gated either. The
@@ -306,10 +307,10 @@ stretch target is their headroom.
 
 | Item | Finding | Proposal |
 |---|---|---|
-| GS stream SHA-1 | About 8 % of the probe, on the machine thread, also with `--window`. It is a chained SHA-1 over every GIF transfer and vsync record (`GsPipeline::gif_transfer`, `vsync`). The per-vblank `gs` events and the end report read it. | (1) A SHA-NI path in `core::Sha1`, with runtime CPU detection and the portable code as fallback. Digests are identical, so every golden holds; a test compares it with the portable code on random input. (2) `--gs-hash off` for window play when nothing reads it (the launcher passes it; headless keeps it on). Moving the hash to the render thread is rejected: each vblank's `gs` event would wait for that thread. |
+| GS stream SHA-1 | About 8 % of the probe, on the machine thread, also with `--window`. It is a chained SHA-1 over every GIF transfer and vsync record (`GsPipeline::gif_transfer`, `vsync`). The per-vblank `gs` events and the end report read it. | **Approved (2026-10-24), session D, merged first:** a SHA-NI path in `core::Sha1`, with runtime CPU detection and the portable code as fallback. Digests are identical, so every golden holds; a test compares it with the portable code on random input. Not approved: `--gs-hash off` for window play (window runs keep hashing). Moving the hash to the render thread is rejected: each vblank's `gs` event would wait for that thread. |
 | A separate VU1 thread (PCSX2's MTVU) | It overlaps only the non-VU1 share. Determinism would need a sync point at every observation: the next VIF command that waits (FLUSH*, MSCAL), EE reads of VU1 memory, VPU_STAT, and every GIF path switch, since PATH1 packets must keep their place against PATH2 and PATH3. | Not now. Revisit after AOT, if VU1 is still more than half of the machine thread. |
 | VU1 on the GPU | The programs are serial, branchy and short, and their results feed the GS in order. A GPU round trip per program would cost more than the program. | Rejected. |
-| Floating-point flags | No `-ffp-contract=off` anywhere. Safe on baseline x86-64, but a CPU-specific build, ARM64 (Tier 2; clang contracts by default) or the VU1 library could change results. | Add `-ffp-contract=off` (and `/fp:precise` on MSVC) next to `dq8_set_warnings()` for the runtime, modules and VU1 library. It must leave the goldens unchanged. |
+| Floating-point flags | No `-ffp-contract=off` anywhere. Safe on baseline x86-64, but a CPU-specific build, ARM64 (Tier 2; clang contracts by default) or the VU1 library could change results. | Not approved tree-wide (2026-10-24); stays a finding for the ARM64 port. The VU1 library alone builds with `-ffp-contract=off`, which the contract needs. |
 | Per-transfer allocation | `GsPipeline::gif_transfer` copies each transfer into a new `std::vector`, and XGKICK has already assembled the packet in a 64 KiB buffer. That is about 880,000 PATH1 packets by vblank 2300. | Measure in P0. If visible, reuse buffers or a per-batch arena. Behaviour does not change. |
 | LTO and PGO for the host | Architecture §12.5 lists them as candidates. | After AOT. Interpreter-only paths (VU0, misses) gain little. |
 
@@ -320,7 +321,7 @@ stretch target is their headroom.
 It uses temporary instrumentation kept as a patch in `work/vu1/` and never committed, like M4's bring-up patches.
 Its findings go into "What exploration established" (counts and addresses only).
 
-1. **Profile again** with the current release build: perf if installed, otherwise at least 300 gdb samples, plus a
+1. **Profile again** with the current release build: at least 300 gdb samples (no `perf`, owner 2026-10-24), plus a
    host-time counter around `VuUnits::run` and the GS hash. This settles the non-VU1 share and the factor VU1 needs.
 2. **The census numbers** over the probe, the opening scene (vblank 3600) and a menu open and close:
    - distinct programs by (entry pc, closure), and their sizes in pairs;
@@ -333,7 +334,8 @@ Its findings go into "What exploration established" (counts and addresses only).
    - FDIV and EFU use;
    - XGKICKs issued while a transfer runs, and whether the other pipelines were drained at that point.
 3. **Where the bytes come from:** the guest source address of each MPG, and whether it lies in the boot ELF, an overlay
-   image (equal bytes) or a buffer read from DATA.DAT. This decides whether remedy (a) is possible.
+   image (equal bytes) or a buffer read from DATA.DAT. This decides whether the published list (remedy (a), the owner's
+   choice) is possible; if it is, the coordinator drafts its ADR for the checkpoint.
 4. **Timing states:** distinct entry timing states per basic block, over the observed paths. This gives the version
    counts and the cap.
 5. **Owner checkpoint:** the numbers, then a go or a redesign. Many hundreds of programs, version explosion or frequent
@@ -343,11 +345,11 @@ Its findings go into "What exploration established" (counts and addresses only).
 
 | Area | Files | What it fixes |
 |---|---|---|
-| ADR | `Docs/adr/0019-vu1-aot-companion-library.md` | Accepted or amended at the checkpoint |
+| ADRs | `Docs/adr/0019-vu1-aot-companion-library.md`; the published program list's ADR if P0 allows it | 0019 accepted or amended at the checkpoint; the list's format in `Docs/formats/` |
 | Shared ISA and arithmetic | `src/runtime/vu/isa/`, `include/dq8/abi/vu1/vu_arith.h` | Moved out of `vu_core.cpp`, `vu_upper.cpp` and `vu_lower.cpp` without behaviour change (the probe's `--json` is byte-identical); the ISA digest. Files adapted from PS2Recomp keep their GPL-3.0-only header and attribution |
 | Library ABI | `include/dq8/abi/vu1_program.h` | Descriptor, program table, run context, resume record, return codes, version 1 |
 | Interpreter seams | `vu_interpreter.h` | The coverage hook, `export_snapshot`/`adopt` (declared; session B implements them), the timing-trace observer for the compiler |
-| Options | `src/host/options.*` | `--vu1 interp\|aot\|verify`, `--vu1-library`, `--vu1-census`, `--vu1-census-samples`, `--vu1-selftest`, `--profile`, `--gs-hash`; refused until wired (the `unwired_m*_option` pattern) |
+| Options | `src/host/options.*` | `--vu1 interp\|aot\|verify`, `--vu1-library`, `--vu1-census`, `--vu1-census-samples`, `--vu1-selftest`, `--profile`; refused until wired (the `unwired_m*_option` pattern) |
 | Status | `src/host/status_channel.*` | `vblank` in `fps`; the `vu1` and `profile` lines |
 | Formats | `Docs/formats/vu1-census.md` | The census index |
 | Build | `tools/vu1/CMakeLists.txt`, the library template, `tests/unit/m6_vu1_{compiler,runtime,core,wins}_tests.cmake` | One test list per session |
@@ -361,8 +363,8 @@ with unit tests, asan, the CI container for ci-clang and ci-gcc, the checker (`-
 **A: the compiler** (`tools/vu1/**`, the corpus generator, `m6_vu1_compiler_tests.cmake`).
 - Delivers: the closure and CFG, the timing oracle and block versions, code generation (locals, commit order,
   flags on demand, lazy PATH1, bail-outs), the descriptor, deterministic output, and the corpus compiled at build time.
-- Done when: the corpus and the snapshot round trip pass on every CI job, the same input gives the same C++, and the
-  fuzzer's seeded faults are caught.
+- Done when: the corpus passes on every CI job and the same input gives the same C++. The snapshot round trip and
+  the fuzzer's seeded faults are B's, and are run again once A and B are both merged.
 
 **B: the runtime** (`src/runtime/vu/**` beyond day 0, the census writer on the I/O thread, the `--vu1*` wiring,
 `m6_vu1_runtime_tests.cmake`).
@@ -376,16 +378,17 @@ with unit tests, asan, the CI container for ci-clang and ci-gcc, the checker (`-
 
 **C: setup, launcher and packaging** (`src/core/vu1/**`, the `vu1` setup stage, registry fields, `src/cli` vu1
 commands, the launcher's Play-page parts, `packaging/**` for `dq8-vu1c`, the checker rules, the Windows library
-build, `m6_vu1_core_tests.cmake`).
+build, the published program list (`data/vu1/`, its publishing tool and loader) if P0 allows it,
+`m6_vu1_core_tests.cmake`).
 - Starts on the day-0 contracts and stubs, and integrates after A and B.
 - Done when: Optimize works from a clean profile on Linux and under Wine, with cancel and resume, and the AppImage and
   zip ship `dq8-vu1c` and pass the scan.
 
-**D: smaller wins** (`src/core/hash/**`, the `--gs-hash` and `-ffp-contract` changes, the per-transfer buffers if P0
-shows them).
-- Can merge first.
-- Done when: digests are equal to the portable code, every golden is unchanged, and the probe's time is recorded
-  before and after.
+**D: the SHA-NI SHA-1** (`src/core/hash/**`, `m6_vu1_wins_tests.cmake`; the per-transfer buffers only if P0 shows
+them and the owner agrees).
+- Merges first (owner, 2026-10-24).
+- Done when: digests are equal to the portable code on random input and on every golden, the portable path still
+  runs where the CPU lacks the extension (forced off in a test), and the probe's time is recorded before and after.
 
 ### Merge order and bring-up
 
@@ -401,7 +404,7 @@ generation work.
 | V2 | Every census program compiled; the probe byte-identical between `interp` and `aot` (section 4, "End to end"); speed in all three configurations |
 | V3 | The opening scene to vblank 3600, a menu round trip and the B5/B6 save path under `verify`; then the owner's playtest route (town, shop, battle) under `aot`, with new census entries optimized |
 | V4 | Windows: the library built with llvm-mingw under Wine, hashes equal to Linux; then the owner on real Windows |
-| V5 | A clean profile: setup (with the published list if chosen), Play, Optimize, Play; no terminal |
+| V5 | A clean profile: setup (with the published list if P0 allowed it), Play, Optimize, Play; no terminal |
 
 ## Acceptance
 
@@ -424,28 +427,27 @@ generation work.
 
 | Risk | Handling |
 |---|---|
-| The 10x does not materialize (the 94 % figure is from before M4's speed-up; non-VU1 work may dominate after AOT) | P0 profiles first; D removes most of the hash; gate G1 stops early with options |
+| The 10x does not materialize (the 94 % figure is from before M4's speed-up; non-VU1 work may dominate after AOT) | P0 profiles first; D makes the hash several times cheaper (to be measured); gate G1 stops early with options |
 | Timing states explode at block entries | The cap with bail-out at block entry; P0 counts versions; the interpreter is always correct |
 | PATH1 stalls on undrained state are common | Lazy PATH1 handles stores and the program end; undrained stalls bail out; P0 counts them. If they are common, a dynamic-scoreboard version of the affected block |
 | Arithmetic drifts between the interpreter and compiled code | One `vu_arith.h`, the ISA digest, `-ffp-contract=off`, no fast-math, boundary operands in the corpus and fuzzer, and the self-test on the user's machine. x87 `long double` is 80-bit on both Linux and llvm-mingw; ARM64 (binary128) is Tier 2 and must be revisited |
-| Programs from the archives appear late (battle, events) and run slowly until Optimize | The census and Optimize; published list (a) where P0 allows; hot-loading (b) later |
+| Programs from the archives appear late (battle, events) and run slowly until Optimize | The census and Optimize with its one-time prompt; the published list where P0 allows |
 | The user's compiler miscompiles | The self-test before registration; the interpreter as fallback |
 | The generated code is large or slow to build | One translation unit per program at `-O2`; P0's sizes give the estimate; ccache when present |
 | The census leaks into the repository | It lives outside the tree by default; checker rules; samples only with an explicit option |
 
-## Questions for the owner
+## Owner decisions (2026-10-24)
 
-1. **Exactness.** The cycle count is kept as well as values, memory and packets (recommended: values need the timing
-   model anyway). The alternative is exact values with approximate cycle counts.
-2. **First play.** Census and Optimize only, or also the published address-only program list (remedy (a), its own ADR,
-   if P0 shows it is possible)? Hot-loading (b) later?
-3. **Optimize UX.** A button and a one-time prompt after a session found new programs (recommended), a button only, or
-   automatic at the next start?
-4. **Smaller wins.** D as the first merge, with `--gs-hash off` for window play (recommended)?
-5. **CPU-specific builds** of the locally built VU1 library (x86-64-v3, checked at load): allowed after V2 if measured
-   to help, or baseline only?
-6. **Profiling.** May P0 install `perf` on the dev box? If not, gdb sampling and the `profile` status line.
-7. **Session plan.** P0, day 0 and four sessions (A–D) as above, or serial work by one session?
+| Question | Decision |
+|---|---|
+| Exactness | Cycle counts stay exact, as well as values, VU memory and PATH1 packets |
+| First play | The census and Optimize, plus the published address-only program list if P0 finds the programs at fixed places on the user's disc (its own ADR at the checkpoint); no hot-loading |
+| Optimize | A button on the Play page and a one-time prompt after a session that recorded new programs |
+| Smaller wins | Only the SHA-NI SHA-1, as session D, merged first. Not approved now: `--gs-hash off` in window play, tree-wide `-ffp-contract=off`, installing `perf` |
+
+Defaults kept from the draft (the owner can still change them at the P0 checkpoint): the VU1 library builds for
+baseline x86-64, and a CPU-specific build comes back to the owner only with V2's measurements; P0, day 0 and four
+sessions (A–D) as above.
 
 ## Protocol notes
 
