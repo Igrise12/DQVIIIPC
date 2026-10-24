@@ -274,6 +274,9 @@ cannot all be found by reading the ELF.
 | **3. Optional JIT** | Evaluate only if stage 2 is insufficient. |
 
 The launcher can offer an "Optimize" action that rebuilds the compiled VU1 set from the census gathered from the user's own play. Correctness never depends on it.
+Stage 2 is planned in [milestones/M6-vu1-aot.md](milestones/M6-vu1-aot.md) (ADR-0019, proposed): a locally built
+companion library whose programs end bit-identical with the interpreter, which finishes any program the compiled code
+bails out of.
 
 VU0 macro mode is handled inside the EE code path (§4.4) and is used heavily (spike S2: 1,234 COP2 macro ops plus 954 `lqc2`/`sqc2`). VU0 micro mode is used at exactly two `vcallms` sites, so the VU0 microprogram path cannot be skipped but may stay an interpreter. S7's save states show VU0 microcode loaded by the title screen with VU0 data memory still zero, so those programs run later (battle is the likely place).
 
@@ -736,7 +739,7 @@ This table is the practical meaning of "scalable". Each row says what to add and
 
 ## 18. Decision log
 
-Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are accepted. The first batch is proposed here. ADR-0009 was accepted on 2026-10-19, ADRs 0003, 0004 and 0008 on 2026-10-20, ADRs 0005, 0007, 0011 and 0012 on 2026-10-21 at the start of M3, ADRs 0014, 0015 and 0016 on 2026-10-21 at the start of M4, and ADRs 0006, 0010, 0017 and 0018 on 2026-10-22 at the start of M5 (files in `Docs/adr/`). ADR-0013 is proposed. The others still await the project owner's confirmation of the corresponding items in the brief (§14).
+Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are accepted. The first batch is proposed here. ADR-0009 was accepted on 2026-10-19, ADRs 0003, 0004 and 0008 on 2026-10-20, ADRs 0005, 0007, 0011 and 0012 on 2026-10-21 at the start of M3, ADRs 0014, 0015 and 0016 on 2026-10-21 at the start of M4, and ADRs 0006, 0010, 0017 and 0018 on 2026-10-22 at the start of M5 (files in `Docs/adr/`). ADRs 0013 and 0019 are proposed. The others still await the project owner's confirmation of the corresponding items in the brief (§14).
 
 | ADR | Decision | Status | Rationale in one line |
 |---|---|---|---|
@@ -758,6 +761,7 @@ Decisions are recorded as short ADRs in `Docs/adr/NNNN-title.md` as they are acc
 | 0016 | The memory card is a host folder behind the native mcserv, with a virtual real-time clock | **Accepted** (2026-10-21; `Docs/adr/0016-memory-card-host-folder.md`) | Plain, backed-up saves; deterministic runs; card-image import stays P1. |
 | 0017 | Function maps published as address-only data (`data/maps/`); jump-table entries read from the user's disc at setup | **Accepted** (2026-10-22; `Docs/adr/0017-published-function-maps.md`) | End users never run Ghidra; nothing game-derived is committed. |
 | 0018 | On Windows the host and the user's game modules are both built with a pinned llvm-mingw (host cross-compiled in CI, toolchain downloaded on demand for users) | **Accepted** (2026-10-22; `Docs/adr/0018-windows-llvm-mingw.md`) | One exception model across the module boundary; MSVC cannot be redistributed. |
+| 0019 | VU1 programs compiled ahead of time into a locally built companion library (`dq8_vu1_<profile>`), matched by content, bit-identical with the interpreter, which finishes any program the compiled code bails out of | Proposed (2026-10-24; `Docs/adr/0019-vu1-aot-companion-library.md`; plan in `Docs/milestones/M6-vu1-aot.md`) | The field runs at 16–20 % of real time on the VU1 interpreter; exactness keeps every golden provable |
 
 ---
 
