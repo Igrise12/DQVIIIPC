@@ -37,7 +37,9 @@ By Amdahl's law the factor VU1 needs depends on that share:
 | 6 % (M4's samples) | about 7x | about 10x |
 | 15 % (*inferred* after the speed-up) | about 17x | unreachable unless the non-VU1 work also shrinks |
 
-The first thing P0 does is profile the current build again. The GS hash item below matters for the same reason.
+The same session's notes say the interpreter's profile is now flat: per-lane loops and the x87 sums dominate, and
+further gains need a structural change. The first thing P0 does is profile the current build again. The GS hash item
+below matters for the same reason.
 
 **How VU1 runs in the machine** (code as of `f1c383f`).
 - VIF1's MSCAL, MSCALF and MSCNT call `VuUnits::start` and `resume` (`dma/vif.cpp`, `Vif::start_micro`).
@@ -83,8 +85,12 @@ the heavy stretch.
 
 **Tooling on hand.**
 - `perf` and `valgrind` are still not installed. M4 sampled with gdb. `ccache` is installed.
-- The M4 differential fuzzer ran in a session scratchpad and **was not kept**: no fuzz code is in the repository. P0
-  and session B rebuild it, committed this time.
+- The M4 differential fuzzer was **not committed**: no fuzz code is in the repository. Its source survives outside
+  the repository, in the notes of the M4 speed-up session (`vu1-speedup-difffuzz.cpp`, 407 lines; old interpreter
+  against new, slice by slice). Its generator makes random programs with branches, XGKICK packets, D/T/E bits, reserved
+  opcodes, sliced budgets and EE stores between slices, and it has an FMAC mode with boundary operands. Its last run
+  covered 32,000 programs (1.27 M slices, 1.1 M packets) and 4 M boundary FMACs with no difference. P0 copies it to
+  `work/vu1/`. Session B starts from it, compares compiled against interpreted runs, and commits it.
 - No build file sets `-ffp-contract`, `-march` or fast-math flags. On baseline x86-64 no FMA is emitted, so the
   interpreter is safe today. A CPU-specific or ARM64 build could contract `a*b+c` and change results.
 - `core::Sha1` (`src/core/hash/hash.cpp`) is a portable implementation.
@@ -231,7 +237,7 @@ The same census always gives byte-identical C++. The generator string carries th
 |---|---|---|
 | Unit (CI) | A corpus of synthetic VU1 programs, made by our generator with fixed seeds, covering branches, JR/JALR, XGKICK packets that race stores, D/T/E bits, all latencies, and FMACs with operands at the overflow and underflow edges. They are compiled at build time and run against the interpreter from random entry states. State, data memory, packets and cycles must be equal. | `tests/unit`, Linux, MSVC and Wine jobs |
 | Snapshot round trip (CI) | On the corpus, run the interpreter to pair k, export, adopt into a fresh interpreter and continue. The result must equal an uninterrupted run for every k. This proves bail-out at any boundary. | `tests/unit` |
-| Fuzzer (e2e) | The rebuilt differential fuzzer generates random programs, compiles them with `dq8-vu1c`, builds the library and runs it in lockstep with the interpreter. Seeded faults must be caught: a skipped commit cycle, a product rounded to float, a reversed commit order, a short PATH1 copy, a lost sticky bit, a store committed one cycle late. | label `e2e`, the GCC 13 CI job |
+| Fuzzer (e2e) | M4's differential fuzzer, rewired, generates random programs, compiles them with `dq8-vu1c`, builds the library and runs it in lockstep with the interpreter. Seeded faults must be caught: a skipped commit cycle, a product rounded to float, a reversed commit order, a short PATH1 copy, a lost sticky bit, a store committed one cycle late. | label `e2e`, the GCC 13 CI job |
 | Census replay (local) | Every census program, from its recorded entry samples, compiled against the interpreter. | `work/vu1/`, label `local` |
 | Lockstep on the disc (local) | `--vu1 verify` runs the interpreter for real and the compiled program on a shadow copy, then compares after every program. The first mismatch stops the run, naming the entry pc and the first differing field, and writes the entry state to `work/` as a reproducer. | bring-up |
 | End to end (local) | The New Game probe with `--vu1 interp` and `--vu1 aot` must give a byte-identical `--json` report, `--events` log, `gs_hash`, `--gs-trace` file (SHA-1 compared, file deleted), RAM SHA-1 at vblank 2300 and audio hash, with `--gs null` and `--gs trace`. M3 and M4 goldens are unchanged in both modes, and Debug equals Release. | bring-up V2, acceptance |
