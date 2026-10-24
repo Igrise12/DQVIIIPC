@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Planned 2026-10-24 with the project owner. Nothing is implemented; phase P0 (measure) comes next, then the owner's checkpoint before day 0 |
+| **Status** | Planned 2026-10-24 with the project owner. Nothing is implemented. Phase P0 measured 2026-10-24 (under "What exploration established"); the owner's checkpoint comes next, then day 0 |
 | **Scope** | Stage 2 of architecture.md §5.4, the "full speed" half of M6 (brief §11). The playthrough half of M6 gets its own brief |
 | **Exit** | On the dev box (Ryzen 5 5600, release preset) the field and the opening scene of the New Game probe run at full speed or better, and the compiled VU1 programs leave every deterministic output byte-identical with the interpreter |
 | **Owner choices (2026-10-24)** | Exact cycle counts as well as values, memory and packets · the census and Optimize, plus a published address-only program list if P0 finds the programs at fixed places on the disc (its own ADR) · Optimize as a button with a one-time prompt · of the smaller wins only the SHA-NI SHA-1, merged first (no `--gs-hash off`, no tree-wide `-ffp-contract=off`, no `perf` install: P0 samples with gdb) |
@@ -102,6 +102,207 @@ the heavy stretch.
   PCSX2's SPU2, and adapt no code.
 - ico-recomp and god-of-war-recomp also compile VU1 programs ahead of time (brief §15). How exact their timing is has
   not been checked.
+
+### P0 (2026-10-24): the measurements
+
+**Method.** Code as of `f1c383f`, release preset (RelWithDebInfo, GCC), Ryzen 5 5600 (TSC 3.5 GHz), headless with
+`--gs null` and `--movies blank`, on an otherwise idle host. Three inputs, each run from vblank 0:
+- the New Game probe to vblank 2300 (`work/bringup/probes/newgame.dq8in`);
+- the same input to vblank 3600, the opening scene;
+- M4's B2 route to vblank 5400 (`work/bringup/route/b2.dq8in`). Free control at vblank 5019, MENU resident at 5072,
+  the menu open by 5139, BATTLE resident again at 5221, the menu closed by 5289.
+
+The temporary instrumentation is `work/vu1/p0-instrumentation.patch` (git-ignored, never committed). It adds rdtsc
+counters around `VuUnits::run`, the `GsPipeline` hash and `gif_transfer`, a snapshot every 50 vblanks, and, with
+`DQ8_P0_CENSUS=<dir>`, a census written as tables of counts, micro addresses and SHA-1s. The patch changes no
+output:
+- at vblank 2300 the RAM SHA-1 (`b6cd4cc2…`), `gs_hash` (`ff8c4534…`) and VU1 stats (159,743 programs, 331,941,343
+  cycles, 720,815 XGKICKs) equal the unpatched build's;
+- at vblank 3600 so do RAM `32edc8b1…`, `gs_hash` `e8702694…` and 1,369,279 programs, 2,539,815,373 cycles and
+  7,118,351 XGKICKs;
+- with the census off, the counters cost nothing measurable (probe median 29.95 s against 29.93 s).
+
+The gdb sampler, the sample classifier and the census and source scripts are in `work/vu1/`. M4's differential fuzzer
+(`vu1-speedup-difffuzz.cpp`, SHA-1 `0a5bb602…`) and its notes are copied there too.
+
+**Speed today.** Unpatched build: the probe takes 29.83, 29.93 and 29.95 s (median 29.93 s), and the run to vblank
+3600 takes 184.8 s. VU1's first program runs at vblank 2025 (census). Per segment (timers; the median of three probe
+runs, one run to 3600):
+
+| Vblanks | Wall s | Speed | VU1 interpreter | GS hash | Everything else |
+|---|---|---|---|---|---|
+| 2050–2200, field | 12.88 | 0.194 | 84.9 % | 8.6 % | 6.5 % |
+| 2200–2300, heavy | 9.07 | 0.184 | 85.3 % | 8.4 % | 6.2 % |
+| 2300–2900, opening scene | 59.34 | 0.169 | 85.7 % | 8.4 % | 5.8 % |
+| 2900–3600, opening scene (dialogue and glow) | 99.42 | 0.117 | 86.5 % | 8.0 % | 5.4 % |
+
+- "VU1 interpreter" is the time inside `VuUnits::run` minus the PATH1 GIF work it calls (0.01–0.12 s per segment).
+  Hashing the PATH1 packets counts under the hash: it is 0.34 of the hash's 0.76 s in 2200–2300.
+- Speed is guest time (vblanks at 59.94 Hz) over wall time.
+- The opening scene's second half is the slowest stretch measured, slower than the probe's heavy stretch.
+- The interpreter runs about 16.6 M VU1 cycles per host second in the probe and 16.1 M in the opening scene. The game
+  asks for about 72 M per guest second in the probe's field and 102 M in the opening scene (*inferred* from the
+  timers and the cycle totals).
+
+**Where the machine thread's time goes (gdb).** Samples are taken every 0.03 s of program time in the probe (954
+samples) and every 0.1 s in the run to 3600 (1,839). Each sample is tagged with its vblank, and the outside loop
+waits for each sample before sending the next SIGINT. Machine thread only:
+
+| Bucket | Boot 0–1950 (184 samples) | Field 1950–2200 (467) | Heavy 2200–2300 (291) | Opening 2900–3600 (968) |
+|---|---|---|---|---|
+| VU1 interpreter | 0 | 82.2 % | 86.6 % | 86.9 % |
+| GS hash | 26.6 % | 9.4 % | 6.5 % | 7.6 % |
+| EE code (game code and its dispatch) | 37.5 % | 3.9 % | 3.8 % | 3.0 % |
+| IOP and SPU2 | 28.8 % | 1.9 % | 0.7 % | 0.1 % |
+| VIF, DMA and GIF (with PATH1 under VU1) | 2.2 % | 2.1 % | 2.1 % | 1.8 % |
+| EE kernel, VU0, other | 4.9 % | 0.4 % | 0.3 % | 0.6 % |
+
+The samples agree with the timers within three points. Inside the interpreter the profile is flat. The shares come
+from the innermost interpreter frame, inlined frames included, over the field and heavy stretches (592 samples) and
+the opening's second half (841):
+- the commit pass 21–25 %;
+- the FMAC flags 17–18 %;
+- hazards 16 %;
+- the run loop 14–16 %;
+- upper execution 13–14 %;
+- queueing 6–8 %;
+- lower execution 6 %;
+- decode 1–2 %;
+- PATH1 1 %.
+
+**The share outside VU1, and the factor VU1 needs.** Per guest second, VU1 interpretation costs 4.4 s in the field,
+4.6 s in the heavy stretch and 7.4 s in the opening's second half. Everything else costs 0.78, 0.79 and 1.15 s. The
+brief's *inferred* 15 % holds: 13.5–15.1 % measured. In the heaviest stretch, the work outside VU1 alone is
+slower than real time. The factor VU1 needs for speed 1.0 is F = v / (s − (1 − v)), with s the segment's speed and v
+its VU1 share:
+
+| Segment | VU1 s per guest s | Hash | Other | F, other work as today | F, hash at a quarter (*assumed* SHA-NI gain) | F, no hash | F for speed 1.5, hash at a quarter |
+|---|---|---|---|---|---|---|---|
+| field 2050–2200 | 4.38 | 0.44 | 0.34 | 19.7 | 7.9 | 6.6 | 19.8 |
+| heavy 2200–2300 | 4.64 | 0.46 | 0.34 | 22.4 | 8.4 | 7.0 | 21.5 |
+| opening 2300–2900 | 5.07 | 0.50 | 0.34 | 31.7 | 9.5 | 7.7 | 25.5 |
+| opening 2900–3600 | 7.39 | 0.68 | 0.46 | unreachable | 20.1 | 13.7 | 216 |
+
+In the brief's terms, with the heavy stretch's VU1 share of 0.853, speed 0.20 needs a factor of 16. Speed 0.16 needs
+66, and real time there is out of reach unless the work outside VU1 also shrinks.
+
+The portable SHA-1 hashes about 231 MB/s here: 3.61 s for at least 847 MB of GIF transfers in the probe. This CPU
+reports `sha_ni`; session D has not measured its gain, so "a quarter" is an assumption. The per-transfer allocation
+is not visible: with `--gs parallel`, `gif_transfer` without its hashing costs about 0.08 s over the probe (0.3 %).
+With `--gs null` the pipeline runs inline and copies nothing.
+
+**The census** (`work/vu1/census/{probe,opening,menu}`). Each run counts from vblank 0, so a later run contains the
+earlier ones.
+
+| | Probe, to 2300 | Opening, to 3600 | Menu route, to 5400 |
+|---|---|---|---|
+| VU1 programs (MSCAL / MSCNT) | 159,743 (42,294 / 117,449) | 1,369,279 (308,015 / 1,061,264) | 3,664,669 (886,419 / 2,778,250) |
+| Cycles; XGKICKs | 331,941,343; 720,815 | 2,539,815,373; 7,118,351 | 6,143,832,378; 19,145,720 |
+| Pairs executed; cycles per pair | 295,082,820; 1.125 | 2,244,180,583; 1.132 | 5,404,381,142; 1.137 |
+| Entry programs (entry pc and static closure) | 9 | 12 | 12 |
+| Keys with the observed JR/JALR target code | 68 | 90 | 100 |
+| Distinct segments; their pairs; the largest | 46; 3,993; 562 | 53; 4,707; 562 | 54; 4,759; 562 |
+| Closure per entry program in pairs: the largest; the sum | 1,287; 4,549 | 1,287; 5,771 | 1,320; 5,878 |
+| Cycle share of the top 1 / 3 / 5 / 10 entry programs | 76.0 / 96.7 / 99.4 / 100 % | 71.0 / 93.1 / 98.9 / 99.98 % | 67.4 / 93.1 / 98.8 / 99.98 % |
+
+A segment is the static closure from one start pc: an entry, or an observed JR/JALR target. The closure follows
+static branches and BAL/JALR return points, and stops at JR and at an E bit's delay slot. Its identity is the SHA-1
+of its pc and pair bytes.
+
+- **Entries.** Every run uses three MSCAL pcs (0x0000, 0x0320, 0x0960) and two MSCNT pcs (0x0328, 0x0330). The
+  largest program, a continuation at 0x0328, takes 67–76 % of the cycles, and its twin at 0x0330 16–17 %. MSCAL 0x0000 is the 88-pair MPG
+  M4 saw every frame (86 pairs reachable). MSCAL 0x0320 runs two pairs and kicks nothing.
+- **Routine slots.** The continuation programs JR or JALR into routines at nine micro addresses outside their own
+  closure: 0x0960, 0x0970, 0x0980, 0x0990, 0x10E0, 0x1900, 0x2710, 0x29C8 and 0x3930. MPGs swap different routines
+  into these slots, up to seven variants at 0x0960 and 0x1900 and six at 0x10E0. That is why 12 entry programs make
+  100 keys, while there are only 54 distinct segments.
+- **Branches.** Static, over the 54 segments: 167 conditional branches, 54 B, 2 BAL, 30 JR and 50 JALR; no branch sits
+  in a delay slot. The menu run executed 92 JR/JALR sites: 86 with one target, 4 with two and 2 with four. There are 17
+  distinct targets in all: the nine slots plus return points inside the closure.
+- **D/T bits.** None in any segment, and no run has D or T enabled.
+- **Flags.** No program reads status: there is no FSEQ, FSAND or FSOR, and no FSSET either. So sticky status is never
+  read inside a program; it is still part of the end state.
+  - MAC is read by FMEQ and FMAND (7 and 8 sites, 4.1 M executions in the menu run). 97 % of the FMEQ executions run
+    while flag-pipeline entries are still in flight.
+  - Clip is read by FCAND and FCOR (62 and 20 sites, 207 M executions). 26 % of the FCAND executions (30.2 M of
+    115.8 M) run while flag-pipeline entries are still in flight; no FCOR does.
+  - FCSET has 13 sites. There is no FCGET, FCEQ or FMOR.
+- **FDIV and EFU.**
+  - FDIV: only DIV (99 sites, 88.0 M executions in the menu run; no SQRT or RSQRT) and 23 WAITQ. 39.1 M of 159.9 M Q
+    reads by upper instructions happen while a DIV is in flight, so they see the old Q.
+  - EFU: three instructions in one segment (1.04 M executions) and one WAITP. 67 % of the MFP reads (696,616) happen
+    with an EFU result in flight.
+- **XGKICK against an active transfer.** 29–31 % of XGKICKs find the previous transfer still running: 5,591,777 of
+  19,145,720 in the menu run. At that point the other pipelines are drained in only 50–64 % of the cases (3,551,313),
+  but by the end of the stall they are drained in every case. Stalls last 1 to 8 cycles, 3.4–3.8 on average.
+- **Stores against PATH1.** 9,439,180 stores commit while a transfer runs (menu run). None lands in the part of the
+  packet not yet copied.
+- **The menu itself.** No program key and no MPG appears first after vblank 5000. The one segment the menu route adds
+  to the opening run's (52 pairs at 0x3930) first appears at vblank 3653.
+
+**Where the MPG bytes come from.** Every MPG in the three runs comes from the boot ELF. There are 36 distinct
+payloads: 34 for VU1 and 2 for VU0, from 16 to 2,048 bytes. Each is read in one contiguous DMA transfer from one fixed
+guest address in the main segment, between 0x00381890 and 0x00390B78, and is equal byte for byte to the ELF file at
+the matching offset. None comes from an overlay or a buffer.
+- The ELF keeps them as DMA packets: a `ret` tag whose QWC covers the payload, a VIF NOP, then an MPG VIFcode. Some
+  packets carry several MPGs in a row.
+- A static scan for that pattern finds 55 packets with 67 MPGs (60,928 bytes) in the ELF's main segment, from
+  0x00381890 to 0x00390B78, and none in the six overlay files. All 36 observed payloads are among them. 31 (30,272
+  bytes) were never uploaded in our runs: battle and other scenes, presumably (*inferred*).
+- A raw scan of the whole disc image for the same pattern finds the same 55 packets, inside `SLUS_212.07` at image
+  offsets 0x330A00–0x33F8C0. Its only other hits are two false ones, whose micro addresses exceed 16 KiB. So no
+  archive holds microcode in raw form. A raw scan cannot rule out compressed archive data, and no battle has run.
+
+**So the published address-only program list is possible** for everything seen. Each MPG is an ELF guest address,
+a size, a micro address and a SHA-1. Each program is an entry pc and closure ranges over micro memory built from those
+MPGs. Setup can read the bytes from the user's ELF.
+
+**Timing states per block.** Blocks are keyed by (entry program, leader pc) over all observed paths. Leaders are:
+- the entry;
+- branch targets;
+- the pair after each branch's delay slot;
+- BAL and JALR return points;
+- observed JR/JALR targets.
+
+The entry timing state is the set of in-flight items with their remaining cycles: VF lanes, VI, ACC, flag entries,
+FDIV, EFU and its busy time, stores, and the VI branch backup. It is counted with and without the PATH1-active bit.
+
+| | Probe | Opening | Menu route |
+|---|---|---|---|
+| Blocks; visits | 384; 28.6 M | 437; 212.8 M | 458; 510.2 M |
+| Blocks with 1 / 2 / 3 / 4 states | 292 / 84 / 4 / 4 | 333 / 93 / 7 / 4 | 349 / 97 / 8 / 4 |
+| Versions (the sum of states); with the PATH1 bit | 488; 512 | 556; 580 | 583; 607 |
+| Visits that enter drained; with PATH1 active | 56.6 %; 1.5 % | 53.7 %; 2.2 % | 51.6 %; 2.6 % |
+
+No block has more than four states, so the cap of 8 is never reached. In the probe, 31 of the 33 (entry program,
+routine slot) blocks have a single state.
+
+### P0 checkpoint: recommendation (2026-10-24)
+
+**Go, with five changes before day 0.** The census is small and the timing states are few. The values that depend on
+timing are common: Q, clip, MAC, P and the PATH1 copy. So the exact static model is the right contract, and an
+approximate one would diverge often.
+
+1. **Compile segments, not closures.** A JR or JALR into a routine slot dispatches at run time to the compiled segment
+   whose bytes match that slot in the current generation. It enters the version for the timing state at the jump.
+   That is 54 segments and 4,759 pairs instead of 100 keys. It could also let setup compile routines the census has
+   not seen, from the published list and the known slot addresses (to be confirmed).
+2. **PATH1 stalls choose a version by the stall length.** Bailing out on an undrained stall would hit 2,040,464 stalls
+   in the menu run, 0.56 per program. Instead, the lazy PATH1 cursor gives the stall length. When the stall covers the
+   longest remaining latency, the program continues in the drained version, which happened in every observed stall.
+   Otherwise it bails out. Stores land outside the uncopied part of the packet, so a range check at each store commit
+   can replace advancing the cursor there; a store inside the range bails out (none observed).
+3. **No D/T versions.** None were observed, so D/T is a bail-out only.
+4. **The speed target needs work outside VU1, and gate G1 must rise.** With today's other work, an infinitely fast
+   VU1 gives about 1.3x real time in the field and 0.87x in the opening's second half. With the hash at a quarter, VU1
+   needs about 8x in the field, 9.5x in the opening's first half and 20x in its second half. The 1.5 stretch needs
+   about 20x in the field. So session D is required, and G1's threshold should go from 5x to about 10x for the hottest
+   program, which takes 67–76 % of the cycles. The owner should choose for the opening scene's heaviest stretch:
+   - accept below 1.0 there in M6;
+   - or add an item for the rest of the work outside VU1: EE code, VIF and DMA, about 0.46 s per guest second there.
+5. **Draft the published list's ADR.** The microcode is in the ELF only, at fixed addresses, and all 67 MPGs can be
+   listed. Programs from code no run has reached (battle) still need the census until a playtest records them.
+   Compressed archives are the one source the scans cannot exclude.
 
 ## Design
 
